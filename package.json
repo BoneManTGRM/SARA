@@ -1,0 +1,40 @@
+{
+  "name": "sara",
+  "version": "1.0.0",
+  "private": false,
+  "description": "SARA — Self-Directed Autonomous Realization Agent. A TGRM repair layer around a frontier LLM.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BoneManTGRM/SARA.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BoneManTGRM/SARA/issues"
+  },
+  "homepage": "https://github.com/BoneManTGRM/SARA#readme",
+  "keywords": [
+    "sara",
+    "tgrm",
+    "reparodynamics",
+    "rye",
+    "self-repair",
+    "llm"
+  ],
+  "exports": {
+    ".": "./tgrm/index.ts"
+  },
+  "scripts": {
+    "test": "tsx --test tests/tgrm.test.ts",
+    "demo": "tsx cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.5",
+    "tsx": "^4.20.5",
+    "typescript": "^5.7.0"
+  }
+}

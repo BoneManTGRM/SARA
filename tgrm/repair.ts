@@ -9,6 +9,15 @@ function lineHasTerm(line: string, terms: string[]) {
   return terms.some((t) => hasTerm(line, t));
 }
 
+function includeLine(body: string) {
+  const t = body.trim();
+  if (!t) return "";
+  if (t.split(/\s+/).length > 2 || /^[A-Z]/.test(t) || /[.!?]$/.test(t)) {
+    return `\n- ${t}`;
+  }
+  return `\n- Take a ${t}.`;
+}
+
 /** Smallest useful local patch. Never regenerates the whole text. */
 export function repairLocal(text: string, faults: Fault[], constraints: Constraint[]): string {
   if (faults.length === 0) return text;
@@ -40,9 +49,8 @@ export function repairLocal(text: string, faults: Fault[], constraints: Constrai
     const c = byId.get(f.ruleId);
     const body = (c?.body ?? f.ruleBody).trim();
     if (!body) continue;
-    if (hasTerm(next, body)) continue;
-    const addition = `\n- Take a ${body}.`;
-    next = `${next.replace(/\s+$/, "")}${addition}`;
+    if (hasTerm(next, body) || (c && termsFor(c).some((t) => hasTerm(next, t)))) continue;
+    next = `${next.replace(/\s+$/, "")}${includeLine(body)}`;
   }
 
   const missingKeep = faults.filter((f) => f.type === "keep_fact");

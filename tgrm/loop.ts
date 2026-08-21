@@ -123,6 +123,16 @@ export function runTgrm(input: TgrmInput): TgrmResult {
   };
 }
 
+export function compareTgrm(input: Omit<TgrmInput, "tgrmEnabled">): {
+  on: TgrmResult;
+  off: TgrmResult;
+} {
+  return {
+    on: runTgrm({ ...input, tgrmEnabled: true }),
+    off: runTgrm({ ...input, tgrmEnabled: false }),
+  };
+}
+
 export function applyModelPatch(
   before: string,
   proposed: string,
