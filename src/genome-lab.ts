@@ -226,7 +226,6 @@ export async function buildVerifiedSkillCandidate(
       schemaVersion: 1,
       kind: "generated_skill_candidate",
       generatorAuthority: "untrusted_candidate",
-      jobId: handoff.jobId,
       objective: handoff.objective,
       acceptanceCriteria: handoff.acceptanceCriteria,
       skillName: proposal.skillName,
