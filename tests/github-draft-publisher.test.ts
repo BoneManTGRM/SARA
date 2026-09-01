@@ -165,4 +165,72 @@ describe("GitHub draft PR publisher", () => {
     assert.ok(invocations.some((item) => item.file === "gh" && item.args.includes("--draft")));
     assert.ok(!invocations.some((item) => item.file === "git" && ["checkout", "add", "commit", "push"].includes(item.args[0] ?? "")));
   });
+
+  it("preserves a legacy mismatched branch and publishes an exact digest-qualified candidate", async () => {
+    const source = await artifact();
+    const repository = await mkdtemp(join(tmpdir(), "sara-publisher-repo-"));
+    const invocations: CommandInvocation[] = [];
+    const directiveId = "12f1399e-4d2b-4f64-91b4-20ac93006ec3";
+    const commitSha = "e".repeat(40);
+    const legacyReceipt = {
+      schemaVersion: 1,
+      directiveId,
+      mutationId: "78e6fccc-d230-48cd-9049-8d41d83bc799",
+      jobId: "2c693b5d-5607-4db7-8888-2229f2323c07",
+      candidateDigest: "f".repeat(64),
+      sourceTreeDigest: "c".repeat(64),
+      stage: "SHADOW",
+      productionAuthority: false,
+      verification: [{ command: "npm run verify", exitCode: 0, outputDigest: "d".repeat(64) }],
+    };
+    let branchLookups = 0;
+    const run = async (invocation: CommandInvocation): Promise<CommandResult> => {
+      invocations.push(invocation);
+      const command = [invocation.file, ...invocation.args].join(" ");
+      if (command === "git status --porcelain") return { exitCode: 0, stdout: "", stderr: "" };
+      if (command.includes("ls-remote")) {
+        branchLookups += 1;
+        return branchLookups === 1
+          ? { exitCode: 0, stdout: `${"b".repeat(40)}\trefs/heads/legacy\n`, stderr: "" }
+          : { exitCode: 2, stdout: "", stderr: "missing" };
+      }
+      if (command === "git rev-parse FETCH_HEAD") return { exitCode: 0, stdout: `${"b".repeat(40)}\n`, stderr: "" };
+      if (command.startsWith("git show FETCH_HEAD:")) {
+        return { exitCode: 0, stdout: JSON.stringify(legacyReceipt), stderr: "" };
+      }
+      if (command === "npm run verify") return { exitCode: 0, stdout: "all checks passed\n", stderr: "" };
+      if (command === "git rev-parse HEAD") return { exitCode: 0, stdout: `${commitSha}\n`, stderr: "" };
+      if (command.startsWith("gh pr create")) {
+        return { exitCode: 0, stdout: "https://github.com/BoneManTGRM/SARA/pull/10\n", stderr: "" };
+      }
+      if (command.startsWith("gh pr view")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            url: "https://github.com/BoneManTGRM/SARA/pull/10",
+            isDraft: true,
+            state: "OPEN",
+            headRefOid: commitSha,
+          }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const publisher = new GithubDraftPullRequestPublisher({ repository, run });
+    const evidence = await publisher.publish({
+      directiveId,
+      candidateDigest: source.digest,
+      artifactDirectory: source.directory,
+      mutationId: "80f3deef-4e10-4bb2-8072-b99436497e14",
+      jobId: "7c0e0fdb-9cc7-4bc2-9ba7-feb96c8e81f1",
+      stage: "SHADOW",
+    });
+
+    const expectedBranch = `sara/directive-${directiveId}-${source.digest.slice(0, 12)}`;
+    assert.equal(evidence.draftPrUrl, "https://github.com/BoneManTGRM/SARA/pull/10");
+    assert.ok(invocations.some((item) => item.file === "git" && item.args.join(" ") === `checkout -b ${expectedBranch}`));
+    assert.ok(invocations.some((item) => item.file === "git" && item.args.join(" ") === `push origin HEAD:refs/heads/${expectedBranch}`));
+    assert.ok(!invocations.some((item) => item.args.includes("--force")));
+  });
 });
