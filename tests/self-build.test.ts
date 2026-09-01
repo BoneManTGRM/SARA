@@ -101,6 +101,23 @@ describe("SARA owner-controlled self-building cycle", () => {
     assert.ok((await restarted.inspectAudit()).some((event) => event.type === "self_build_cycle_completed"));
   });
 
+  it("content-addresses equivalent candidates across jobs and restarts", async () => {
+    const { kernel, jobId } = await preparedKernel();
+    const first = await kernel.runSelfBuildCycle(SARA_PRINCIPAL, jobId, generator());
+    const secondJob = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
+      objective: "Create a deterministic numeric scoring skill.",
+      expectedOwnerValue: 10,
+      requiredCapabilities: ["numeric-scoring"],
+      acceptanceCriteria: ["The skill doubles finite numeric input and rejects other input."],
+      maximumBudgetUsd: 0,
+    });
+    const second = await kernel.runSelfBuildCycle(SARA_PRINCIPAL, secondJob.id, generator());
+
+    assert.notEqual(first.job.id, second.job.id);
+    assert.notEqual(first.mutation.id, second.mutation.id);
+    assert.equal(first.mutation.candidateDigest, second.mutation.candidateDigest);
+  });
+
   it("pulls bounded global memory into the self-building context", async () => {
     const { kernel, jobId } = await preparedKernel();
     let received: unknown;
