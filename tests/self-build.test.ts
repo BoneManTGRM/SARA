@@ -101,6 +101,27 @@ describe("SARA owner-controlled self-building cycle", () => {
     assert.ok((await restarted.inspectAudit()).some((event) => event.type === "self_build_cycle_completed"));
   });
 
+  it("pulls bounded global memory into the self-building context", async () => {
+    const { kernel, jobId } = await preparedKernel();
+    let received: unknown;
+    await kernel.runSelfBuildCycle(SARA_PRINCIPAL, jobId, {
+      ...generator(),
+      async generate(input) {
+        received = structuredClone(input);
+        return safeProposal();
+      },
+    });
+
+    const context = (received as {
+      memoryContext?: { contextDigest: string; memories: Array<{ scope: string; statement: string }> };
+    }).memoryContext;
+    assert.match(context?.contextDigest ?? "", /^[a-f0-9]{64}$/);
+    assert.ok((context?.memories.length ?? 0) >= 6);
+    assert.ok((context?.memories.length ?? 0) <= 12);
+    assert.ok(context?.memories.every((memory) => memory.scope === "global"));
+    assert.ok(context?.memories.some((memory) => memory.statement.includes("Earn before expanding")));
+  });
+
   it("rejects network-capable generated source and records the job failure without a mutation", async () => {
     const { kernel, jobId } = await preparedKernel();
     const malicious = safeProposal();
