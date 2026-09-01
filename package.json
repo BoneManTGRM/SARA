@@ -1,8 +1,8 @@
 {
   "name": "sara",
   "version": "1.0.0",
-  "private": false,
-  "description": "SARA — Self-Directed Autonomous Realization Agent. A TGRM repair layer around a frontier LLM.",
+  "private": true,
+  "description": "SARA — an owner-controlled self-development kernel built on TGRM.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -19,15 +19,23 @@
     "reparodynamics",
     "rye",
     "self-repair",
-    "llm"
+    "llm",
+    "self-development",
+    "owner-controlled"
   ],
   "exports": {
     ".": "./tgrm/index.ts"
   },
   "scripts": {
-    "test": "tsx --test tests/tgrm.test.ts",
-    "demo": "tsx cli.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "demo": "node --import tsx cli.ts",
+    "start": "node --import tsx src/main.ts",
+    "proof:bootstrap": "node --import tsx proof/bootstrap.ts",
+    "proof:self-build": "node --import tsx proof/self-build.ts",
+    "proof:http": "node --import tsx --test tests/http.test.ts",
+    "executor:site": "node --import tsx scripts/site-directive-executor.ts",
+    "typecheck": "tsc --noEmit",
+    "verify": "npm test && npm run typecheck && npm run demo && npm run proof:bootstrap && npm run proof:self-build && npm run proof:http"
   },
   "engines": {
     "node": ">=22"

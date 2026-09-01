@@ -1,4 +1,5 @@
 node_modules/
+.sara-state/
 dist/
 .DS_Store
 *.tsbuildinfo
