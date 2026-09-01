@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "kind": "generated_skill_candidate",
+  "generatorAuthority": "untrusted_candidate",
+  "jobId": "8a43f6bb-114a-439c-a330-2fea8939aa45",
+  "objective": "Create a deterministic release-evidence normalizer that trims and lowercases string input and rejects non-string input.",
+  "acceptanceCriteria": [
+    "The skill returns trimmed lowercase text for string input.",
+    "The skill returns null for non-string input.",
+    "The candidate passes isolated behavioral verification and stops at SHADOW.",
+    "Only a draft pull request may be opened; merge and deployment remain owner-gated."
+  ],
+  "skillName": "Release Evidence Normalizer",
+  "summary": "A pure deterministic normalizer for bounded release-evidence labels.",
+  "limitations": [
+    "Normalizes string labels only; it does not interpret or verify release evidence."
+  ],
+  "testNames": [
+    "normalizes text",
+    "rejects non-string input"
+  ],
+  "maximumBudgetUsd": 0,
+  "constitutionDigest": "8a04d0b85b385f8e2564624a7b2022dea58e8bae9a089a86727fc3f64bfea91e",
+  "productionAuthority": false
+}

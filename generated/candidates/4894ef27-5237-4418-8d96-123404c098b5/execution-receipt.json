@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "directiveId": "4894ef27-5237-4418-8d96-123404c098b5",
+  "mutationId": "e78f7c9f-820a-48f6-9083-e281dccf0a3f",
+  "jobId": "8a43f6bb-114a-439c-a330-2fea8939aa45",
+  "candidateDigest": "c56b559ff98634c6b8d043c10d0cc7932deab3f439bff12b6f0e64c09d93d220",
+  "sourceTreeDigest": "e98fed7c46a19ef99f0a9e1d83dbd2a023bdaa6e2268cd516102fe20ec08473f",
+  "stage": "SHADOW",
+  "productionAuthority": false,
+  "verification": [
+    {
+      "command": "kernel:isolated-typescript-behavioral-verification",
+      "exitCode": 0,
+      "outputDigest": "72291079652cbec03be2aec172bb4c80a8d3fa1cb6d4fc35618ac38c366de67c"
+    },
+    {
+      "command": "npm run verify",
+      "exitCode": 0,
+      "outputDigest": "77a447d93ff1ca22bedee7858a7bdf9d9ba92bbc924acc4a6cd8d6b9ac97a0ef"
+    }
+  ]
+}
