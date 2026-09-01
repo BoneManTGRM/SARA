@@ -40,6 +40,7 @@ describe("site executor HTTP client", () => {
     const claim = await claimSiteDirective("o".repeat(64), "https://saraseed.app", async (_input, init) => {
       const body = JSON.parse(String(init?.body));
       assert.equal(body.maximumBudgetUsd, 0);
+      assert.equal(body.recoveryDirectiveId, "488818de-840a-42cd-a951-1a69b2067f9d");
       return new Response(null, { status: 204 });
     });
     assert.equal(claim, null);
