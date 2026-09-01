@@ -10,5 +10,5 @@
     "allowImportingTsExtensions": true,
     "types": ["node"]
   },
-  "include": ["tgrm/**/*.ts", "cli.ts", "tests/**/*.ts"]
+  "include": ["tgrm/**/*.ts", "src/**/*.ts", "proof/**/*.ts", "cli.ts", "tests/**/*.ts"]
 }
