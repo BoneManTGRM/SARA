@@ -33,6 +33,7 @@
     "proof:bootstrap": "node --import tsx proof/bootstrap.ts",
     "proof:self-build": "node --import tsx proof/self-build.ts",
     "proof:http": "node --import tsx --test tests/http.test.ts",
+    "executor:site": "node --import tsx scripts/site-directive-executor.ts",
     "typecheck": "tsc --noEmit",
     "verify": "npm test && npm run typecheck && npm run demo && npm run proof:bootstrap && npm run proof:self-build && npm run proof:http"
   },

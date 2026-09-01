@@ -52,7 +52,7 @@ type ArtifactTreeEntry = {
   contentDigest?: string;
 };
 
-async function digestArtifactTree(artifactDirectory: string): Promise<string> {
+export async function digestArtifactTree(artifactDirectory: string): Promise<string> {
   const entries: ArtifactTreeEntry[] = [];
   async function walk(absoluteDirectory: string, relativeDirectory: string): Promise<void> {
     const directoryStat = await lstat(absoluteDirectory);

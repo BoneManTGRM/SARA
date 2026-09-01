@@ -73,13 +73,26 @@ npm start
 
 Open the local dashboard, choose **Unlock owner controls**, and paste the value held in `SARA_OWNER_TOKEN`. The server verifies it in constant time and the kernel issues an owner capability bound to the state’s original authentication digest; caller-authored `authenticated: true` objects have no authority. `/health` remains readable so recovery can be verified during emergency stop. Never commit the token or its plaintext value.
 
-The server binds to `127.0.0.1` by default. Do not expose it directly to the public internet. A future `saraseed.app` launch must place it behind HTTPS, Cloudflare access controls, rate limiting, and an owner-reviewed deployment configuration.
+The local kernel server binds to `127.0.0.1` by default. Do not expose it directly to the public internet. The separate `saraseed.app` owner channel is served over HTTPS and keeps its session, rate limits, directives, and executor bridge at the Cloudflare boundary; it does not expose this local server.
 
 The command-center design is deliberately aspirational while its claims remain literal: visitors see the visual direction and the $0 bootstrap promise, but durable memory, finances, jobs, capabilities, audit hashes, and mutation history stay locked until owner authentication. The interface uses only local HTML, CSS, and JavaScript, includes reduced-motion and mobile layouts, and does not add a recurring service.
 
 The built-in coding system is intentionally narrow. It now proves the complete safe takeover seam—objective → generator → source → compiler → isolated behavioral tests → hashed artifact → durable SHADOW—but it is not a general unsupervised product developer. A future model-backed executor can plug into the same `CandidateGenerator` contract without receiving secrets, production access, payment authority, or promotion authority. The owner API also accepts a bounded proposal at `POST /api/jobs/:id/self-build`; this is authenticated and can never promote beyond SHADOW. CANARY and later stages require a locally re-verifiable artifact, kernel-executed evidence, and stage-specific approval from the authenticated constitutional owner. The exhaustive artifact tree—including paths, exact bytes, file types, and permissions—is re-hashed immediately before every promotion.
 
-The deliberate stopping point is the safe takeover boundary: SARA can now start writing and rejecting her own bounded deterministic skills as soon as a compatible zero-cost or earned-budget generator is connected. Connecting a frontier model, GitHub App, deployment target, bank, or paid API is a separate owner-controlled capability; none is silently provisioned and none is required for the local proof.
+## Minimum site-to-draft self-build loop
+
+The first external loop remains deliberately narrower than a general coding agent:
+
+1. The authenticated owner checks an explicit public-repository disclosure and creates one fixed `$0` proof directive on `saraseed.app`.
+2. An hourly or owner-dispatched GitHub Actions job obtains a short-lived OIDC identity. The site accepts only the exact SARA repository, numeric repository and owner identities, default branch, workflow, audience, and GitHub-hosted runner.
+3. The site atomically leases at most one approved proof directive. Arbitrary owner directives stay recorded as `CAPABLE_MODEL_REQUIRED`; they cannot be silently routed to this deterministic executor.
+4. The existing SARA kernel compiles the work card, runs the fixed `CandidateGenerator`, applies the Genome Lab source restrictions, compiles and behaviorally tests the isolated skill, hashes the complete artifact, records the job and mutation, and stops at `SHADOW`.
+5. The publisher re-hashes the artifact, copies only the authorized candidate source, verifier, manifest, and verification record, runs the complete repository verification, creates a unique candidate branch, and opens an open **draft** pull request.
+6. The site stores the zero-cost result, candidate and source hashes, exact commit and draft PR, verification hashes, and lessons. It rejects expired claims, replay, non-zero cost, unsafe states, and non-draft evidence.
+
+The workflow has no model, account, payment, merge, deployment, Constitution, secret-administration, or production authority. GitHub tokens remain short-lived inside the GitHub runner; no GitHub credential is stored by the site. Candidate retries may reuse only an identical recorded branch and draft PR and never overwrite an existing branch.
+
+The deliberate stopping point is the safe takeover boundary: SARA can write and reject this bounded deterministic skill and create a reviewable draft PR. This proves the self-building seam, not general autonomous software engineering. A future model-backed generator may replace the fixed generator only after a zero-cost or realized-profit-funded capability is available and must pass the same work-card, Genome Lab, verification, draft-only, and owner-promotion boundaries. No model, bank, paid API, new account, merge, or production deployment is silently provisioned.
 
 SARA is a repair layer around a frontier LLM. It does not make the model smarter. It makes the *system* stay intact:
 

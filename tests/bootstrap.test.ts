@@ -395,7 +395,7 @@ describe("SARA durable memory and Genome Lab", () => {
     const kernel = await SaraKernel.boot({ stateDirectory });
     const eventPath = join(stateDirectory, "events.ndjson");
     const raw = await readFile(eventPath, "utf8");
-    await writeFile(eventPath, raw.replace("\n", "\n\n"));
+    await writeFile(eventPath, raw.replaceAll("\n", "\n\n"));
     await assert.rejects(() => kernel.getStatus(), EventStoreIntegrityError);
   });
 
