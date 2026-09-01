@@ -76,7 +76,11 @@ export async function claimSiteDirective(
   const response = await fetchImpl(`${executorOrigin(origin)}/api/executor/directives/claim`, {
     method: "POST",
     headers: { authorization: `Bearer ${oidcToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ maximumBudgetUsd: 0, executorKind: "deterministic_release_evidence_normalizer_v1" }),
+    body: JSON.stringify({
+      maximumBudgetUsd: 0,
+      executorKind: "deterministic_release_evidence_normalizer_v1",
+      recoveryDirectiveId: "488818de-840a-42cd-a951-1a69b2067f9d",
+    }),
     redirect: "error",
   });
   if (response.status === 204) return null;
@@ -105,4 +109,3 @@ export async function recordSiteDirectiveResult(
   );
   await responseJson<{ directive: unknown }>(response, "Directive result recording");
 }
-
