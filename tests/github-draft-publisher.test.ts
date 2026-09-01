@@ -151,8 +151,11 @@ describe("GitHub draft PR publisher", () => {
       directiveId: receipt.directiveId,
       candidateDigest: source.digest,
       artifactDirectory: source.directory,
-      mutationId: receipt.mutationId,
-      jobId: receipt.jobId,
+      // A restart creates fresh trace IDs. The immutable branch receipt must
+      // retain valid original IDs while authority remains bound to the exact
+      // directive, candidate digest, commit, and SHADOW evidence.
+      mutationId: "80f3deef-4e10-4bb2-8072-b99436497e14",
+      jobId: "7c0e0fdb-9cc7-4bc2-9ba7-feb96c8e81f1",
       stage: "SHADOW",
     });
 

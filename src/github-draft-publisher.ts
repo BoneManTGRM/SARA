@@ -91,8 +91,8 @@ function parseReceipt(value: unknown, expected: CandidatePublication): Execution
   if (
     receipt.schemaVersion !== 1 ||
     receipt.directiveId !== expected.directiveId ||
-    receipt.mutationId !== expected.mutationId ||
-    receipt.jobId !== expected.jobId ||
+    !UUID_V4.test(receipt.mutationId ?? "") ||
+    !UUID_V4.test(receipt.jobId ?? "") ||
     receipt.candidateDigest !== expected.candidateDigest ||
     !SHA256.test(receipt.sourceTreeDigest ?? "") ||
     receipt.stage !== "SHADOW" ||
