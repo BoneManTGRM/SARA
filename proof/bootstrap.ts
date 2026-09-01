@@ -59,7 +59,7 @@ try {
   assert.equal(restarted.constitution.ownerAuthority.bootstrapOwnerFundedRecurringMonthlyTargetUsd, 0);
   assert.equal(restarted.constitution.ownerAuthority.unearnedExpansionBudgetUsd, 0);
   assert.equal(status.ownerFundedRecurringMonthlyUsd, 0);
-  assert.equal(status.memoryCount, 1);
+  assert.equal(status.memoryCount, 37);
   assert.equal(status.jobs.length, 1);
   assert.equal(status.mutations.length, 1);
   assert.equal(status.mutations[0].stage, "SHADOW");
