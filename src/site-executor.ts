@@ -2,8 +2,8 @@ import { sha256 } from "./canonical.ts";
 import type { SaraKernel } from "./kernel.ts";
 import type { SiteDirectiveClaim, SiteDirectiveFailedResult } from "./site-executor-client.ts";
 import {
-  SITE_GENERATOR_ID,
   runClaimedSiteDirective,
+  siteGeneratorId,
   type DraftPullRequestPublisher,
   type SiteDirectiveShadowResult,
 } from "./site-directive.ts";
@@ -42,7 +42,7 @@ export async function executeOneSiteDirective(
       schemaVersion: 1,
       status: "FAILED",
       maximumCostUsd: 0,
-      generatorId: SITE_GENERATOR_ID,
+      generatorId: siteGeneratorId(claimed.directive),
       failureCode: "SELF_BUILD_EXECUTION_FAILED",
       failureDigest: sha256(failureInput),
       lessons: [

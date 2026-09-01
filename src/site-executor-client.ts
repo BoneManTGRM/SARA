@@ -1,4 +1,11 @@
-import type { ClaimedSiteDirective, SiteDirectiveShadowResult } from "./site-directive.ts";
+import {
+  MODEL_EXECUTOR_KIND,
+  MODEL_GENERATOR_ID,
+  SITE_EXECUTOR_KIND,
+  SITE_GENERATOR_ID,
+  type ClaimedSiteDirective,
+  type SiteDirectiveShadowResult,
+} from "./site-directive.ts";
 
 const EXECUTOR_AUDIENCE = "https://saraseed.app/api/executor";
 const PRODUCTION_ORIGIN = "https://saraseed.app";
@@ -12,7 +19,7 @@ export type SiteDirectiveFailedResult = {
   schemaVersion: 1;
   status: "FAILED";
   maximumCostUsd: 0;
-  generatorId: "deterministic-release-evidence-normalizer-v1";
+  generatorId: typeof SITE_GENERATOR_ID | typeof MODEL_GENERATOR_ID;
   failureCode: string;
   failureDigest: string;
   lessons: string[];
@@ -73,18 +80,31 @@ export async function claimSiteDirective(
   origin = PRODUCTION_ORIGIN,
   fetchImpl: FetchLike = fetch,
 ): Promise<SiteDirectiveClaim | null> {
-  const response = await fetchImpl(`${executorOrigin(origin)}/api/executor/directives/claim`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${oidcToken}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      maximumBudgetUsd: 0,
-      executorKind: "deterministic_release_evidence_normalizer_v1",
-      recoveryDirectiveId: "488818de-840a-42cd-a951-1a69b2067f9d",
-    }),
-    redirect: "error",
+  const endpoint = `${executorOrigin(origin)}/api/executor/directives/claim`;
+  const claim = async (
+    body: Record<string, unknown>,
+    unsupportedDuringMigration = false,
+  ): Promise<SiteDirectiveClaim | null> => {
+    const response = await fetchImpl(endpoint, {
+      method: "POST",
+      headers: { authorization: `Bearer ${oidcToken}`, "content-type": "application/json" },
+      body: JSON.stringify(body),
+      redirect: "error",
+    });
+    if (response.status === 204) return null;
+    if (unsupportedDuringMigration && response.status === 400) return null;
+    return responseJson<SiteDirectiveClaim>(response, "Directive claim");
+  };
+  const generated = await claim(
+    { maximumBudgetUsd: 0, executorKind: MODEL_EXECUTOR_KIND },
+    true,
+  );
+  if (generated) return generated;
+  return claim({
+    maximumBudgetUsd: 0,
+    executorKind: SITE_EXECUTOR_KIND,
+    recoveryDirectiveId: "488818de-840a-42cd-a951-1a69b2067f9d",
   });
-  if (response.status === 204) return null;
-  return responseJson<SiteDirectiveClaim>(response, "Directive claim");
 }
 
 export async function recordSiteDirectiveResult(

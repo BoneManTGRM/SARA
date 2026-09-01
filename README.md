@@ -81,18 +81,18 @@ The built-in coding system is intentionally narrow. It now proves the complete s
 
 ## Minimum site-to-draft self-build loop
 
-The first external loop remains deliberately narrower than a general coding agent:
+The external loop remains deliberately narrower than a general coding agent:
 
-1. The authenticated owner checks an explicit public-repository disclosure and creates one fixed `$0` proof directive on `saraseed.app`.
+1. The authenticated owner checks an explicit public-repository disclosure and creates either the fixed `$0` proof or one bounded pure-skill proposal on `saraseed.app`.
 2. An hourly or owner-dispatched GitHub Actions job obtains a short-lived OIDC identity. The site accepts only the exact SARA repository, numeric repository and owner identities, default branch, workflow, audience, and GitHub-hosted runner.
-3. The site atomically leases at most one approved proof directive. Arbitrary owner directives stay recorded as `CAPABLE_MODEL_REQUIRED`; they cannot be silently routed to this deterministic executor.
-4. The existing SARA kernel compiles the work card, runs the fixed `CandidateGenerator`, applies the Genome Lab source restrictions, compiles and behaviorally tests the isolated skill, hashes the complete artifact, records the job and mutation, and stops at `SHADOW`.
+3. The site atomically leases at most one approved directive. The executor checks the generalized `$0` queue first and preserves the fixed proof as a recovery path.
+4. The SARA kernel compiles the work card and either runs the fixed generator or replays a site-supplied free-model proposal as untrusted input. In both cases Genome Lab independently applies source restrictions, compiles and behaviorally tests the isolated skill, hashes the complete artifact, records the job and mutation, and stops at `SHADOW`.
 5. The publisher re-hashes the artifact, copies only the authorized candidate source, verifier, manifest, and verification record, runs the complete repository verification, creates a unique candidate branch, and opens an open **draft** pull request.
 6. The site stores the zero-cost result, candidate and source hashes, exact commit and draft PR, verification hashes, and lessons. It rejects expired claims, replay, non-zero cost, unsafe states, and non-draft evidence.
 
-The workflow has no model, account, payment, merge, deployment, Constitution, secret-administration, or production authority. GitHub tokens remain short-lived inside the GitHub runner; no GitHub credential is stored by the site. Candidate retries may reuse only an identical recorded branch and draft PR and never overwrite an existing branch.
+The GitHub workflow has no model, account, payment, merge, deployment, Constitution, secret-administration, tool-use, or production authority. A free model may propose pure code and behavioral examples at the site boundary, but the proposal receives no credentials or runtime authority and is rejected unless the local kernel independently verifies it. GitHub tokens remain short-lived inside the GitHub runner; no GitHub credential is stored by the site. Candidate retries may reuse only an identical recorded branch and draft PR and never overwrite an existing branch.
 
-The deliberate stopping point is the safe takeover boundary: SARA can write and reject this bounded deterministic skill and create a reviewable draft PR. This proves the self-building seam, not general autonomous software engineering. A future model-backed generator may replace the fixed generator only after a zero-cost or realized-profit-funded capability is available and must pass the same work-card, Genome Lab, verification, draft-only, and owner-promotion boundaries. No model, bank, paid API, new account, merge, or production deployment is silently provisioned.
+The deliberate stopping point is the safe takeover boundary: SARA can accept, write, and reject a bounded pure skill and create a reviewable draft PR. This proves a generalized self-building seam, not general autonomous software engineering. It cannot edit the champion, use tools, merge, deploy, spend, or open financial accounts. Any future broader coding capability must pass the same work-card, Genome Lab, verification, draft-only, and owner-promotion boundaries. No bank, paid API, new account, merge, or production deployment is silently provisioned.
 
 SARA is a repair layer around a frontier LLM. It does not make the model smarter. It makes the *system* stay intact:
 

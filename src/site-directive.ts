@@ -4,29 +4,47 @@ import type { CandidateGenerator, SkillCandidateProposal } from "./types.ts";
 
 export const SITE_EXECUTOR_KIND = "deterministic_release_evidence_normalizer_v1" as const;
 export const SITE_GENERATOR_ID = "deterministic-release-evidence-normalizer-v1" as const;
+export const MODEL_EXECUTOR_KIND = "free_ai_pure_skill_candidate_v1" as const;
+export const MODEL_GENERATOR_ID = "free-ai-pure-skill-candidate-v1" as const;
 const PROOF_OBJECTIVE = "Create a deterministic release-evidence normalizer that trims and lowercases string input and rejects non-string input.";
+const MAX_OBJECTIVE_LENGTH = 1_000;
+const MAX_PROPOSAL_BYTES = 64 * 1024;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const GIT_COMMIT = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u;
 const DRAFT_PR = /^https:\/\/github\.com\/BoneManTGRM\/SARA\/pull\/[1-9][0-9]*$/u;
 
-export type ClaimedSiteDirective = {
+type SharedWorkCard<TExecutorKind extends string> = {
+  schemaVersion: 1;
+  kind: "self_development";
+  acceptanceCriteria: string[];
+  maximumBudgetUsd: 0;
+  publicRepoApproved: true;
+  executorKind: TExecutorKind;
+  prohibitedActions: string[];
+};
+
+type SharedClaim<TExecutorKind extends string, TWorkCard> = {
   id: string;
   objective: string;
   status: "EXECUTOR_CLAIMED";
   maximumBudgetUsd: 0;
   publicRepoApproved: true;
-  executorKind: typeof SITE_EXECUTOR_KIND;
-  workCard: {
-    schemaVersion: 1;
-    kind: "self_development";
-    acceptanceCriteria: string[];
-    maximumBudgetUsd: 0;
-    publicRepoApproved: true;
-    executorKind: typeof SITE_EXECUTOR_KIND;
-    prohibitedActions: string[];
-  };
+  executorKind: TExecutorKind;
+  workCard: TWorkCard;
 };
+
+export type DeterministicSiteDirective = SharedClaim<
+  typeof SITE_EXECUTOR_KIND,
+  SharedWorkCard<typeof SITE_EXECUTOR_KIND>
+>;
+
+export type ModelSiteDirective = SharedClaim<
+  typeof MODEL_EXECUTOR_KIND,
+  SharedWorkCard<typeof MODEL_EXECUTOR_KIND> & { candidateProposal: SkillCandidateProposal }
+>;
+
+export type ClaimedSiteDirective = DeterministicSiteDirective | ModelSiteDirective;
 
 export type DraftPullRequestEvidence = {
   draftPrUrl: string;
@@ -52,7 +70,7 @@ export type SiteDirectiveShadowResult = {
   schemaVersion: 1;
   status: "SHADOW";
   maximumCostUsd: 0;
-  generatorId: typeof SITE_GENERATOR_ID;
+  generatorId: typeof SITE_GENERATOR_ID | typeof MODEL_GENERATOR_ID;
   candidateDigest: string;
   sourceTreeDigest: string;
   commitSha: string;
@@ -61,7 +79,7 @@ export type SiteDirectiveShadowResult = {
   lessons: string[];
 };
 
-function validateDirective(directive: ClaimedSiteDirective): void {
+function validateSharedDirective(directive: ClaimedSiteDirective): void {
   if (!UUID_V4.test(directive.id)) throw new Error("Site directive id must be a UUID v4.");
   if (directive.status !== "EXECUTOR_CLAIMED") throw new Error("Site directive is not executor-claimed.");
   if (directive.maximumBudgetUsd !== 0 || directive.workCard.maximumBudgetUsd !== 0) {
@@ -70,11 +88,8 @@ function validateDirective(directive: ClaimedSiteDirective): void {
   if (directive.publicRepoApproved !== true || directive.workCard.publicRepoApproved !== true) {
     throw new Error("Explicit public-repository approval is required.");
   }
-  if (directive.executorKind !== SITE_EXECUTOR_KIND || directive.workCard.executorKind !== SITE_EXECUTOR_KIND) {
+  if (directive.executorKind !== directive.workCard.executorKind) {
     throw new Error("Site directive executor kind is unsupported.");
-  }
-  if (directive.objective !== PROOF_OBJECTIVE) {
-    throw new Error("The deterministic generator is not authorized for this objective.");
   }
   if (
     directive.workCard.schemaVersion !== 1 ||
@@ -86,6 +101,43 @@ function validateDirective(directive: ClaimedSiteDirective): void {
   ) {
     throw new Error("Site directive work card is malformed.");
   }
+  if (!directive.objective.trim() || directive.objective.length > MAX_OBJECTIVE_LENGTH) {
+    throw new Error("Site directive objective is malformed.");
+  }
+}
+
+function validateModelProposalEnvelope(proposal: SkillCandidateProposal): void {
+  if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) {
+    throw new Error("Free-model candidate proposal is malformed.");
+  }
+  const allowedKeys = ["limitations", "schemaVersion", "skillName", "source", "summary", "tests"];
+  if (Object.keys(proposal).sort().join("\n") !== allowedKeys.join("\n")) {
+    throw new Error("Free-model candidate proposal contains unsupported fields.");
+  }
+  let serialized = "";
+  try {
+    serialized = JSON.stringify(proposal);
+  } catch {
+    throw new Error("Free-model candidate proposal is not JSON serializable.");
+  }
+  if (Buffer.byteLength(serialized, "utf8") > MAX_PROPOSAL_BYTES) {
+    throw new Error("Free-model candidate proposal exceeds the bounded envelope.");
+  }
+}
+
+function validateDirective(directive: ClaimedSiteDirective): void {
+  validateSharedDirective(directive);
+  if (directive.executorKind === SITE_EXECUTOR_KIND) {
+    if (directive.objective !== PROOF_OBJECTIVE) {
+      throw new Error("The deterministic generator is not authorized for this objective.");
+    }
+    return;
+  }
+  if (directive.executorKind === MODEL_EXECUTOR_KIND) {
+    validateModelProposalEnvelope(directive.workCard.candidateProposal);
+    return;
+  }
+  throw new Error("Site directive executor kind is unsupported.");
 }
 
 function proposal(): SkillCandidateProposal {
@@ -119,6 +171,29 @@ function deterministicGenerator(): CandidateGenerator {
   };
 }
 
+function modelProposalGenerator(proposal: SkillCandidateProposal): CandidateGenerator {
+  return {
+    id: MODEL_GENERATOR_ID,
+    external: true,
+    maximumCostUsd: 0,
+    async generate() {
+      return structuredClone(proposal);
+    },
+  };
+}
+
+function generatorForDirective(directive: ClaimedSiteDirective): CandidateGenerator {
+  return directive.executorKind === SITE_EXECUTOR_KIND
+    ? deterministicGenerator()
+    : modelProposalGenerator(directive.workCard.candidateProposal);
+}
+
+export function siteGeneratorId(
+  directive: ClaimedSiteDirective,
+): typeof SITE_GENERATOR_ID | typeof MODEL_GENERATOR_ID {
+  return directive.executorKind === SITE_EXECUTOR_KIND ? SITE_GENERATOR_ID : MODEL_GENERATOR_ID;
+}
+
 function validatePublication(evidence: DraftPullRequestEvidence): void {
   if (!DRAFT_PR.test(evidence.draftPrUrl)) throw new Error("Publisher did not return a trusted SARA draft PR URL.");
   if (!GIT_COMMIT.test(evidence.commitSha)) throw new Error("Publisher commit must be a Git object digest.");
@@ -142,10 +217,15 @@ export async function runClaimedSiteDirective(
   publisher: DraftPullRequestPublisher,
 ): Promise<SiteDirectiveShadowResult> {
   validateDirective(directive);
+  const generator = generatorForDirective(directive);
   const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
     objective: directive.objective,
     expectedOwnerValue: 1,
-    requiredCapabilities: ["release-evidence-normalizer"],
+    requiredCapabilities: [
+      directive.executorKind === SITE_EXECUTOR_KIND
+        ? "release-evidence-normalizer"
+        : "generated-pure-skill",
+    ],
     acceptanceCriteria: [...directive.workCard.acceptanceCriteria],
     maximumBudgetUsd: 0,
     external: true,
@@ -153,7 +233,7 @@ export async function runClaimedSiteDirective(
   const execution = await kernel.runSelfBuildCycle(
     SARA_PRINCIPAL,
     job.id,
-    deterministicGenerator(),
+    generator,
   );
   if (execution.job.status !== "verified" || execution.mutation.stage !== "SHADOW") {
     throw new Error("Kernel did not produce a verified SHADOW candidate.");
@@ -171,15 +251,20 @@ export async function runClaimedSiteDirective(
     schemaVersion: 1,
     status: "SHADOW",
     maximumCostUsd: 0,
-    generatorId: SITE_GENERATOR_ID,
+    generatorId: siteGeneratorId(directive),
     candidateDigest: execution.mutation.candidateDigest,
     sourceTreeDigest: publication.sourceTreeDigest,
     commitSha: publication.commitSha,
     draftPrUrl: publication.draftPrUrl,
     verification: publication.verification,
-    lessons: [
-      "The fixed zero-cost generator produced a kernel-verified candidate and stopped at SHADOW.",
-      "Draft publication did not grant merge, deployment, spending, or production authority.",
-    ],
+    lessons: directive.executorKind === SITE_EXECUTOR_KIND
+      ? [
+        "The fixed zero-cost generator produced a kernel-verified candidate and stopped at SHADOW.",
+        "Draft publication did not grant merge, deployment, spending, or production authority.",
+      ]
+      : [
+        "The untrusted proposal was revalidated, compiled, behaviorally tested, and stopped at SHADOW.",
+        "Draft publication did not grant merge, deployment, spending, tool, or production authority.",
+      ],
   };
 }
