@@ -142,6 +142,37 @@ export class GithubDraftPullRequestPublisher implements DraftPullRequestPublishe
     return this.#run({ file, args, cwd: this.#repository });
   }
 
+  async #createDraftPullRequest(
+    candidate: CandidatePublication,
+    branch: string,
+    commitSha: string,
+  ): Promise<string> {
+    const body = [
+      "## SARA SHADOW candidate",
+      "",
+      `Directive: \`${candidate.directiveId}\``,
+      `Candidate digest: \`${candidate.candidateDigest}\``,
+      "",
+      "This is a draft-only, zero-cost candidate. It has no merge, deployment, spending, or production authority.",
+    ].join("\n");
+    const create = requireSuccess(
+      await this.#command("gh", [
+        "pr", "create", "--draft", "--base", "main", "--head", branch,
+        "--title", `SARA SHADOW candidate ${candidate.directiveId.slice(0, 8)}`,
+        "--body", body,
+      ]),
+      "Draft PR creation",
+    );
+    const draftPrUrl = create.stdout.trim();
+    if (!DRAFT_PR.test(draftPrUrl)) throw new Error("GitHub did not return a trusted SARA draft PR URL.");
+    const view = requireSuccess(
+      await this.#command("gh", ["pr", "view", draftPrUrl, "--json", "url,isDraft,state,headRefOid"]),
+      "Draft PR verification",
+    );
+    parsePullRequest(view.stdout, commitSha);
+    return draftPrUrl;
+  }
+
   async publish(candidate: CandidatePublication): Promise<DraftPullRequestEvidence> {
     if (!UUID_V4.test(candidate.directiveId) || !UUID_V4.test(candidate.mutationId) || !UUID_V4.test(candidate.jobId)) {
       throw new Error("Candidate publication identifiers must be UUID v4 values.");
@@ -217,29 +248,7 @@ export class GithubDraftPullRequestPublisher implements DraftPullRequestPublishe
     if (!GIT_COMMIT.test(commitSha)) throw new Error("Git returned an invalid candidate commit digest.");
     requireSuccess(await this.#command("git", ["push", "origin", `HEAD:refs/heads/${branch}`]), "Candidate branch push");
 
-    const body = [
-      "## SARA SHADOW candidate",
-      "",
-      `Directive: \`${candidate.directiveId}\``,
-      `Candidate digest: \`${candidate.candidateDigest}\``,
-      "",
-      "This is a draft-only, zero-cost candidate. It has no merge, deployment, spending, or production authority.",
-    ].join("\n");
-    const create = requireSuccess(
-      await this.#command("gh", [
-        "pr", "create", "--draft", "--base", "main", "--head", branch,
-        "--title", `SARA SHADOW candidate ${candidate.directiveId.slice(0, 8)}`,
-        "--body", body,
-      ]),
-      "Draft PR creation",
-    );
-    const draftPrUrl = create.stdout.trim();
-    if (!DRAFT_PR.test(draftPrUrl)) throw new Error("GitHub did not return a trusted SARA draft PR URL.");
-    const view = requireSuccess(
-      await this.#command("gh", ["pr", "view", draftPrUrl, "--json", "url,isDraft,state,headRefOid"]),
-      "Draft PR verification",
-    );
-    parsePullRequest(view.stdout, commitSha);
+    const draftPrUrl = await this.#createDraftPullRequest(candidate, branch, commitSha);
     return { draftPrUrl, commitSha, sourceTreeDigest, verification };
   }
 
@@ -268,7 +277,13 @@ export class GithubDraftPullRequestPublisher implements DraftPullRequestPublishe
     );
     const existing = JSON.parse(list.stdout) as unknown[];
     if (existing.length === 0) {
-      throw new Error("Matching candidate branch exists without an open draft PR; refusing to alter it.");
+      const draftPrUrl = await this.#createDraftPullRequest(candidate, branch, commitSha);
+      return {
+        draftPrUrl,
+        commitSha,
+        sourceTreeDigest: receipt.sourceTreeDigest,
+        verification: receipt.verification,
+      };
     }
     const pr = parsePullRequest(list.stdout, commitSha);
     return {

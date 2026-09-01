@@ -103,4 +103,63 @@ describe("GitHub draft PR publisher", () => {
     );
     assert.equal(called, false);
   });
+
+  it("opens a missing draft PR for an exact previously-pushed candidate without rewriting it", async () => {
+    const source = await artifact();
+    const repository = await mkdtemp(join(tmpdir(), "sara-publisher-repo-"));
+    const invocations: CommandInvocation[] = [];
+    const commitSha = "b".repeat(40);
+    const sourceTreeDigest = "c".repeat(64);
+    const receipt = {
+      schemaVersion: 1,
+      directiveId: "12f1399e-4d2b-4f64-91b4-20ac93006ec3",
+      mutationId: "78e6fccc-d230-48cd-9049-8d41d83bc799",
+      jobId: "2c693b5d-5607-4db7-8888-2229f2323c07",
+      candidateDigest: source.digest,
+      sourceTreeDigest,
+      stage: "SHADOW",
+      productionAuthority: false,
+      verification: [{ command: "npm run verify", exitCode: 0, outputDigest: "d".repeat(64) }],
+    };
+    const run = async (invocation: CommandInvocation): Promise<CommandResult> => {
+      invocations.push(invocation);
+      const command = [invocation.file, ...invocation.args].join(" ");
+      if (command === "git status --porcelain") return { exitCode: 0, stdout: "", stderr: "" };
+      if (command.includes("ls-remote")) return { exitCode: 0, stdout: `${commitSha}\trefs/heads/existing\n`, stderr: "" };
+      if (command === "git rev-parse FETCH_HEAD") return { exitCode: 0, stdout: `${commitSha}\n`, stderr: "" };
+      if (command.startsWith("git show FETCH_HEAD:")) return { exitCode: 0, stdout: JSON.stringify(receipt), stderr: "" };
+      if (command.startsWith("gh pr list")) return { exitCode: 0, stdout: "[]", stderr: "" };
+      if (command.startsWith("gh pr create")) {
+        return { exitCode: 0, stdout: "https://github.com/BoneManTGRM/SARA/pull/8\n", stderr: "" };
+      }
+      if (command.startsWith("gh pr view")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            url: "https://github.com/BoneManTGRM/SARA/pull/8",
+            isDraft: true,
+            state: "OPEN",
+            headRefOid: commitSha,
+          }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const publisher = new GithubDraftPullRequestPublisher({ repository, run });
+    const evidence = await publisher.publish({
+      directiveId: receipt.directiveId,
+      candidateDigest: source.digest,
+      artifactDirectory: source.directory,
+      mutationId: receipt.mutationId,
+      jobId: receipt.jobId,
+      stage: "SHADOW",
+    });
+
+    assert.equal(evidence.draftPrUrl, "https://github.com/BoneManTGRM/SARA/pull/8");
+    assert.equal(evidence.commitSha, commitSha);
+    assert.equal(evidence.sourceTreeDigest, sourceTreeDigest);
+    assert.ok(invocations.some((item) => item.file === "gh" && item.args.includes("--draft")));
+    assert.ok(!invocations.some((item) => item.file === "git" && ["checkout", "add", "commit", "push"].includes(item.args[0] ?? "")));
+  });
 });
