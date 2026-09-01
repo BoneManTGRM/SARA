@@ -11,6 +11,7 @@ import {
   verifyGenomeLabArtifact,
 } from "./genome-lab.ts";
 import { compileExecutorHandoff } from "./handoff.ts";
+import { CORE_MEMORY_SEEDS, CORE_MEMORY_SOURCE, recallMemories, validateMemoryMetadata } from "./memory-fabric.ts";
 import { loadConstitution, type SaraConstitution } from "./constitution.ts";
 import {
   assertMoney,
@@ -33,6 +34,8 @@ import type {
   Job,
   LedgerEntry,
   MemoryRecord,
+  MemoryRecall,
+  MemoryRecallQuery,
   Mutation,
   MutationEvidence,
   MutationStage,
@@ -422,6 +425,13 @@ export class SaraKernel {
         constitutionVersion: loaded.constitution.version,
         ownerTokenSha256,
       });
+      const seeded = existingEvents.some((event) => event.type === "core_memory_seeded");
+      if (!seeded) {
+        await store.append("core_memory_seeded", SARA_PRINCIPAL, {
+          source: CORE_MEMORY_SOURCE,
+          memories: CORE_MEMORY_SEEDS,
+        });
+      }
       return kernel;
     });
   }
@@ -458,6 +468,11 @@ export class SaraKernel {
 
     for (const event of events) {
       if (event.type === "memory_recorded") memories.push(event.data as MemoryRecord);
+      if (event.type === "core_memory_seeded") {
+        const data = event.data as { memories?: unknown };
+        if (!Array.isArray(data.memories)) throw new EventStoreIntegrityError("Core memory seed event is malformed.");
+        memories.push(...structuredClone(data.memories as MemoryRecord[]));
+      }
       if (event.type === "ledger_recorded") ledger.push(event.data as LedgerEntry);
       if (event.type === "capability_registered") {
         const capability = event.data as Capability;
@@ -541,10 +556,16 @@ export class SaraKernel {
       if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
         throw new RangeError("Memory confidence must be between 0 and 1.");
       }
+      validateMemoryMetadata(input);
       const memory: MemoryRecord = { ...input, id: randomUUID() };
       await this.#store.append("memory_recorded", principal, memory);
       return memory;
     });
+  }
+
+  async recallMemory(input: MemoryRecallQuery): Promise<MemoryRecall> {
+    const state = await this.state();
+    return recallMemories(state.memories, input);
   }
 
   recordLedgerEntry(principal: Principal, input: Omit<LedgerEntry, "id">): Promise<LedgerEntry> {
@@ -730,14 +751,30 @@ export class SaraKernel {
         );
       }
       const compiled = compileExecutorHandoff(job, this.constitutionDigest);
+      const recalled = recallMemories(state.memories, {
+        query: [
+          job.workCard.objective,
+          ...job.workCard.acceptanceCriteria,
+          ...job.workCard.missingCapabilities,
+        ].join(" "),
+        scope: "global",
+        categories: ["constitutional", "strategic", "economic", "procedural", "failure", "skill"],
+        limit: 12,
+      });
+      const memoryContext = {
+        contextDigest: recalled.contextDigest,
+        memories: [...recalled.anchors, ...recalled.relevant].slice(0, 12),
+      };
       await this.#store.append("job_status_changed", principal, {
         jobId,
         from: job.status,
         status: "running",
         generatorId: generator.id,
         maximumCostUsd: generator.maximumCostUsd,
+        memoryContextDigest: memoryContext.contextDigest,
+        memoryIds: memoryContext.memories.map((memory) => memory.id),
       });
-      return compiled;
+      return { ...compiled, memoryContext };
     });
 
     try {
@@ -746,6 +783,7 @@ export class SaraKernel {
         acceptanceCriteria: [...handoff.acceptanceCriteria],
         missingCapabilities: [...handoff.missingCapabilities],
         constitutionDigest: handoff.constitutionDigest,
+        memoryContext: structuredClone(handoff.memoryContext),
       });
 
       return await this.serializeMutation(async () => {
