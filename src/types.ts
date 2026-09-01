@@ -70,6 +70,33 @@ export type MemoryRecord = {
   dependencies: string[];
   lastValidatedAt: string;
   revalidateAfter?: string;
+  importance?: 1 | 2 | 3 | 4 | 5;
+  tags?: string[];
+  status?: "active" | "superseded" | "retired";
+  supersedes?: string[];
+};
+
+export type MemoryRecallQuery = {
+  query: string;
+  scope: string;
+  categories?: MemoryRecord["category"][];
+  limit?: number;
+  now?: Date;
+};
+
+export type MemoryRecall = {
+  query: string;
+  scope: string;
+  anchors: MemoryRecord[];
+  relevant: MemoryRecord[];
+  staleExcluded: number;
+  supersededExcluded: number;
+  contextDigest: string;
+};
+
+export type CandidateMemoryContext = {
+  contextDigest: string;
+  memories: MemoryRecord[];
 };
 
 export type LedgerEntry = {
@@ -144,6 +171,7 @@ export type CandidateGenerator = {
     acceptanceCriteria: string[];
     missingCapabilities: string[];
     constitutionDigest: string;
+    memoryContext: CandidateMemoryContext;
   }): Promise<SkillCandidateProposal>;
 };
 
