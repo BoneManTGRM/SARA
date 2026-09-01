@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "command": "kernel:isolated-typescript-behavioral-verification",
+  "exitCode": 0,
+  "stdout": "{\"result\":\"PASS\",\"tests\":2}",
+  "stderr": "",
+  "tests": 2,
+  "typescriptVersion": "5.9.3"
+}
