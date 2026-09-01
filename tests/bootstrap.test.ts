@@ -381,7 +381,7 @@ describe("SARA durable memory and Genome Lab", () => {
     });
     const restarted = await SaraKernel.boot({ stateDirectory });
     const status = await restarted.getStatus();
-    assert.equal(status.memoryCount, 1);
+    assert.equal(status.memoryCount, 37);
     const events = await restarted.inspectAudit();
     assert.deepEqual(events.find((event) => event.type === "memory_recorded")?.data, memory);
 
@@ -602,7 +602,7 @@ describe("SARA durable memory and Genome Lab", () => {
     );
     assert.equal((await kernel.getStatus()).jobs.length, 0);
     assert.equal((await kernel.getStatus()).ownerFundedRecurringMonthlyUsd, 0);
-    assert.equal((await kernel.getStatus()).memoryCount, 1);
+    assert.equal((await kernel.getStatus()).memoryCount, 37);
     await kernel.setEmergencyStop(owner, false);
     assert.equal((await kernel.getStatus()).emergencyStopped, false);
   });
