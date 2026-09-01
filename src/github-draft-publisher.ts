@@ -16,6 +16,7 @@ const SHA256 = /^[a-f0-9]{64}$/u;
 const GIT_COMMIT = /^[a-f0-9]{40}$/u;
 const DRAFT_PR = /^https:\/\/github\.com\/BoneManTGRM\/SARA\/pull\/[1-9][0-9]*$/u;
 const PUBLISHED_FILES = ["manifest.json", "skill.ts", "verification.json", "verification.ts"] as const;
+const RECEIPT_MISMATCH = "Existing candidate branch receipt does not match the claimed directive.";
 
 export type CommandInvocation = {
   file: string;
@@ -102,7 +103,7 @@ function parseReceipt(value: unknown, expected: CandidatePublication): Execution
       typeof item?.command !== "string" || item.exitCode !== 0 || !SHA256.test(item.outputDigest),
     )
   ) {
-    throw new Error("Existing candidate branch receipt does not match the claimed directive.");
+    throw new Error(RECEIPT_MISMATCH);
   }
   return receipt as ExecutionReceipt;
 }
@@ -193,11 +194,31 @@ export class GithubDraftPullRequestPublisher implements DraftPullRequestPublishe
     const clean = requireSuccess(await this.#command("git", ["status", "--porcelain"]), "Git worktree inspection");
     if (clean.stdout.trim()) throw new Error("GitHub publication requires a clean isolated checkout.");
 
-    const branch = `sara/directive-${candidate.directiveId}`;
-    const remote = await this.#command("git", ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`]);
-    if (remote.exitCode === 0) return this.#reuseExisting(candidate, branch);
-    if (remote.exitCode !== 2) requireSuccess(remote, "Candidate branch lookup");
+    const primaryBranch = `sara/directive-${candidate.directiveId}`;
+    const primaryRemote = await this.#command(
+      "git",
+      ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${primaryBranch}`],
+    );
+    if (primaryRemote.exitCode === 0) {
+      try {
+        return await this.#reuseExisting(candidate, primaryBranch);
+      } catch (error) {
+        if (!(error instanceof Error) || error.message !== RECEIPT_MISMATCH) throw error;
+        const digestBranch = `${primaryBranch}-${candidate.candidateDigest.slice(0, 12)}`;
+        const digestRemote = await this.#command(
+          "git",
+          ["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${digestBranch}`],
+        );
+        if (digestRemote.exitCode === 0) return this.#reuseExisting(candidate, digestBranch);
+        if (digestRemote.exitCode !== 2) requireSuccess(digestRemote, "Digest-qualified candidate branch lookup");
+        return this.#publishNew(candidate, digestBranch);
+      }
+    }
+    if (primaryRemote.exitCode !== 2) requireSuccess(primaryRemote, "Candidate branch lookup");
+    return this.#publishNew(candidate, primaryBranch);
+  }
 
+  async #publishNew(candidate: CandidatePublication, branch: string): Promise<DraftPullRequestEvidence> {
     requireSuccess(await this.#command("git", ["checkout", "-b", branch]), "Candidate branch creation");
     const target = join(this.#repository, "generated", "candidates", candidate.directiveId);
     await mkdir(target, { recursive: true, mode: 0o700 });
