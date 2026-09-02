@@ -14,6 +14,7 @@ type CloudflareGeneratorOptions = {
   accountId: string;
   apiToken: string;
   workersPlan: string;
+  repairProposal?: SkillCandidateProposal;
   fetcher?: Fetcher;
 };
 
@@ -33,11 +34,14 @@ function requireCredentials(options: CloudflareGeneratorOptions): void {
   }
 }
 
-function proposalPrompt(input: Parameters<CandidateGenerator["generate"]>[0]): string {
+function proposalPrompt(
+  input: Parameters<CandidateGenerator["generate"]>[0],
+  repairProposal?: SkillCandidateProposal,
+): string {
   if (!input.objective.trim() || input.objective.length > MAX_OBJECTIVE_LENGTH) {
     throw new Error("Owner objective must contain 1–1,000 characters.");
   }
-  return [
+  const prompt = [
     "Create exactly one bounded SARA Genome Lab skill candidate for this owner objective:",
     input.objective,
     "",
@@ -50,9 +54,19 @@ function proposalPrompt(input: Parameters<CandidateGenerator["generate"]>[0]): s
     "The source must be deterministic pure TypeScript and export only runSkill(input: unknown): unknown.",
     "Use no imports, network, filesystem, secrets, timers, dynamic code, outreach, applications, contracts, spending, deployment, account creation, payment activity, Date, randomness, or ambient authority.",
     "Include 2–8 behavioral tests. Keep all output below 64 KiB. Do not use Markdown fences or commentary.",
+    "Before responding, dry-run runSkill for every test. Each expected value must exactly equal the complete observed return value after recursive object-key normalization.",
     `Constitution digest: ${input.constitutionDigest}`,
     `Bounded memory context digest: ${input.memoryContext.contextDigest}`,
-  ].join("\n");
+  ];
+  if (repairProposal) {
+    prompt.push(
+      "",
+      "The previous proposal passed source and TypeScript restrictions but failed isolated behavioral verification.",
+      "Repair the source and/or exact expected values, return the complete replacement proposal, and do not omit any required field.",
+      `Previous rejected proposal: ${JSON.stringify(repairProposal)}`,
+    );
+  }
+  return prompt.join("\n");
 }
 
 function stripSingleFence(value: string): string {
@@ -127,7 +141,7 @@ export function createCloudflareFreeCandidateGenerator(
               role: "system",
               content: "You generate untrusted pure TypeScript candidates for independent verification. Return JSON only.",
             },
-            { role: "user", content: proposalPrompt(input) },
+            { role: "user", content: proposalPrompt(input, options.repairProposal) },
           ],
           response_format: { type: "json_object" },
           stream: false,
