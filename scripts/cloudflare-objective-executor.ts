@@ -79,7 +79,11 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       ...cloudflare,
       id: `${cloudflare.id}-attempt-${attempt}`,
       async generate(input) {
-        previousProposal = await cloudflare.generate(input);
+        const generated = await cloudflare.generate(input);
+        if (generated.candidateKind === "typescript_program") {
+          throw new Error("The Cloudflare pure-skill executor returned an unauthorized program candidate.");
+        }
+        previousProposal = generated;
         return previousProposal;
       },
     });

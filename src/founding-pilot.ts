@@ -71,8 +71,16 @@ function requireFiniteNonNegative(value: number, field: string): void {
   if (!Number.isFinite(value) || value < 0) throw new Error(`${field} must be finite and non-negative.`);
 }
 
-export function compileFoundingPilot(input: FoundingPilotInput): FoundingPilotCard {
+export function compileFoundingPilot(
+  input: FoundingPilotInput,
+  commercialTerms: { minimumBudgetUsd: number; budgetGapMessage: string } = {
+    minimumBudgetUsd: 149,
+    budgetGapMessage: "Available budget is below the fixed $149 pilot price",
+  },
+): FoundingPilotCard {
   requireFiniteNonNegative(input.budgetUsd, "budgetUsd");
+  requireFiniteNonNegative(commercialTerms.minimumBudgetUsd, "minimumBudgetUsd");
+  if (!commercialTerms.budgetGapMessage.trim()) throw new Error("budgetGapMessage is required.");
   requireFiniteNonNegative(input.desiredTurnaroundDays, "desiredTurnaroundDays");
   if (input.recentCommitDays !== null) requireFiniteNonNegative(input.recentCommitDays, "recentCommitDays");
 
@@ -89,7 +97,7 @@ export function compileFoundingPilot(input: FoundingPilotInput): FoundingPilotCa
   if (!input.repositoryOwnerPermissionConfirmed) evidenceGaps.push("Repository-owner permission is not confirmed");
   if (input.recentCommitDays === null) evidenceGaps.push("Repository activity recency is unknown");
   if (input.primaryGoal === "other") evidenceGaps.push("Define a security, dependency, or release-readiness goal");
-  if (input.budgetUsd < 149) evidenceGaps.push("Available budget is below the fixed $149 pilot price");
+  if (input.budgetUsd < commercialTerms.minimumBudgetUsd) evidenceGaps.push(commercialTerms.budgetGapMessage);
 
   let fitScore = 25;
   if (repository) fitScore += 15;
@@ -97,7 +105,7 @@ export function compileFoundingPilot(input: FoundingPilotInput): FoundingPilotCa
   if (input.repositoryOwnerPermissionConfirmed) fitScore += 20;
   if (input.primaryGoal !== "other") fitScore += 10;
   if (input.recentCommitDays !== null && input.recentCommitDays <= 180) fitScore += 10;
-  if (input.budgetUsd < 149) fitScore -= 20;
+  if (input.budgetUsd < commercialTerms.minimumBudgetUsd) fitScore -= 20;
   fitScore -= disqualifyingRisks.length * 40;
   fitScore = Math.max(0, Math.min(100, fitScore));
 

@@ -6,7 +6,13 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
 import { PolicyDeniedError } from "../src/policy.ts";
-import type { CandidateGenerator, OwnerApproval, SkillCandidateProposal } from "../src/types.ts";
+import type {
+  CandidateProposal,
+  CandidateGenerator,
+  OwnerApproval,
+  ProgramCandidateProposal,
+  SkillCandidateProposal,
+} from "../src/types.ts";
 
 const cleanup: string[] = [];
 const OWNER_TOKEN = "self-build-test-owner-token";
@@ -51,7 +57,7 @@ function safeProposal(): SkillCandidateProposal {
   };
 }
 
-function generator(proposal = safeProposal()): CandidateGenerator {
+function generator(proposal: CandidateProposal = safeProposal()): CandidateGenerator {
   return {
     id: "zero-cost-test-generator",
     external: false,
@@ -59,6 +65,52 @@ function generator(proposal = safeProposal()): CandidateGenerator {
     async generate() {
       return structuredClone(proposal);
     },
+  };
+}
+
+function safeProgramProposal(): ProgramCandidateProposal {
+  return {
+    schemaVersion: 1,
+    candidateKind: "typescript_program",
+    programName: "Invoice Calculator",
+    summary: "A complete dependency-free program with separate domain, public API, and behavioral test modules.",
+    files: [
+      {
+        path: "src/money.ts",
+        content: [
+          "export function addAmounts(values: readonly number[]): number {",
+          '  if (values.some((value) => !Number.isFinite(value))) throw new Error("Amounts must be finite.");',
+          "  return values.reduce((total, value) => total + value, 0);",
+          "}",
+          "",
+        ].join("\n"),
+      },
+      {
+        path: "src/index.ts",
+        content: [
+          'import { addAmounts } from "./money.ts";',
+          "export type Invoice = { items: readonly number[]; taxRate: number };",
+          "export function invoiceTotal(invoice: Invoice): number {",
+          "  const subtotal = addAmounts(invoice.items);",
+          "  return subtotal + subtotal * invoice.taxRate;",
+          "}",
+          "",
+        ].join("\n"),
+      },
+      {
+        path: "tests/invoice.test.ts",
+        content: [
+          'import assert from "node:assert/strict";',
+          'import { test } from "node:test";',
+          'import { invoiceTotal } from "../src/index.ts";',
+          'test("calculates an invoice", () => {',
+          "  assert.equal(invoiceTotal({ items: [20, 30], taxRate: 0.1 }), 55);",
+          "});",
+          "",
+        ].join("\n"),
+      },
+    ],
+    limitations: ["Dependency-free deterministic calculation only."],
   };
 }
 
@@ -77,6 +129,91 @@ afterEach(async () => {
 });
 
 describe("SARA owner-controlled self-building cycle", () => {
+  it("builds, type-checks, tests, hashes, and durably shadows a complete multi-file program", async () => {
+    const { kernel, stateDirectory, jobId } = await preparedKernel();
+    const result = await kernel.runSelfBuildCycle(SARA_PRINCIPAL, jobId, generator(safeProgramProposal()));
+
+    assert.equal(result.job.status, "verified");
+    assert.equal(result.mutation.stage, "SHADOW");
+    assert.equal(result.evidence.command, "kernel:isolated-typescript-program-verification");
+    const artifact = join(stateDirectory, result.artifactRelativePath);
+    assert.match(await readFile(join(artifact, "project", "src", "index.ts"), "utf8"), /invoiceTotal/);
+    const verification = JSON.parse(await readFile(join(artifact, "verification.json"), "utf8")) as {
+      result: string;
+      sourceFiles: number;
+      testFiles: number;
+      networkAuthority: boolean;
+      filesystemWriteAuthority: boolean;
+      productionAuthority: boolean;
+    };
+    assert.deepEqual(verification, {
+      ...verification,
+      result: "PASS",
+      sourceFiles: 2,
+      testFiles: 1,
+      networkAuthority: false,
+      filesystemWriteAuthority: false,
+      productionAuthority: false,
+    });
+
+    const restarted = await SaraKernel.boot({ stateDirectory, ownerTokenSha256: OWNER_TOKEN_DIGEST });
+    const owner = restarted.authenticateOwnerToken(OWNER_TOKEN);
+    const promoted = await restarted.promoteMutation(
+      owner,
+      result.mutation.id,
+      "CANARY",
+      canaryApproval(owner.id, result.mutation.id),
+    );
+    assert.equal(promoted.stage, "CANARY");
+  });
+
+  it("rejects program source that requests network, filesystem, packages, or path traversal", async () => {
+    const cases: Array<{ mutate(proposal: ProgramCandidateProposal): void; message: RegExp }> = [
+      {
+        mutate(proposal) { proposal.files[0]!.content += '\nfetch("https://example.com");\n'; },
+        message: /identifier fetch is prohibited/,
+      },
+      {
+        mutate(proposal) { proposal.files[0]!.content = 'import { readFile } from "node:fs/promises";\nexport const x = readFile;\n'; },
+        message: /external module node:fs\/promises is prohibited/,
+      },
+      {
+        mutate(proposal) { proposal.files[0]!.content = 'import value from "left-pad";\nexport const x = value;\n'; },
+        message: /external module left-pad is prohibited/,
+      },
+      {
+        mutate(proposal) { proposal.files[0]!.path = "src/../escape.ts"; },
+        message: /file paths must be unique normalized/,
+      },
+      {
+        mutate(proposal) { proposal.files[0]!.content += '\nexport const escape = console["log"]["constructor"]("return process")();\n'; },
+        message: /computed property access is prohibited/,
+      },
+    ];
+    for (const candidate of cases) {
+      const { kernel, jobId } = await preparedKernel();
+      const proposal = safeProgramProposal();
+      candidate.mutate(proposal);
+      await assert.rejects(
+        () => kernel.runSelfBuildCycle(SARA_PRINCIPAL, jobId, generator(proposal)),
+        candidate.message,
+      );
+    }
+  });
+
+  it("rejects a multi-file program whose independent behavioral test fails", async () => {
+    const { kernel, jobId } = await preparedKernel();
+    const proposal = safeProgramProposal();
+    proposal.files.find((file) => file.path === "tests/invoice.test.ts")!.content = proposal.files
+      .find((file) => file.path === "tests/invoice.test.ts")!.content.replace(", 55);", ", 54);");
+    await assert.rejects(
+      () => kernel.runSelfBuildCycle(SARA_PRINCIPAL, jobId, generator(proposal)),
+    );
+    const status = await kernel.getStatus();
+    assert.equal(status.jobs.find((job) => job.id === jobId)?.status, "failed");
+    assert.equal(status.mutations.length, 0);
+  });
+
   it("writes, compiles, behaviorally verifies, hashes, and durably shadows a zero-cost candidate", async () => {
     const { kernel, stateDirectory, jobId } = await preparedKernel();
     const result = await kernel.runSelfBuildCycle(SARA_PRINCIPAL, jobId, generator());

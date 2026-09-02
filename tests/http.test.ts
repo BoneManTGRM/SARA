@@ -92,6 +92,31 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.equal((await ownerStatus.json() as { runtime: { startupProof: { status: string } } }).runtime.startupProof.status, "succeeded");
   });
 
+  it("exposes tools and service choices only to the authenticated owner", async () => {
+    assert.equal((await fetch(`${baseUrl}/api/tools`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/revenue-pilot/services`)).status, 401);
+
+    const toolsResponse = await fetch(`${baseUrl}/api/tools`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(toolsResponse.status, 200);
+    const tools = await toolsResponse.json() as Array<{ id: string; status: string }>;
+    assert.equal(tools.find((tool) => tool.id === "luna-worker")?.status, "available");
+
+    const servicesResponse = await fetch(`${baseUrl}/api/revenue-pilot/services`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(servicesResponse.status, 200);
+    const services = await servicesResponse.json() as Array<{ id: string; priceUsd: number }>;
+    assert.deepEqual(services.map((service) => service.id), [
+      "public-repository-readiness-snapshot",
+      "documentation-clarity-review",
+      "ci-workflow-readiness-review",
+      "dependency-hygiene-brief",
+    ]);
+    assert.deepEqual(services.map((service) => service.priceUsd), [149, 79, 99, 79]);
+  });
+
   it("rejects unauthenticated promotion and accepts target-bound owner approval", async () => {
     const unauthenticated = await fetch(`${baseUrl}/api/mutations/${mutationId}/promote`, {
       method: "POST",
@@ -220,6 +245,66 @@ describe("SARA owner dashboard HTTP boundary", () => {
       { attestation: execution.evidence.attestation, exitCode: execution.evidence.exitCode },
       { attestation: "kernel_executed", exitCode: 0 },
     );
+  });
+
+  it("accepts a complete multi-file program only through the authenticated Genome Lab boundary", async () => {
+    const createResponse = await fetch(`${baseUrl}/api/objectives`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        objective: "Build a dependency-free order calculator",
+        expectedOwnerValue: 10,
+        requiredCapabilities: ["multi-file-program-building"],
+        acceptanceCriteria: ["Type-check and pass independent tests."],
+        maximumBudgetUsd: 0,
+      }),
+    });
+    const created = await createResponse.json() as { id: string };
+    const payload = {
+      proposal: {
+        schemaVersion: 1,
+        candidateKind: "typescript_program",
+        programName: "Order Calculator",
+        summary: "A dependency-free multi-module order calculator.",
+        files: [
+          { path: "src/math.ts", content: "export const sum = (values: readonly number[]): number => values.reduce((total, value) => total + value, 0);\n" },
+          { path: "src/index.ts", content: 'import { sum } from "./math.ts";\nexport const orderTotal = (values: readonly number[]): number => sum(values);\n' },
+          { path: "tests/order.test.ts", content: 'import assert from "node:assert/strict";\nimport { test } from "node:test";\nimport { orderTotal } from "../src/index.ts";\ntest("totals an order", () => assert.equal(orderTotal([2, 3]), 5));\n' },
+        ],
+        limitations: ["No external dependencies or I/O."],
+      },
+    };
+    assert.equal((await fetch(`${baseUrl}/api/jobs/${created.id}/self-build`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    })).status, 401);
+    const response = await fetch(`${baseUrl}/api/jobs/${created.id}/self-build`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(response.status, 201);
+    const execution = await response.json() as {
+      job: { status: string };
+      mutation: { stage: string; summary: string };
+      evidence: { command: string; exitCode: number };
+    };
+    assert.deepEqual(
+      {
+        status: execution.job.status,
+        stage: execution.mutation.stage,
+        command: execution.evidence.command,
+        exitCode: execution.evidence.exitCode,
+      },
+      {
+        status: "verified",
+        stage: "SHADOW",
+        command: "kernel:isolated-typescript-program-verification",
+        exitCode: 0,
+      },
+    );
+    assert.match(execution.mutation.summary, /Generated program candidate: Order Calculator/);
   });
 
   it("creates and payment-authorizes a revenue pilot only behind owner authentication", async () => {

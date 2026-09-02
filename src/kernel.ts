@@ -1168,10 +1168,14 @@ export class SaraKernel {
           `${this.#store.stateDirectory}/genome-lab`,
           candidateId,
         );
+        const programCandidate = proposal.candidateKind === "typescript_program";
+        const candidateName = programCandidate ? proposal.programName : proposal.skillName;
         const mutation: Mutation = {
           id: candidateId,
           jobId,
-          summary: `Generated skill candidate: ${proposal.skillName}`,
+          summary: programCandidate
+            ? `Generated program candidate: ${candidateName}`
+            : `Generated skill candidate: ${candidateName}`,
           candidateDigest: artifact.candidateDigest,
           artifactRelativePath: artifact.artifactRelativePath,
           stage: "SANDBOX",
@@ -1180,7 +1184,9 @@ export class SaraKernel {
         };
         const evidence: MutationEvidence = {
           id: randomUUID(),
-          command: "kernel:isolated-typescript-behavioral-verification",
+          command: programCandidate
+            ? "kernel:isolated-typescript-program-verification"
+            : "kernel:isolated-typescript-behavioral-verification",
           exitCode: 0,
           outputDigest: artifact.verificationOutputDigest,
           candidateDigest: artifact.candidateDigest,

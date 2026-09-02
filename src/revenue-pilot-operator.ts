@@ -14,6 +14,7 @@ import {
   type RevenuePilotArtifact,
 } from "./revenue-pilot-artifacts.ts";
 import type { RevenuePilotJob, RevenuePilotLease } from "./revenue-pilot.ts";
+import { getRevenueService } from "./revenue-service-catalog.ts";
 
 export type RevenuePilotOperatorTick =
   | { outcome: "completed_role"; jobId: string; role: RevenuePilotLease["role"]; costUsd: number }
@@ -74,6 +75,7 @@ type WorkerRolePacket = {
   jobId: string;
   role: RevenuePilotLease["role"];
   serviceId: RevenuePilotJob["plan"]["serviceId"];
+  serviceName: string;
   primaryGoal: RevenuePilotJob["input"]["primaryGoal"];
   repository: string;
   repositoryEvidenceDigest: string;
@@ -81,6 +83,7 @@ type WorkerRolePacket = {
   permittedActions: string[];
   prohibitedActions: string[];
   requiredOutput: string[];
+  serviceDeliverables: string[];
   priorRoleArtifacts: Array<{ role: RevenuePilotLease["role"]; outputText: string; truncated: boolean }>;
 };
 
@@ -148,11 +151,13 @@ function buildPrompt(
   prior: WorkerRolePacket["priorRoleArtifacts"],
   evidence: StoredPublicRepositoryEvidence,
 ): string {
+  const service = getRevenueService(job.plan.serviceId);
   const packet: WorkerRolePacket = {
     schemaVersion: 1,
     jobId: job.id,
     role,
     serviceId: job.plan.serviceId,
+    serviceName: service.name,
     primaryGoal: job.input.primaryGoal,
     repository: evidence.snapshot.repository,
     repositoryEvidenceDigest: evidence.snapshotDigest,
@@ -170,6 +175,7 @@ function buildPrompt(
       "deployment",
     ],
     requiredOutput: requiredOutput(role),
+    serviceDeliverables: [...service.deliverables],
     priorRoleArtifacts: prior,
   };
   return [

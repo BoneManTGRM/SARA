@@ -5,6 +5,11 @@ import type {
   WorkerModelExecutionEvidence,
   WorkerModelFailureEvidence,
 } from "./model-router.ts";
+import {
+  getRevenueService,
+  serviceSupportsGoal,
+  type RevenueServiceId,
+} from "./revenue-service-catalog.ts";
 
 export const PILOT_MONTHLY_OWNER_BUDGET_CEILING_USD = 50 as const;
 export const PILOT_MAXIMUM_EXECUTION_COST_USD = 3 as const;
@@ -32,6 +37,7 @@ export type RevenuePilotInput = Omit<FoundingPilotInput, "budgetUsd"> & {
   sourceAllowsAutomatedDiscovery: boolean;
   discoveredFromPublicSource: boolean;
   customerBudgetUsd: number;
+  requestedServiceId?: RevenueServiceId;
 };
 
 export type LearningObjective = {
@@ -44,12 +50,13 @@ export type LearningObjective = {
 
 export type RevenuePilotPlan = {
   schemaVersion: 1;
-  serviceId: "public-repository-readiness-snapshot";
+  serviceId: RevenueServiceId;
+  serviceName: string;
   opportunityId: string;
   sourceUrl: string | null;
   decision: "offer_ready" | "owner_review" | "reject";
-  priceUsd: 149;
-  maximumExecutionCostUsd: 3;
+  priceUsd: number;
+  maximumExecutionCostUsd: number;
   monthlyOwnerBudgetCeilingUsd: 50;
   mayBeginFulfillment: false;
   fitScore: number;
@@ -57,6 +64,7 @@ export type RevenuePilotPlan = {
   disqualifyingRisks: string[];
   evidenceGaps: string[];
   requiredCapabilities: string[];
+  includedDeliverables: string[];
   missingCapabilities: string[];
   learningObjectives: LearningObjective[];
   roles: RevenuePilotRole[];
@@ -134,10 +142,10 @@ function copyJob(job: RevenuePilotJob): RevenuePilotJob {
   return structuredClone(job);
 }
 
-function learningObjective(capabilityId: string): LearningObjective {
+function learningObjective(capabilityId: string, serviceName: string): LearningObjective {
   return {
     capabilityId,
-    objective: `Build and independently verify the bounded ${capabilityId} capability for the public-repository readiness pilot.`,
+    objective: `Build and independently verify the bounded ${capabilityId} capability for the ${serviceName}.`,
     acceptanceCriteria: [
       `The ${capabilityId} behavior passes deterministic or isolated behavioral tests.`,
       "The candidate uses no production credentials, customer outreach, payment authority, merge authority, or deployment authority.",
@@ -150,15 +158,23 @@ function learningObjective(capabilityId: string): LearningObjective {
 
 export function compileRevenuePilot(
   input: RevenuePilotInput,
-  availableCapabilities: readonly string[] = PILOT_REQUIRED_CAPABILITIES,
+  availableCapabilities?: readonly string[],
 ): RevenuePilotPlan {
   if (!SAFE_ID.test(input.opportunityId)) {
     throw new Error("opportunityId must be 1–128 safe identifier characters.");
   }
+  assertMoney(input.customerBudgetUsd, "customerBudgetUsd");
   if (!PILOT_GOALS.has(input.primaryGoal)) throw new Error("primaryGoal is not recognized.");
+  const service = getRevenueService(input.requestedServiceId ?? "public-repository-readiness-snapshot");
   if (input.sourceUrl.length > 2_048) throw new Error("sourceUrl exceeds 2048 characters.");
   const sourceUrl = canonicalHttpsUrl(input.sourceUrl);
-  const pilot = compileFoundingPilot({ ...input, budgetUsd: input.customerBudgetUsd });
+  const pilot = compileFoundingPilot(
+    { ...input, budgetUsd: input.customerBudgetUsd },
+    {
+      minimumBudgetUsd: service.priceUsd,
+      budgetGapMessage: `Available budget is below the fixed $${service.priceUsd} ${service.name} price`,
+    },
+  );
   const disqualifyingRisks = [...pilot.disqualifyingRisks];
   const evidenceGaps = [...pilot.evidenceGaps];
   if (!input.sourceAllowsAutomatedDiscovery) {
@@ -168,9 +184,12 @@ export function compileRevenuePilot(
     disqualifyingRisks.push("The opportunity was not discovered from a public source");
   }
   if (!sourceUrl) evidenceGaps.push("Provide one canonical HTTPS opportunity source URL");
+  if (!serviceSupportsGoal(service, input.primaryGoal)) {
+    evidenceGaps.push(`The requested service does not support the ${input.primaryGoal} goal`);
+  }
 
-  const available = new Set(availableCapabilities);
-  const missingCapabilities = PILOT_REQUIRED_CAPABILITIES.filter((capability) => !available.has(capability));
+  const available = new Set(availableCapabilities ?? service.requiredCapabilities);
+  const missingCapabilities = service.requiredCapabilities.filter((capability) => !available.has(capability));
   if (missingCapabilities.length > 0) {
     evidenceGaps.push(`Missing verified capabilities: ${missingCapabilities.join(", ")}`);
   }
@@ -188,21 +207,23 @@ export function compileRevenuePilot(
 
   return {
     schemaVersion: 1,
-    serviceId: "public-repository-readiness-snapshot",
+    serviceId: service.id,
+    serviceName: service.name,
     opportunityId: input.opportunityId.trim(),
     sourceUrl,
     decision,
-    priceUsd: 149,
-    maximumExecutionCostUsd: PILOT_MAXIMUM_EXECUTION_COST_USD,
+    priceUsd: service.priceUsd,
+    maximumExecutionCostUsd: service.maximumExecutionCostUsd,
     monthlyOwnerBudgetCeilingUsd: PILOT_MONTHLY_OWNER_BUDGET_CEILING_USD,
     mayBeginFulfillment: false,
     fitScore: pilot.fitScore,
     repository: pilot.repository,
     disqualifyingRisks,
     evidenceGaps,
-    requiredCapabilities: [...PILOT_REQUIRED_CAPABILITIES],
+    requiredCapabilities: [...service.requiredCapabilities],
+    includedDeliverables: [...service.deliverables],
     missingCapabilities: [...missingCapabilities],
-    learningObjectives: missingCapabilities.map(learningObjective),
+    learningObjectives: missingCapabilities.map((capability) => learningObjective(capability, service.name)),
     roles: [...PILOT_ROLES],
     safestNextStep,
   };
