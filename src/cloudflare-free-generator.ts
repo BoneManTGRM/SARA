@@ -15,6 +15,7 @@ type CloudflareGeneratorOptions = {
   apiToken: string;
   workersPlan: string;
   repairProposal?: SkillCandidateProposal;
+  repairFeedback?: string;
   fetcher?: Fetcher;
 };
 
@@ -37,6 +38,7 @@ function requireCredentials(options: CloudflareGeneratorOptions): void {
 function proposalPrompt(
   input: Parameters<CandidateGenerator["generate"]>[0],
   repairProposal?: SkillCandidateProposal,
+  repairFeedback?: string,
 ): string {
   if (!input.objective.trim() || input.objective.length > MAX_OBJECTIVE_LENGTH) {
     throw new Error("Owner objective must contain 1–1,000 characters.");
@@ -63,6 +65,7 @@ function proposalPrompt(
       "",
       "The previous proposal passed source and TypeScript restrictions but failed isolated behavioral verification.",
       "Repair the source and/or exact expected values, return the complete replacement proposal, and do not omit any required field.",
+      `Bounded independent verifier feedback: ${repairFeedback || "Behavioral outputs did not exactly match the proposed expected values."}`,
       `Previous rejected proposal: ${JSON.stringify(repairProposal)}`,
     );
   }
@@ -194,7 +197,7 @@ export function createCloudflareFreeCandidateGenerator(
               role: "system",
               content: "You generate untrusted pure TypeScript candidates for independent verification. Return JSON only.",
             },
-            { role: "user", content: proposalPrompt(input, options.repairProposal) },
+            { role: "user", content: proposalPrompt(input, options.repairProposal, options.repairFeedback) },
           ],
           response_format: { type: "json_object" },
           stream: false,

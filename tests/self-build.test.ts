@@ -178,6 +178,30 @@ describe("SARA owner-controlled self-building cycle", () => {
     assert.equal((await kernel.getStatus()).jobs.find((job) => job.id === jobId)?.status, "authorized");
   });
 
+  it("reports every bounded behavioral mismatch with exact expected and actual values", async () => {
+    const { kernel, jobId } = await preparedKernel();
+    const inconsistent = safeProposal();
+    inconsistent.tests = [
+      { name: "first mismatch", input: 4, expected: 7 },
+      { name: "second mismatch", input: 5, expected: 9 },
+    ];
+
+    await assert.rejects(
+      () => kernel.runSelfBuildCycle(SARA_PRINCIPAL, jobId, generator(inconsistent)),
+      (error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        assert.match(message, /Behavioral verification mismatches:/);
+        assert.match(message, /first mismatch/);
+        assert.match(message, /\"expected\":\"7\"/);
+        assert.match(message, /\"actual\":\"8\"/);
+        assert.match(message, /second mismatch/);
+        assert.match(message, /\"expected\":\"9\"/);
+        assert.match(message, /\"actual\":\"10\"/);
+        return true;
+      },
+    );
+  });
+
   it("obeys the emergency stop before invoking a candidate generator", async () => {
     const { kernel, jobId } = await preparedKernel();
     const owner = kernel.authenticateOwnerToken(OWNER_TOKEN);
