@@ -5,7 +5,7 @@ import { compileExecutorHandoff } from "./handoff.ts";
 import { SaraKernel } from "./kernel.ts";
 import { PolicyDeniedError } from "./policy.ts";
 import type { RevenuePilotInput } from "./revenue-pilot.ts";
-import type { MutationStage, SkillCandidateProposal } from "./types.ts";
+import type { CandidateProposal, MutationStage } from "./types.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -183,9 +183,9 @@ async function handleSelfBuild(
   jobId: string,
 ): Promise<void> {
   const body = await readJson(request);
-  const proposal = body.proposal as SkillCandidateProposal;
+  const proposal = body.proposal as CandidateProposal;
   if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) {
-    throw new Error("proposal must be a skill candidate object.");
+    throw new Error("proposal must be a skill or program candidate object.");
   }
   json(
     response,

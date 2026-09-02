@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { digestArtifactTree } from "./genome-lab.ts";
@@ -15,7 +15,7 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const SHA256 = /^[a-f0-9]{64}$/u;
 const GIT_COMMIT = /^[a-f0-9]{40}$/u;
 const DRAFT_PR = /^https:\/\/github\.com\/BoneManTGRM\/SARA\/pull\/[1-9][0-9]*$/u;
-const PUBLISHED_FILES = ["manifest.json", "skill.ts", "verification.json", "verification.ts"] as const;
+const SKILL_PUBLISHED_FILES = ["manifest.json", "skill.ts", "verification.json", "verification.ts"] as const;
 const RECEIPT_MISMATCH = "Existing candidate branch receipt does not match the claimed directive.";
 
 export type CommandInvocation = {
@@ -76,9 +76,38 @@ function requireSuccess(result: CommandResult, label: string): CommandResult {
   return result;
 }
 
-async function digestPublishedSource(directory: string): Promise<string> {
+async function regularFiles(directory: string, relativeDirectory = ""): Promise<string[]> {
+  const files: string[] = [];
+  const entries = await readdir(join(directory, relativeDirectory), { withFileTypes: true });
+  entries.sort((left, right) => left.name.localeCompare(right.name));
+  for (const entry of entries) {
+    const relativePath = relativeDirectory ? `${relativeDirectory}/${entry.name}` : entry.name;
+    const path = join(directory, relativePath);
+    const stat = await lstat(path);
+    if (stat.isSymbolicLink()) throw new Error("Published candidates may not contain symbolic links.");
+    if (stat.isDirectory()) files.push(...await regularFiles(directory, relativePath));
+    else if (stat.isFile()) files.push(relativePath);
+    else throw new Error("Published candidates may contain only regular files and directories.");
+  }
+  return files;
+}
+
+async function authorizedPublicationFiles(artifactDirectory: string): Promise<string[]> {
+  const manifest = JSON.parse(await readFile(join(artifactDirectory, "manifest.json"), "utf8")) as { kind?: unknown };
+  if (manifest.kind === "generated_skill_candidate") return [...SKILL_PUBLISHED_FILES];
+  if (manifest.kind === "generated_typescript_program_candidate") {
+    const projectFiles = await regularFiles(join(artifactDirectory, "project"));
+    if (projectFiles.length < 3 || projectFiles.length > 24) {
+      throw new Error("Program candidate publication file count is outside its bounded envelope.");
+    }
+    return ["manifest.json", "verification.json", ...projectFiles.map((path) => `project/${path}`)];
+  }
+  throw new Error("Genome Lab artifact kind is not authorized for draft publication.");
+}
+
+async function digestPublishedSource(directory: string, relativePaths: readonly string[]): Promise<string> {
   const entries: Array<{ path: string; contentDigest: string }> = [];
-  for (const name of PUBLISHED_FILES) {
+  for (const name of [...relativePaths].sort()) {
     const path = join(directory, name);
     const stat = await lstat(path);
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("Published candidates may contain regular files only.");
@@ -185,9 +214,10 @@ export class GithubDraftPullRequestPublisher implements DraftPullRequestPublishe
       throw new Error("Verified Genome Lab artifact digest changed before publication.");
     }
 
+    const publishedFiles = await authorizedPublicationFiles(candidate.artifactDirectory);
     const topLevel = (await readdir(candidate.artifactDirectory)).sort();
-    const allowed = new Set([...PUBLISHED_FILES, "runtime"]);
-    if (topLevel.some((name) => !allowed.has(name as (typeof PUBLISHED_FILES)[number] | "runtime"))) {
+    const expectedTopLevel = new Set([...publishedFiles.map((name) => name.split("/")[0]), "runtime"]);
+    if (topLevel.some((name) => !expectedTopLevel.has(name))) {
       throw new Error("Genome Lab artifact contains an unauthorized publication entry.");
     }
 
@@ -215,26 +245,39 @@ export class GithubDraftPullRequestPublisher implements DraftPullRequestPublishe
       }
     }
     if (primaryRemote.exitCode !== 2) requireSuccess(primaryRemote, "Candidate branch lookup");
-    return this.#publishNew(candidate, primaryBranch);
+    return this.#publishNew(candidate, primaryBranch, publishedFiles);
   }
 
-  async #publishNew(candidate: CandidatePublication, branch: string): Promise<DraftPullRequestEvidence> {
+  async #publishNew(
+    candidate: CandidatePublication,
+    branch: string,
+    requestedPublishedFiles?: string[],
+  ): Promise<DraftPullRequestEvidence> {
+    const publishedFiles = requestedPublishedFiles ?? await authorizedPublicationFiles(candidate.artifactDirectory);
     requireSuccess(await this.#command("git", ["checkout", "-b", branch]), "Candidate branch creation");
     const target = join(this.#repository, "generated", "candidates", candidate.directiveId);
     await mkdir(target, { recursive: true, mode: 0o700 });
-    for (const name of PUBLISHED_FILES) {
+    for (const name of publishedFiles) {
       const source = join(candidate.artifactDirectory, name);
       const sourceStat = await lstat(source);
       if (!sourceStat.isFile() || sourceStat.isSymbolicLink()) {
         throw new Error(`Authorized candidate file ${name} is not a regular file.`);
       }
+      await mkdir(dirname(join(target, name)), { recursive: true, mode: 0o700 });
       await writeFile(join(target, name), await readFile(source), { mode: 0o600 });
     }
 
-    const sourceTreeDigest = await digestPublishedSource(target);
+    const sourceTreeDigest = await digestPublishedSource(target, publishedFiles);
     const kernelVerification = JSON.parse(await readFile(join(target, "verification.json"), "utf8")) as unknown;
+    const kernelCommand = (kernelVerification as { command?: unknown }).command;
+    if (
+      kernelCommand !== "kernel:isolated-typescript-behavioral-verification" &&
+      kernelCommand !== "kernel:isolated-typescript-program-verification"
+    ) {
+      throw new Error("Kernel verification record contains an unauthorized command.");
+    }
     const verification: DraftPullRequestEvidence["verification"] = [{
-      command: "kernel:isolated-typescript-behavioral-verification",
+      command: kernelCommand,
       exitCode: 0,
       outputDigest: sha256(canonicalJson(kernelVerification)),
     }];

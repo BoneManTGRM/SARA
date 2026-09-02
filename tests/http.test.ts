@@ -222,6 +222,66 @@ describe("SARA owner dashboard HTTP boundary", () => {
     );
   });
 
+  it("accepts a complete multi-file program only through the authenticated Genome Lab boundary", async () => {
+    const createResponse = await fetch(`${baseUrl}/api/objectives`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        objective: "Build a dependency-free order calculator",
+        expectedOwnerValue: 10,
+        requiredCapabilities: ["multi-file-program-building"],
+        acceptanceCriteria: ["Type-check and pass independent tests."],
+        maximumBudgetUsd: 0,
+      }),
+    });
+    const created = await createResponse.json() as { id: string };
+    const payload = {
+      proposal: {
+        schemaVersion: 1,
+        candidateKind: "typescript_program",
+        programName: "Order Calculator",
+        summary: "A dependency-free multi-module order calculator.",
+        files: [
+          { path: "src/math.ts", content: "export const sum = (values: readonly number[]): number => values.reduce((total, value) => total + value, 0);\n" },
+          { path: "src/index.ts", content: 'import { sum } from "./math.ts";\nexport const orderTotal = (values: readonly number[]): number => sum(values);\n' },
+          { path: "tests/order.test.ts", content: 'import assert from "node:assert/strict";\nimport { test } from "node:test";\nimport { orderTotal } from "../src/index.ts";\ntest("totals an order", () => assert.equal(orderTotal([2, 3]), 5));\n' },
+        ],
+        limitations: ["No external dependencies or I/O."],
+      },
+    };
+    assert.equal((await fetch(`${baseUrl}/api/jobs/${created.id}/self-build`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    })).status, 401);
+    const response = await fetch(`${baseUrl}/api/jobs/${created.id}/self-build`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(response.status, 201);
+    const execution = await response.json() as {
+      job: { status: string };
+      mutation: { stage: string; summary: string };
+      evidence: { command: string; exitCode: number };
+    };
+    assert.deepEqual(
+      {
+        status: execution.job.status,
+        stage: execution.mutation.stage,
+        command: execution.evidence.command,
+        exitCode: execution.evidence.exitCode,
+      },
+      {
+        status: "verified",
+        stage: "SHADOW",
+        command: "kernel:isolated-typescript-program-verification",
+        exitCode: 0,
+      },
+    );
+    assert.match(execution.mutation.summary, /Generated program candidate: Order Calculator/);
+  });
+
   it("creates and payment-authorizes a revenue pilot only behind owner authentication", async () => {
     const opportunity = {
       opportunityId: "http-public-opportunity-1",

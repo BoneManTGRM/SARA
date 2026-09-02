@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import * as ts from "typescript";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import type { ExecutorHandoff } from "./handoff.ts";
-import type { SkillCandidateProposal } from "./types.ts";
+import type { CandidateProposal, ProgramCandidateProposal, SkillCandidateProposal } from "./types.ts";
 
 export type GeneratedSkillCandidate = {
   artifactDirectory: string;
@@ -18,6 +18,10 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const execFileAsync = promisify(execFile);
 const MAX_SOURCE_BYTES = 32 * 1024;
 const MAX_TEST_VECTORS = 16;
+const MAX_PROGRAM_FILES = 24;
+const MAX_PROGRAM_FILE_BYTES = 16 * 1024;
+const MAX_PROGRAM_BYTES = 48 * 1024;
+const PROGRAM_PATH = /^(?:src\/[a-z0-9][a-z0-9._/-]*|tests\/[a-z0-9][a-z0-9._/-]*\.test)\.ts$/u;
 const BLOCKED_IDENTIFIERS = new Set([
   "Bun",
   "Date",
@@ -212,13 +216,253 @@ function semanticDiagnostics(files: string[]): ts.Diagnostic[] {
   );
 }
 
+function isProgramCandidate(proposal: CandidateProposal): proposal is ProgramCandidateProposal {
+  return "candidateKind" in proposal && proposal.candidateKind === "typescript_program";
+}
+
+function validateProgramCandidateProposal(proposal: ProgramCandidateProposal): void {
+  if (proposal.schemaVersion !== 1) throw new Error("Program candidate schema version is unsupported.");
+  if (!/^[A-Za-z][A-Za-z0-9 _-]{1,63}$/u.test(proposal.programName)) {
+    throw new Error("Program name must be 2–64 safe display characters.");
+  }
+  if (!proposal.summary.trim() || proposal.summary.length > 500) {
+    throw new Error("Program candidate summary must be 1–500 characters.");
+  }
+  if (proposal.files.length < 3 || proposal.files.length > MAX_PROGRAM_FILES) {
+    throw new Error(`Program candidates require 3–${MAX_PROGRAM_FILES} files.`);
+  }
+  if (proposal.limitations.length > 16 || proposal.limitations.some((item) => !item.trim() || item.length > 300)) {
+    throw new Error("Program limitations must contain at most 16 non-empty entries of 300 characters or fewer.");
+  }
+  const paths = new Set<string>();
+  let totalBytes = 0;
+  let sourceFiles = 0;
+  let testFiles = 0;
+  for (const file of proposal.files) {
+    if (
+      !PROGRAM_PATH.test(file.path) ||
+      file.path.includes("//") ||
+      file.path.includes("..") ||
+      posix.normalize(file.path) !== file.path ||
+      paths.has(file.path)
+    ) {
+      throw new Error("Program file paths must be unique normalized src/*.ts or tests/*.test.ts paths.");
+    }
+    paths.add(file.path);
+    const bytes = Buffer.byteLength(file.content, "utf8");
+    if (bytes === 0 || bytes > MAX_PROGRAM_FILE_BYTES) {
+      throw new Error(`Each program file must be between 1 and ${MAX_PROGRAM_FILE_BYTES} bytes.`);
+    }
+    totalBytes += bytes;
+    if (file.path.startsWith("src/")) sourceFiles += 1;
+    if (file.path.startsWith("tests/")) testFiles += 1;
+  }
+  if (totalBytes > MAX_PROGRAM_BYTES) throw new Error(`Program source exceeds ${MAX_PROGRAM_BYTES} bytes.`);
+  if (!paths.has("src/index.ts") || sourceFiles < 2 || testFiles < 1) {
+    throw new Error("Programs require src/index.ts, at least two source modules, and at least one test module.");
+  }
+}
+
+function programModuleSpecifier(node: ts.Node): ts.Expression | undefined {
+  if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return node.moduleSpecifier;
+  return undefined;
+}
+
+function assertBoundedProgramSource(
+  filePath: string,
+  source: string,
+  allPaths: ReadonlySet<string>,
+): void {
+  const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
+  const syntaxErrors = (sourceFile as ts.SourceFile & { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics ?? [];
+  if (syntaxErrors.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)) {
+    throw new Error(`Program file ${filePath} contains invalid TypeScript syntax.`);
+  }
+  let violation = "";
+  const visit = (node: ts.Node): void => {
+    if (violation) return;
+    if (ts.isImportEqualsDeclaration(node) || (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)) {
+      violation = "dynamic or legacy module loading is prohibited";
+      return;
+    }
+    const moduleExpression = programModuleSpecifier(node);
+    if (moduleExpression) {
+      if (!ts.isStringLiteral(moduleExpression)) {
+        violation = "module specifiers must be string literals";
+        return;
+      }
+      const specifier = moduleExpression.text;
+      const allowedTestBuiltin = filePath.startsWith("tests/") &&
+        (specifier === "node:test" || specifier === "node:assert/strict");
+      if (!allowedTestBuiltin) {
+        if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
+          violation = `external module ${specifier} is prohibited`;
+          return;
+        }
+        if (!specifier.endsWith(".ts")) {
+          violation = "relative imports must use an explicit .ts extension";
+          return;
+        }
+        const resolved = posix.normalize(posix.join(posix.dirname(filePath), specifier));
+        if (resolved.startsWith("../") || !allPaths.has(resolved)) {
+          violation = `relative module ${specifier} is outside or absent from the candidate`;
+          return;
+        }
+        if (filePath.startsWith("src/") && !resolved.startsWith("src/")) {
+          violation = "production source may not import test modules";
+          return;
+        }
+      }
+    }
+    if (ts.isIdentifier(node) && BLOCKED_IDENTIFIERS.has(node.text)) {
+      violation = `identifier ${node.text} is prohibited`;
+      return;
+    }
+    if (ts.isPropertyAccessExpression(node) && (BLOCKED_PROPERTIES.has(node.name.text) || node.name.text.startsWith("__"))) {
+      violation = `property ${node.name.text} is prohibited`;
+      return;
+    }
+    if (ts.isElementAccessExpression(node)) {
+      violation = "computed property access is prohibited";
+      return;
+    }
+    if (node.kind === ts.SyntaxKind.AnyKeyword) {
+      violation = "the any type is prohibited";
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  if (violation) throw new Error(`Generated program is not a bounded isolated candidate: ${filePath}: ${violation}.`);
+}
+
+function runtimeModuleSource(source: string): string {
+  const emitted = ts.transpileModule(source, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  }).outputText;
+  return emitted.replace(/(["'])(\.\.?\/[^"']+)\.ts\1/gu, "$1$2.mjs$1");
+}
+
+async function buildVerifiedProgramCandidate(
+  handoff: ExecutorHandoff,
+  proposal: ProgramCandidateProposal,
+  genomeLabRoot: string,
+  candidateId: string,
+): Promise<GeneratedSkillCandidate> {
+  validateProgramCandidateProposal(proposal);
+  const allPaths = new Set(proposal.files.map((file) => file.path));
+  for (const file of proposal.files) assertBoundedProgramSource(file.path, file.content, allPaths);
+
+  await mkdir(genomeLabRoot, { recursive: true, mode: 0o700 });
+  const artifactDirectory = join(genomeLabRoot, candidateId);
+  await mkdir(artifactDirectory, { recursive: false, mode: 0o700 });
+  try {
+    const projectDirectory = join(artifactDirectory, "project");
+    const runtimeDirectory = join(artifactDirectory, "runtime");
+    await Promise.all([
+      mkdir(projectDirectory, { recursive: true, mode: 0o700 }),
+      mkdir(runtimeDirectory, { recursive: true, mode: 0o700 }),
+    ]);
+    const projectFiles: string[] = [];
+    const runtimeFiles: string[] = [];
+    const runtimeTests: string[] = [];
+    for (const file of proposal.files) {
+      const projectPath = join(projectDirectory, file.path);
+      const runtimePath = join(runtimeDirectory, file.path.replace(/\.ts$/u, ".mjs"));
+      await Promise.all([
+        mkdir(dirname(projectPath), { recursive: true, mode: 0o700 }),
+        mkdir(dirname(runtimePath), { recursive: true, mode: 0o700 }),
+      ]);
+      await Promise.all([
+        writeFile(projectPath, file.content, { encoding: "utf8", mode: 0o600 }),
+        writeFile(runtimePath, runtimeModuleSource(file.content), { encoding: "utf8", mode: 0o600 }),
+      ]);
+      projectFiles.push(projectPath);
+      runtimeFiles.push(runtimePath);
+      if (file.path.startsWith("tests/")) runtimeTests.push(runtimePath);
+    }
+    const diagnostics = semanticDiagnostics(projectFiles);
+    if (diagnostics.length > 0) {
+      throw new Error(`Generated program failed TypeScript verification with ${diagnostics.length} error(s).`);
+    }
+    const runtimeVerifierPath = join(runtimeDirectory, "program-verification.mjs");
+    await writeFile(
+      runtimeVerifierPath,
+      `${runtimeTests.map((path) => `import ${JSON.stringify(`./${path.slice(runtimeDirectory.length + 1).replaceAll("\\", "/")}`)};`).join("\n")}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    );
+    const allowedRuntimeFiles = [...runtimeFiles, runtimeVerifierPath]
+      .flatMap((path) => ["--allow-fs-read", path]);
+    const { stdout, stderr } = await execFileAsync(
+      process.execPath,
+      [
+        "--permission",
+        ...allowedRuntimeFiles,
+        "--max-old-space-size=64",
+        runtimeVerifierPath,
+      ],
+      {
+        cwd: runtimeDirectory,
+        env: { NODE_NO_WARNINGS: "1" },
+        timeout: 5_000,
+        maxBuffer: 128 * 1024,
+        encoding: "utf8",
+      },
+    );
+    const verification = {
+      result: "PASS",
+      command: "kernel:isolated-typescript-program-verification",
+      exitCode: 0,
+      stdout: stdout.trim().slice(0, 64 * 1024),
+      stderr: stderr.trim().slice(0, 64 * 1024),
+      sourceFiles: proposal.files.filter((file) => file.path.startsWith("src/")).length,
+      testFiles: runtimeTests.length,
+      typescriptVersion: ts.version,
+      networkAuthority: false,
+      filesystemWriteAuthority: false,
+      productionAuthority: false,
+    } as const;
+    const manifest = {
+      schemaVersion: 1,
+      kind: "generated_typescript_program_candidate",
+      generatorAuthority: "untrusted_candidate",
+      objective: handoff.objective,
+      acceptanceCriteria: handoff.acceptanceCriteria,
+      programName: proposal.programName,
+      summary: proposal.summary.trim(),
+      limitations: proposal.limitations,
+      files: proposal.files.map((file) => ({ path: file.path, contentDigest: sha256(file.content) })),
+      maximumBudgetUsd: handoff.maximumBudgetUsd,
+      constitutionDigest: handoff.constitutionDigest,
+      dependencyPolicy: "no_external_dependencies",
+      productionAuthority: false,
+    } as const;
+    await Promise.all([
+      writeFile(join(artifactDirectory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 }),
+      writeFile(join(artifactDirectory, "verification.json"), `${JSON.stringify(verification, null, 2)}\n`, { mode: 0o600 }),
+    ]);
+    return {
+      artifactDirectory,
+      artifactRelativePath: join("genome-lab", candidateId),
+      candidateDigest: await digestArtifactTree(artifactDirectory),
+      verificationOutputDigest: sha256(canonicalJson(verification)),
+    };
+  } catch (error) {
+    await rm(artifactDirectory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 export async function buildVerifiedSkillCandidate(
   handoff: ExecutorHandoff,
-  proposal: SkillCandidateProposal,
+  proposal: CandidateProposal,
   genomeLabRoot: string,
   candidateId: string,
 ): Promise<GeneratedSkillCandidate> {
   if (!UUID_V4.test(candidateId)) throw new Error("Genome Lab candidate id must be a UUID v4.");
+  if (isProgramCandidate(proposal)) {
+    return buildVerifiedProgramCandidate(handoff, proposal, genomeLabRoot, candidateId);
+  }
   validateSkillCandidateProposal(proposal);
   assertPureSkillSource(proposal.source);
   await mkdir(genomeLabRoot, { recursive: true, mode: 0o700 });
@@ -314,17 +558,17 @@ export async function verifyGenomeLabArtifact(
     throw new Error("Genome Lab artifact path is outside the protected candidate namespace.");
   }
   const artifactDirectory = join(stateDirectory, parts[0], parts[1]);
-  const [source, manifestText, observedDigest] = await Promise.all([
-    readFile(join(artifactDirectory, "skill.ts"), "utf8"),
+  const [manifestText, observedDigest] = await Promise.all([
     readFile(join(artifactDirectory, "manifest.json"), "utf8"),
     digestArtifactTree(artifactDirectory),
   ]);
   const manifest = JSON.parse(manifestText) as { kind?: unknown; productionAuthority?: unknown };
-  if (!source.trim()) throw new Error("Genome Lab skill source is empty.");
   if (manifest.productionAuthority !== false) {
     throw new Error("Genome Lab artifacts must explicitly deny candidate production authority.");
   }
   if (manifest.kind === "generated_skill_candidate") {
+    const source = await readFile(join(artifactDirectory, "skill.ts"), "utf8");
+    if (!source.trim()) throw new Error("Genome Lab skill source is empty.");
     const verification = JSON.parse(await readFile(join(artifactDirectory, "verification.json"), "utf8")) as {
       result?: unknown;
       exitCode?: unknown;
@@ -337,6 +581,27 @@ export async function verifyGenomeLabArtifact(
     ) {
       throw new Error("Generated skill candidate lacks a valid kernel verification record.");
     }
+  } else if (manifest.kind === "generated_typescript_program_candidate") {
+    const verification = JSON.parse(await readFile(join(artifactDirectory, "verification.json"), "utf8")) as {
+      result?: unknown;
+      exitCode?: unknown;
+      command?: unknown;
+      networkAuthority?: unknown;
+      filesystemWriteAuthority?: unknown;
+      productionAuthority?: unknown;
+    };
+    if (
+      verification.result !== "PASS" ||
+      verification.exitCode !== 0 ||
+      verification.command !== "kernel:isolated-typescript-program-verification" ||
+      verification.networkAuthority !== false ||
+      verification.filesystemWriteAuthority !== false ||
+      verification.productionAuthority !== false
+    ) {
+      throw new Error("Generated program candidate lacks a valid isolated kernel verification record.");
+    }
+    const projectEntries = await readdir(join(artifactDirectory, "project"));
+    if (projectEntries.length === 0) throw new Error("Genome Lab program source is empty.");
   } else if (manifest.kind !== "skill_scaffold") {
     throw new Error("Genome Lab artifact kind is unsupported.");
   }

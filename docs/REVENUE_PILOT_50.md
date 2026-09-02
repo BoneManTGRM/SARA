@@ -19,6 +19,7 @@ Observable acceptance criteria:
 9. GPT-5.6 Luna is the default paid worker. Gemini 3.8 Flash is a bounded fallback/challenger, never an automatic authority increase.
 10. Every routed call has token, attempt, wall-time, and task-cost ceilings; success and all-route failure both produce durable cost evidence without storing prompts or outputs.
 11. After collected revenue and job-bound owner approval, SARA gathers one anonymous, read-only public GitHub evidence snapshot pinned to an immutable commit; the bounded snapshot is integrity-checked, reused by every role, and collection failure stops before any model call.
+12. Genome Lab accepts either a pure skill or a dependency-free multi-file TypeScript program candidate, validates every path and import, type-checks the complete project, runs its tests without network, child-process, or filesystem-write authority, hashes all source and evidence, and stops at `SHADOW`.
 
 Out of scope for this candidate:
 
@@ -27,6 +28,7 @@ Out of scope for this candidate:
 - giving a worker owner credentials;
 - autonomous outreach, application submission, contracting, collection, refund, merge, deployment, or customer-system access;
 - claiming that a generated skill is production-ready before staged evidence and owner promotion;
+- installing arbitrary dependencies, granting generated programs network or secret access, or letting a candidate merge, deploy, or rewrite SARA;
 - adding a second backend, policy authority, ledger, memory system, or dashboard.
 
 ## Fixed commercial envelope

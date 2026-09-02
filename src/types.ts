@@ -155,12 +155,29 @@ export type SkillTestVector = {
 
 export type SkillCandidateProposal = {
   schemaVersion: 1;
+  candidateKind?: "pure_skill";
   skillName: string;
   summary: string;
   source: string;
   tests: SkillTestVector[];
   limitations: string[];
 };
+
+export type ProgramCandidateFile = {
+  path: string;
+  content: string;
+};
+
+export type ProgramCandidateProposal = {
+  schemaVersion: 1;
+  candidateKind: "typescript_program";
+  programName: string;
+  summary: string;
+  files: ProgramCandidateFile[];
+  limitations: string[];
+};
+
+export type CandidateProposal = SkillCandidateProposal | ProgramCandidateProposal;
 
 export type CandidateGenerator = {
   id: string;
@@ -172,7 +189,7 @@ export type CandidateGenerator = {
     missingCapabilities: string[];
     constitutionDigest: string;
     memoryContext: CandidateMemoryContext;
-  }): Promise<SkillCandidateProposal>;
+  }): Promise<CandidateProposal>;
 };
 
 export type MutationStage = "SANDBOX" | "SHADOW" | "CANARY" | "LIMITED_PRODUCTION" | "BROADER_PRODUCTION";

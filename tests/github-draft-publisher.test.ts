@@ -28,7 +28,59 @@ async function artifact(): Promise<{ directory: string; digest: string }> {
   return { directory, digest: await digestArtifactTree(directory) };
 }
 
+async function programArtifact(): Promise<{ directory: string; digest: string }> {
+  const directory = await mkdtemp(join(tmpdir(), "sara-publisher-program-"));
+  await Promise.all([
+    mkdir(join(directory, "project", "src"), { recursive: true, mode: 0o700 }),
+    mkdir(join(directory, "project", "tests"), { recursive: true, mode: 0o700 }),
+    mkdir(join(directory, "runtime"), { mode: 0o700 }),
+  ]);
+  await Promise.all([
+    writeFile(join(directory, "manifest.json"), `${JSON.stringify({ kind: "generated_typescript_program_candidate", productionAuthority: false })}\n`, { mode: 0o600 }),
+    writeFile(join(directory, "verification.json"), `${JSON.stringify({ result: "PASS", exitCode: 0, command: "kernel:isolated-typescript-program-verification" })}\n`, { mode: 0o600 }),
+    writeFile(join(directory, "project", "src", "index.ts"), "export { double } from './math.ts';\n", { mode: 0o600 }),
+    writeFile(join(directory, "project", "src", "math.ts"), "export const double = (value: number) => value * 2;\n", { mode: 0o600 }),
+    writeFile(join(directory, "project", "tests", "math.test.ts"), "// verified test source\n", { mode: 0o600 }),
+    writeFile(join(directory, "runtime", "private.mjs"), "export const runtimeOnly = true;\n", { mode: 0o600 }),
+  ]);
+  return { directory, digest: await digestArtifactTree(directory) };
+}
+
 describe("GitHub draft PR publisher", () => {
+  it("publishes a verified multi-file program tree but excludes its executable runtime", async () => {
+    const source = await programArtifact();
+    const repository = await mkdtemp(join(tmpdir(), "sara-publisher-repo-"));
+    const run = async (invocation: CommandInvocation): Promise<CommandResult> => {
+      const command = [invocation.file, ...invocation.args].join(" ");
+      if (command === "git status --porcelain") return { exitCode: 0, stdout: "", stderr: "" };
+      if (command.includes("ls-remote")) return { exitCode: 2, stdout: "", stderr: "missing" };
+      if (command === "npm run verify") return { exitCode: 0, stdout: "all checks passed\n", stderr: "" };
+      if (command === "git rev-parse HEAD") return { exitCode: 0, stdout: `${"9".repeat(40)}\n`, stderr: "" };
+      if (command.startsWith("gh pr create")) return { exitCode: 0, stdout: "https://github.com/BoneManTGRM/SARA/pull/31\n", stderr: "" };
+      if (command.startsWith("gh pr view")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({ url: "https://github.com/BoneManTGRM/SARA/pull/31", isDraft: true, state: "OPEN", headRefOid: "9".repeat(40) }),
+          stderr: "",
+        };
+      }
+      return { exitCode: 0, stdout: "", stderr: "" };
+    };
+    const publisher = new GithubDraftPullRequestPublisher({ repository, run });
+    const evidence = await publisher.publish({
+      directiveId: "12f1399e-4d2b-4f64-91b4-20ac93006ec3",
+      candidateDigest: source.digest,
+      artifactDirectory: source.directory,
+      mutationId: "78e6fccc-d230-48cd-9049-8d41d83bc799",
+      jobId: "2c693b5d-5607-4db7-8888-2229f2323c07",
+      stage: "SHADOW",
+    });
+    assert.equal(evidence.verification[0]?.command, "kernel:isolated-typescript-program-verification");
+    const target = join(repository, "generated", "candidates", "12f1399e-4d2b-4f64-91b4-20ac93006ec3");
+    assert.match(await readFile(join(target, "project", "src", "index.ts"), "utf8"), /double/);
+    await assert.rejects(() => readFile(join(target, "runtime", "private.mjs")), /ENOENT/);
+  });
+
   it("copies only verified candidate evidence, verifies the repository, and opens a draft PR", async () => {
     const source = await artifact();
     const repository = await mkdtemp(join(tmpdir(), "sara-publisher-repo-"));
