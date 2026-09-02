@@ -108,4 +108,23 @@ describe("Cloudflare free candidate generator", () => {
     });
     await assert.rejects(() => oversized.generate(input()), /bounded envelope/);
   });
+
+  it("provides the rejected proposal only to one explicitly configured repair request", async () => {
+    const previous = candidate();
+    let requestBody = "";
+    const generator = createCloudflareFreeCandidateGenerator({
+      accountId: ACCOUNT_ID,
+      apiToken: API_TOKEN,
+      workersPlan: "free",
+      repairProposal: previous,
+      async fetcher(_url, init) {
+        requestBody = String(init?.body);
+        return Response.json({ choices: [{ message: { content: JSON.stringify(candidate()) } }] });
+      },
+    });
+    await generator.generate(input());
+    const request = JSON.parse(requestBody) as { messages: Array<{ content: string }> };
+    assert.match(request.messages[1].content, /Previous rejected proposal:/);
+    assert.match(request.messages[1].content, /Opportunity Scorer/);
+  });
 });
