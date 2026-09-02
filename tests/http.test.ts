@@ -12,6 +12,8 @@ import { PILOT_REQUIRED_CAPABILITIES } from "../src/revenue-pilot.ts";
 describe("SARA owner dashboard HTTP boundary", () => {
   const token = "test-owner-token";
   const tokenHash = createHash("sha256").update(token).digest("hex");
+  const bridgeToken = "test-read-only-bridge-token";
+  const bridgeTokenHash = createHash("sha256").update(bridgeToken).digest("hex");
   let directory: string;
   let baseUrl: string;
   let kernel: SaraKernel;
@@ -45,6 +47,7 @@ describe("SARA owner dashboard HTTP boundary", () => {
     }
     server = createSaraServer(kernel, {
       ownerTokenSha256: tokenHash,
+      readOnlyBridgeTokenSha256: bridgeTokenHash,
       runtimeStatus: async () => ({
         worker: { configured: true, running: true, monthlyBudgetUsd: 10 },
         startupProof: { status: "succeeded", accountedCostUsd: 0.001 },
@@ -115,6 +118,42 @@ describe("SARA owner dashboard HTTP boundary", () => {
       "dependency-hygiene-brief",
     ]);
     assert.deepEqual(services.map((service) => service.priceUsd), [149, 79, 99, 79]);
+  });
+
+  it("gives the bridge a read-only catalog without owner authority", async () => {
+    assert.equal((await fetch(`${baseUrl}/api/bridge/catalog`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/bridge/catalog`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })).status, 401);
+
+    const catalogResponse = await fetch(`${baseUrl}/api/bridge/catalog`, {
+      headers: { Authorization: `Bearer ${bridgeToken}` },
+    });
+    assert.equal(catalogResponse.status, 200);
+    const catalog = await catalogResponse.json() as {
+      schemaVersion: number;
+      access: string;
+      tools: Array<{ id: string; status: string }>;
+      services: Array<{ id: string; priceUsd: number }>;
+    };
+    assert.equal(catalog.schemaVersion, 1);
+    assert.equal(catalog.access, "read_only");
+    assert.equal(catalog.tools.find((tool) => tool.id === "luna-worker")?.status, "available");
+    assert.deepEqual(catalog.services.map((service) => service.id), [
+      "public-repository-readiness-snapshot",
+      "documentation-clarity-review",
+      "ci-workflow-readiness-review",
+      "dependency-hygiene-brief",
+    ]);
+
+    assert.equal((await fetch(`${baseUrl}/api/status`, {
+      headers: { Authorization: `Bearer ${bridgeToken}` },
+    })).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/objectives`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${bridgeToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ objective: "must remain unauthorized" }),
+    })).status, 401);
   });
 
   it("rejects unauthenticated promotion and accepts target-bound owner approval", async () => {
