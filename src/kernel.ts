@@ -799,6 +799,7 @@ export class SaraKernel {
     principal: Principal,
     workerId: string,
     leaseSeconds = 300,
+    expected?: { jobId: string; role: RevenuePilotLease["role"] },
   ): Promise<{ job: RevenuePilotJob; lease: RevenuePilotLease }> {
     return this.serializeMutation(async () => {
       await this.authorize(principal, {
@@ -808,10 +809,11 @@ export class SaraKernel {
       });
       const state = await this.state();
       const now = new Date();
-      const job = state.revenuePilotJobs.find((candidate) =>
-        candidate.status === "queued" ||
-        (candidate.status === "running" && candidate.activeLease !== null && Date.parse(candidate.activeLease.expiresAt) <= now.getTime())
-      );
+      const job = state.revenuePilotJobs.find((candidate) => {
+        const available = candidate.status === "queued" ||
+          (candidate.status === "running" && candidate.activeLease !== null && Date.parse(candidate.activeLease.expiresAt) <= now.getTime());
+        return available && (!expected || (candidate.id === expected.jobId && candidate.nextRole === expected.role));
+      });
       if (!job) throw new Error("No revenue pilot role is available for execution.");
       const claimed = claimPilotRole(job, workerId, now, leaseSeconds);
       await this.#store.append("revenue_pilot_snapshot", principal, claimed.job);
@@ -850,7 +852,12 @@ export class SaraKernel {
       maximumTaskCostUsd: number;
       allowGeminiFreeTier: boolean;
       clients: readonly WorkerModelClient[];
-      verificationPassed: boolean | null;
+      verificationPassed: boolean | null | ((outputText: string) => boolean | null);
+      persistOutput?: (output: {
+        outputText: string;
+        evidence: WorkerModelExecutionEvidence;
+        role: RevenuePilotLease["role"];
+      }) => Promise<void>;
     },
   ): Promise<{
     outputText: string;
@@ -913,22 +920,48 @@ export class SaraKernel {
         role: job.activeLease.role,
         outputDigest: error.evidence.failureDigest,
         costUsd: conservativeWholeCentCost,
-        verificationPassed: input.verificationPassed,
+        verificationPassed: typeof input.verificationPassed === "function" ? null : input.verificationPassed,
         completedAt: new Date().toISOString(),
         modelFailure: error.evidence,
         executionFailed: true,
+        failureStage: "model_execution",
       });
       throw new Error("All bounded model routes failed; their conservative cost was recorded and the job stopped.");
     }
     const conservativeWholeCentCost = Math.ceil(
       (execution.evidence.accountedCostUsd - Number.EPSILON) * 100,
     ) / 100;
+    const verificationPassed = typeof input.verificationPassed === "function"
+      ? input.verificationPassed(execution.outputText)
+      : input.verificationPassed;
+    if (input.persistOutput) {
+      try {
+        await input.persistOutput({
+          outputText: execution.outputText,
+          evidence: execution.evidence,
+          role: job.activeLease.role,
+        });
+      } catch {
+        await this.completeRevenuePilotRole(principal, input.jobId, {
+          leaseId: input.leaseId,
+          role: job.activeLease.role,
+          outputDigest: execution.evidence.outputDigest,
+          costUsd: conservativeWholeCentCost,
+          verificationPassed: null,
+          completedAt: new Date().toISOString(),
+          modelExecution: execution.evidence,
+          executionFailed: true,
+          failureStage: "artifact_persistence",
+        });
+        throw new Error("Private artifact persistence failed; model cost was recorded and the job stopped.");
+      }
+    }
     const completed = await this.completeRevenuePilotRole(principal, input.jobId, {
       leaseId: input.leaseId,
       role: job.activeLease.role,
       outputDigest: execution.evidence.outputDigest,
       costUsd: conservativeWholeCentCost,
-      verificationPassed: input.verificationPassed,
+      verificationPassed,
       completedAt: new Date().toISOString(),
       modelExecution: execution.evidence,
     });

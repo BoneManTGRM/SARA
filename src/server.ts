@@ -9,6 +9,16 @@ import type { MutationStage, SkillCandidateProposal } from "./types.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
+export type SaraRuntimeStatus = {
+  worker: unknown;
+  startupProof: unknown;
+};
+
+type ServerOptions = {
+  ownerTokenSha256: string;
+  runtimeStatus?: () => Promise<SaraRuntimeStatus>;
+};
+
 function tokenDigest(token: string): Buffer {
   return createHash("sha256").update(token, "utf8").digest();
 }
@@ -59,6 +69,7 @@ async function handlePublicRequest(
   response: ServerResponse,
   url: URL,
   kernel: SaraKernel,
+  options: ServerOptions,
 ): Promise<boolean> {
   if (request.method === "GET" && url.pathname === "/") {
     response.writeHead(200, {
@@ -77,6 +88,7 @@ async function handlePublicRequest(
       ok: true,
       constitutionVerified: status.constitution.verified,
       emergencyStopped: status.emergencyStopped,
+      workerConfigured: Boolean(options.runtimeStatus),
     });
     return true;
   }
@@ -214,9 +226,14 @@ async function handleAuthenticatedRequest(
   url: URL,
   kernel: SaraKernel,
   owner: OwnerSession,
+  options: ServerOptions,
 ): Promise<void> {
   if (request.method === "GET" && url.pathname === "/api/status") {
-    json(response, 200, await kernel.getStatus());
+    const status = await kernel.getStatus();
+    json(response, 200, {
+      ...status,
+      runtime: options.runtimeStatus ? await options.runtimeStatus() : null,
+    });
     return;
   }
   if (request.method === "POST" && url.pathname === "/api/objectives") {
@@ -269,17 +286,17 @@ async function routeSaraRequest(
   request: IncomingMessage,
   response: ServerResponse,
   kernel: SaraKernel,
-  ownerTokenSha256: string,
+  options: ServerOptions,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
-  if (await handlePublicRequest(request, response, url, kernel)) return;
+  if (await handlePublicRequest(request, response, url, kernel, options)) return;
 
-  const token = authenticatedToken(request, ownerTokenSha256);
+  const token = authenticatedToken(request, options.ownerTokenSha256);
   if (!token) {
     unauthorized(response);
     return;
   }
-  await handleAuthenticatedRequest(request, response, url, kernel, kernel.authenticateOwnerToken(token));
+  await handleAuthenticatedRequest(request, response, url, kernel, kernel.authenticateOwnerToken(token), options);
 }
 
 function handleRequestError(response: ServerResponse, error: unknown): void {
@@ -293,10 +310,10 @@ function handleRequestError(response: ServerResponse, error: unknown): void {
   json(response, 400, { error: (error as Error).message });
 }
 
-export function createSaraServer(kernel: SaraKernel, options: { ownerTokenSha256: string }): Server {
+export function createSaraServer(kernel: SaraKernel, options: ServerOptions): Server {
   return createServer(async (request, response) => {
     try {
-      await routeSaraRequest(request, response, kernel, options.ownerTokenSha256);
+      await routeSaraRequest(request, response, kernel, options);
     } catch (error) {
       handleRequestError(response, error);
     }

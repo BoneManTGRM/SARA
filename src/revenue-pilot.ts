@@ -80,6 +80,7 @@ export type RevenuePilotReceipt = {
   completedAt: string;
   modelExecution?: WorkerModelExecutionEvidence;
   modelFailure?: WorkerModelFailureEvidence;
+  failureStage?: "model_execution" | "artifact_persistence";
 };
 
 export type RevenuePilotJob = {
@@ -339,6 +340,7 @@ export function completeRevenuePilotRole(
     modelExecution?: WorkerModelExecutionEvidence;
     modelFailure?: WorkerModelFailureEvidence;
     executionFailed?: boolean;
+    failureStage?: "model_execution" | "artifact_persistence";
   },
 ): RevenuePilotJob {
   assertMoney(result.costUsd, "costUsd");
@@ -358,7 +360,11 @@ export function completeRevenuePilotRole(
   if (nextCost > job.plan.maximumExecutionCostUsd) {
     throw new RangeError(`The role would exceed the $${job.plan.maximumExecutionCostUsd.toFixed(2)} execution cap.`);
   }
-  if (result.role === "independent_verifier" && typeof result.verificationPassed !== "boolean") {
+  if (
+    result.role === "independent_verifier" &&
+    !result.executionFailed &&
+    typeof result.verificationPassed !== "boolean"
+  ) {
     throw new Error("The independent verifier must provide a pass or fail result.");
   }
   if (
@@ -391,8 +397,20 @@ export function completeRevenuePilotRole(
       throw new Error("The role cost must conservatively account for the routed model execution.");
     }
   }
-  if (Boolean(result.executionFailed) !== Boolean(result.modelFailure)) {
-    throw new Error("A failed routed role requires matching model failure evidence.");
+  if (result.executionFailed && !result.failureStage) {
+    throw new Error("A failed routed role requires a failure stage.");
+  }
+  if (!result.executionFailed && result.failureStage) {
+    throw new Error("A successful routed role cannot contain a failure stage.");
+  }
+  if (result.failureStage === "model_execution" && !result.modelFailure) {
+    throw new Error("A model-execution failure requires matching model failure evidence.");
+  }
+  if (result.failureStage === "artifact_persistence" && !result.modelExecution) {
+    throw new Error("An artifact-persistence failure requires matching model execution evidence.");
+  }
+  if (result.modelFailure && result.failureStage !== "model_execution") {
+    throw new Error("Model failure evidence requires the model-execution failure stage.");
   }
   if (result.modelExecution && result.modelFailure) {
     throw new Error("A routed role cannot contain both success and failure evidence.");
@@ -428,6 +446,7 @@ export function completeRevenuePilotRole(
     completedAt: new Date(completedAt).toISOString(),
     ...(result.modelExecution ? { modelExecution: structuredClone(result.modelExecution) } : {}),
     ...(result.modelFailure ? { modelFailure: structuredClone(result.modelFailure) } : {}),
+    ...(result.failureStage ? { failureStage: result.failureStage } : {}),
   });
   if (!result.executionFailed) completed.completedRoles.push(result.role);
   completed.actualExecutionCostUsd = nextCost;

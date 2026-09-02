@@ -286,4 +286,59 @@ describe("SARA durable revenue pilot kernel", () => {
     assert.equal(audit.includes("SECOND_PRIVATE_PROMPT_MARKER"), false);
     assert.equal(audit.includes("SECRET_PROVIDER_BODY"), false);
   });
+
+  it("records model cost and stops when private artifact persistence fails", async () => {
+    const directory = await stateDirectory();
+    const digest = sha256(OWNER_TOKEN);
+    const kernel = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: digest });
+    const owner = kernel.authenticateOwnerToken(OWNER_TOKEN);
+    await registerPilotCapabilities(kernel);
+    const job = await kernel.createRevenuePilotJob(SARA_PRINCIPAL, opportunity());
+    const revenue = await kernel.recordLedgerEntry(owner, {
+      kind: "revenue",
+      source: "customer",
+      amountUsd: 149,
+      realized: true,
+      recurringMonthly: false,
+      description: `Collected revenue for ${job.id}`,
+      occurredAt: "2026-09-02T00:00:00.000Z",
+    });
+    await kernel.authorizeRevenuePilotJob(owner, job.id, revenue.id, {
+      approvalId: "approve-artifact-failure",
+      action: "contract_commitment",
+      targetId: `revenue-pilot:${job.id}:fulfillment`,
+      approvedAt: "2026-09-02T00:01:00.000Z",
+      ownerId: owner.id,
+    });
+    const claim = await kernel.claimRevenuePilotRole(SARA_PRINCIPAL, "luna-director", 300);
+    const luna: WorkerModelClient = {
+      routeKey: workerModelRouteKey({ provider: "openai", model: "gpt-5.6-luna", billingMode: "paid" }),
+      maximumWallTimeMs: 1_000,
+      async countInputTokens() { return 100; },
+      async execute() {
+        return { outputText: "private output that could not be stored", inputTokens: 100, billableOutputTokens: 50 };
+      },
+    };
+
+    await assert.rejects(() => kernel.runRevenuePilotRoleWithModel(SARA_PRINCIPAL, {
+      jobId: job.id,
+      leaseId: claim.lease.id,
+      prompt: "bounded public prompt",
+      taskKind: "requirements_analysis",
+      dataClassification: "public",
+      maximumTaskCostUsd: 0.05,
+      allowGeminiFreeTier: false,
+      clients: [luna],
+      verificationPassed: null,
+      async persistOutput() {
+        throw new Error("PRIVATE_FILESYSTEM_ERROR");
+      },
+    }), /artifact persistence failed/i);
+
+    const failed = (await kernel.getStatus()).revenuePilotJobs[0];
+    assert.equal(failed.status, "failed");
+    assert.equal(failed.actualExecutionCostUsd, 0.01);
+    assert.equal(failed.receipts.at(-1)?.failureStage, "artifact_persistence");
+    assert.equal(JSON.stringify(await kernel.inspectAudit()).includes("PRIVATE_FILESYSTEM_ERROR"), false);
+  });
 });
