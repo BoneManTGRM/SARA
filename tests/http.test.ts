@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
 import { createSaraServer } from "../src/server.ts";
+import { PILOT_REQUIRED_CAPABILITIES } from "../src/revenue-pilot.ts";
 
 describe("SARA owner dashboard HTTP boundary", () => {
   const token = "test-owner-token";
@@ -17,6 +18,7 @@ describe("SARA owner dashboard HTTP boundary", () => {
   let server: ReturnType<typeof createSaraServer>;
   let jobId: string;
   let mutationId: string;
+  let revenuePilotJobId: string;
 
   before(async () => {
     directory = await mkdtemp(join(tmpdir(), "sara-http-"));
@@ -32,6 +34,15 @@ describe("SARA owner dashboard HTTP boundary", () => {
     const execution = await kernel.executeDeterministicSkillScaffold(SARA_PRINCIPAL, job.id);
     mutationId = execution.mutation.id;
     await kernel.promoteMutation(SARA_PRINCIPAL, mutationId, "SHADOW");
+    for (const capabilityId of PILOT_REQUIRED_CAPABILITIES) {
+      await kernel.registerCapability(SARA_PRINCIPAL, {
+        id: capabilityId,
+        name: capabilityId,
+        status: "available",
+        evidence: [`http-test:${capabilityId}`],
+        limitations: ["Public-repository readiness pilot only."],
+      });
+    }
     server = createSaraServer(kernel, { ownerTokenSha256: tokenHash });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -201,6 +212,75 @@ describe("SARA owner dashboard HTTP boundary", () => {
     );
   });
 
+  it("creates and payment-authorizes a revenue pilot only behind owner authentication", async () => {
+    const opportunity = {
+      opportunityId: "http-public-opportunity-1",
+      sourceUrl: "https://github.com/example/project/issues/123",
+      sourceAllowsAutomatedDiscovery: true,
+      discoveredFromPublicSource: true,
+      repoUrl: "https://github.com/example/project",
+      repositoryIsPublic: true,
+      repositoryOwnerPermissionConfirmed: true,
+      requiresPrivateAccess: false,
+      containsRegulatedOrPrivateData: false,
+      requestsProductionChanges: false,
+      requestsExploitValidation: false,
+      primaryGoal: "release_readiness",
+      customerBudgetUsd: 149,
+      desiredTurnaroundDays: 3,
+      recentCommitDays: 4,
+    };
+    assert.equal((await fetch(`${baseUrl}/api/revenue-pilot/opportunities`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(opportunity),
+    })).status, 401);
+    const createdResponse = await fetch(`${baseUrl}/api/revenue-pilot/opportunities`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(opportunity),
+    });
+    assert.equal(createdResponse.status, 201);
+    const created = await createdResponse.json() as { id: string; status: string };
+    revenuePilotJobId = created.id;
+    assert.equal(created.status, "offer_ready");
+
+    const paymentReferenceDigest = "e".repeat(64);
+    const authorizedResponse = await fetch(`${baseUrl}/api/revenue-pilot/jobs/${revenuePilotJobId}/authorize`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        collectedRevenueUsd: 149,
+        occurredAt: "2026-09-02T00:00:00.000Z",
+        paymentReferenceDigest,
+      }),
+    });
+    assert.equal(authorizedResponse.status, 200);
+    const authorized = await authorizedResponse.json() as { status: string; revenueEvidenceId: string };
+    assert.equal(authorized.status, "queued");
+    assert.match(authorized.revenueEvidenceId, /^[0-9a-f-]{36}$/i);
+
+    const retryResponse = await fetch(`${baseUrl}/api/revenue-pilot/jobs/${revenuePilotJobId}/authorize`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        collectedRevenueUsd: 149,
+        occurredAt: "2026-09-02T00:00:00.000Z",
+        paymentReferenceDigest,
+      }),
+    });
+    assert.equal(retryResponse.status, 200);
+    assert.equal((await retryResponse.json() as { revenueEvidenceId: string }).revenueEvidenceId, authorized.revenueEvidenceId);
+
+    const status = await fetch(`${baseUrl}/api/status`, { headers: { Authorization: `Bearer ${token}` } });
+    const ownerState = await status.json() as {
+      revenuePilotJobs: Array<{ id: string; status: string }>;
+      realizedProfit: { collectedRevenueUsd: number };
+    };
+    assert.equal(ownerState.revenuePilotJobs.find((job) => job.id === revenuePilotJobId)?.status, "queued");
+    assert.equal(ownerState.realizedProfit.collectedRevenueUsd, 149);
+  });
+
   it("freezes new external work while preserving health and owner reads", async () => {
     const stopped = await fetch(`${baseUrl}/api/emergency-stop`, {
       method: "POST",
@@ -220,6 +300,19 @@ describe("SARA owner dashboard HTTP boundary", () => {
       }),
     });
     assert.equal(blocked.status, 423);
+    await assert.rejects(
+      () => kernel.claimRevenuePilotRole(SARA_PRINCIPAL, "stopped-worker"),
+      (error: unknown) =>
+        error instanceof Error &&
+        "decision" in error &&
+        (error as { decision: { code: string } }).decision.code === "EMERGENCY_STOP",
+    );
+    const blockedOpportunity = await fetch(`${baseUrl}/api/revenue-pilot/opportunities`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ opportunityId: "blocked-opportunity" }),
+    });
+    assert.equal(blockedOpportunity.status, 423);
     assert.equal((await fetch(`${baseUrl}/health`)).status, 200);
     assert.equal((await fetch(`${baseUrl}/api/status`, { headers: { Authorization: `Bearer ${token}` } })).status, 200);
   });
