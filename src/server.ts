@@ -4,6 +4,7 @@ import { DASHBOARD_HTML } from "./dashboard.ts";
 import { compileExecutorHandoff } from "./handoff.ts";
 import { SaraKernel } from "./kernel.ts";
 import { PolicyDeniedError } from "./policy.ts";
+import type { RevenuePilotInput } from "./revenue-pilot.ts";
 import type { MutationStage, SkillCandidateProposal } from "./types.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -102,6 +103,56 @@ async function handleEmergencyStop(request: IncomingMessage, response: ServerRes
   json(response, 200, { active: body.active });
 }
 
+async function handleRevenuePilotOpportunity(
+  request: IncomingMessage,
+  response: ServerResponse,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+): Promise<void> {
+  const body = await readJson(request);
+  const input: RevenuePilotInput = {
+    opportunityId: String(body.opportunityId ?? ""),
+    sourceUrl: String(body.sourceUrl ?? ""),
+    sourceAllowsAutomatedDiscovery: body.sourceAllowsAutomatedDiscovery === true,
+    discoveredFromPublicSource: body.discoveredFromPublicSource === true,
+    repoUrl: String(body.repoUrl ?? ""),
+    repositoryIsPublic: body.repositoryIsPublic === true,
+    repositoryOwnerPermissionConfirmed: body.repositoryOwnerPermissionConfirmed === true,
+    requiresPrivateAccess: body.requiresPrivateAccess === true,
+    containsRegulatedOrPrivateData: body.containsRegulatedOrPrivateData === true,
+    requestsProductionChanges: body.requestsProductionChanges === true,
+    requestsExploitValidation: body.requestsExploitValidation === true,
+    primaryGoal: String(body.primaryGoal ?? "other") as RevenuePilotInput["primaryGoal"],
+    customerBudgetUsd: Number(body.customerBudgetUsd),
+    desiredTurnaroundDays: Number(body.desiredTurnaroundDays),
+    recentCommitDays: body.recentCommitDays === null ? null : Number(body.recentCommitDays),
+  };
+  json(response, 201, await kernel.createRevenuePilotJob(owner, input));
+}
+
+async function handleRevenuePilotAuthorization(
+  request: IncomingMessage,
+  response: ServerResponse,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+  jobId: string,
+): Promise<void> {
+  const body = await readJson(request);
+  const targetId = `revenue-pilot:${jobId}:fulfillment`;
+  const approval = {
+    approvalId: randomUUID(),
+    action: "contract_commitment" as const,
+    targetId,
+    approvedAt: new Date().toISOString(),
+    ownerId: owner.id,
+  };
+  json(response, 200, await kernel.authorizeRevenuePilotWithCollectedRevenue(owner, jobId, {
+    amountUsd: Number(body.collectedRevenueUsd),
+    occurredAt: String(body.occurredAt ?? ""),
+    paymentReferenceDigest: String(body.paymentReferenceDigest ?? ""),
+  }, approval));
+}
+
 async function handleJobHandoff(response: ServerResponse, kernel: SaraKernel, jobId: string): Promise<void> {
   const status = await kernel.getStatus();
   const job = status.jobs.find((candidate) => candidate.id === jobId);
@@ -174,6 +225,21 @@ async function handleAuthenticatedRequest(
   }
   if (request.method === "POST" && url.pathname === "/api/emergency-stop") {
     await handleEmergencyStop(request, response, kernel, owner);
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/revenue-pilot/opportunities") {
+    await handleRevenuePilotOpportunity(request, response, kernel, owner);
+    return;
+  }
+  const revenueAuthorizationMatch = url.pathname.match(/^\/api\/revenue-pilot\/jobs\/([^/]+)\/authorize$/);
+  if (request.method === "POST" && revenueAuthorizationMatch) {
+    await handleRevenuePilotAuthorization(
+      request,
+      response,
+      kernel,
+      owner,
+      decodeURIComponent(revenueAuthorizationMatch[1]),
+    );
     return;
   }
   const handoffMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/handoff$/);

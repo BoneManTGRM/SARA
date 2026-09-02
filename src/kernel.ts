@@ -20,6 +20,25 @@ import {
   type ProfitWaterfall,
 } from "./economics.ts";
 import { evaluatePolicy, PolicyDeniedError } from "./policy.ts";
+import {
+  executeWorkerModelTask,
+  planWorkerModelTask,
+  WorkerModelExecutionError,
+  workerModelRouteKey,
+  type WorkerDataClassification,
+  type WorkerModelClient,
+  type WorkerModelExecutionEvidence,
+  type WorkerTaskKind,
+} from "./model-router.ts";
+import {
+  authorizeRevenuePilot,
+  claimRevenuePilotRole as claimPilotRole,
+  completeRevenuePilotRole as completePilotRole,
+  createRevenuePilotJob as createPilotJob,
+  type RevenuePilotInput,
+  type RevenuePilotJob,
+  type RevenuePilotLease,
+} from "./revenue-pilot.ts";
 import { EventStoreIntegrityError, type StoredEvent } from "./store.ts";
 import {
   provisionalFamilyScenarioTarget,
@@ -335,6 +354,7 @@ type KernelState = {
   capabilities: Capability[];
   jobs: Job[];
   mutations: Mutation[];
+  revenuePilotJobs: RevenuePilotJob[];
   events: StoredEvent[];
 };
 
@@ -349,6 +369,7 @@ export type SaraStatus = {
   capabilities: Capability[];
   jobs: Job[];
   mutations: Mutation[];
+  revenuePilotJobs: RevenuePilotJob[];
   audit: { eventCount: number; headHash: string | null };
 };
 
@@ -464,6 +485,7 @@ export class SaraKernel {
     const capabilityMap = new Map<string, Capability>();
     const jobMap = new Map<string, Job>();
     const mutationMap = new Map<string, Mutation>();
+    const revenuePilotMap = new Map<string, RevenuePilotJob>();
     let emergencyStopped = false;
 
     for (const event of events) {
@@ -504,6 +526,10 @@ export class SaraKernel {
         if (!mutation) throw new Error(`Audit event references missing mutation ${data.mutationId}.`);
         mutation.stage = data.stage;
       }
+      if (event.type === "revenue_pilot_snapshot") {
+        const job = event.data as RevenuePilotJob;
+        revenuePilotMap.set(job.id, structuredClone(job));
+      }
       if (event.type === "emergency_stop_changed") {
         emergencyStopped = (event.data as { active: boolean }).active;
       }
@@ -516,6 +542,7 @@ export class SaraKernel {
       capabilities: [...capabilityMap.values()],
       jobs: [...jobMap.values()],
       mutations: [...mutationMap.values()],
+      revenuePilotJobs: [...revenuePilotMap.values()],
       events,
     };
   }
@@ -599,9 +626,313 @@ export class SaraKernel {
     return this.serializeMutation(async () => {
       await this.authorize(principal, { action: "sandbox_development", targetId: capability.id, external: false });
       if (!capability.id.trim() || !capability.name.trim()) throw new Error("Capability id and name are required.");
+      if (capability.status === "available" && capability.evidence.length === 0) {
+        throw new Error("An available capability requires verification evidence.");
+      }
       await this.#store.append("capability_registered", principal, capability);
       return capability;
     });
+  }
+
+  createRevenuePilotJob(principal: Principal, input: RevenuePilotInput): Promise<RevenuePilotJob> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, {
+        action: "external_read",
+        targetId: `revenue-pilot-opportunity:${input.opportunityId}`,
+        external: true,
+      });
+      const state = await this.state();
+      const availableCapabilities = state.capabilities
+        .filter((capability) => capability.status === "available")
+        .map((capability) => capability.id);
+      const existing = state.revenuePilotJobs.find(
+        (job) => job.plan.opportunityId === input.opportunityId.trim(),
+      );
+      if (existing) {
+        const isCapabilityReview =
+          existing.status === "owner_review" &&
+          existing.revenueEvidenceId === null &&
+          existing.completedRoles.length === 2;
+        if (!isCapabilityReview) return structuredClone(existing);
+        const candidate = createPilotJob(input, availableCapabilities);
+        const refreshed: RevenuePilotJob = {
+          ...structuredClone(existing),
+          input: candidate.input,
+          plan: candidate.plan,
+          completedRoles: candidate.completedRoles,
+          receipts: candidate.receipts,
+          status: candidate.status,
+          updatedAt: new Date().toISOString(),
+        };
+        await this.#store.append("revenue_pilot_snapshot", principal, refreshed);
+        return refreshed;
+      }
+      const job = createPilotJob(input, availableCapabilities);
+      for (const learning of job.plan.decision === "reject" ? [] : job.plan.learningObjectives) {
+        const alreadyQueued = state.jobs.some(
+          (candidate) =>
+            candidate.workCard.requiredCapabilities.includes(learning.capabilityId) &&
+            candidate.status !== "failed",
+        );
+        if (alreadyQueued) continue;
+        const workCard = compileWorkCard({
+          objective: learning.objective,
+          expectedOwnerValue: job.plan.priceUsd,
+          requiredCapabilities: [learning.capabilityId],
+          acceptanceCriteria: learning.acceptanceCriteria,
+          maximumBudgetUsd: learning.maximumBudgetUsd,
+          availableCapabilities: state.capabilities,
+          prohibitedActions: [...this.#constitution.protectedActions],
+        });
+        const learningJob: Job = {
+          id: randomUUID(),
+          kind: "self_development",
+          status: "authorized",
+          workCard,
+        };
+        await this.#store.append("job_created", principal, learningJob);
+      }
+      await this.#store.append("revenue_pilot_snapshot", principal, job);
+      return structuredClone(job);
+    });
+  }
+
+  authorizeRevenuePilotJob(
+    principal: Principal,
+    jobId: string,
+    revenueEvidenceId: string,
+    approval: OwnerApproval,
+  ): Promise<RevenuePilotJob> {
+    return this.serializeMutation(async () => {
+      const targetId = `revenue-pilot:${jobId}:fulfillment`;
+      await this.authorize(principal, {
+        action: "contract_commitment",
+        targetId,
+        external: true,
+        approval,
+      });
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new Error(`Revenue pilot ${jobId} does not exist.`);
+      if (state.revenuePilotJobs.some((candidate) => candidate.id !== jobId && candidate.revenueEvidenceId === revenueEvidenceId)) {
+        throw new Error("Collected revenue evidence is already bound to another revenue pilot.");
+      }
+      const revenue = state.ledger.find((entry) => entry.id === revenueEvidenceId);
+      if (
+        !revenue ||
+        revenue.kind !== "revenue" ||
+        revenue.source !== "customer" ||
+        !revenue.realized ||
+        !revenue.description.includes(jobId)
+      ) {
+        throw new Error("Exact realized customer revenue evidence for this pilot is required.");
+      }
+      const authorized = authorizeRevenuePilot(job, {
+        collectedRevenueUsd: revenue.amountUsd,
+        revenueEvidenceId: revenue.id,
+        ownerApprovalTarget: approval.targetId,
+      });
+      await this.#store.append("revenue_pilot_snapshot", principal, authorized);
+      return structuredClone(authorized);
+    });
+  }
+
+  authorizeRevenuePilotWithCollectedRevenue(
+    principal: Principal,
+    jobId: string,
+    payment: { amountUsd: number; occurredAt: string; paymentReferenceDigest: string },
+    approval: OwnerApproval,
+  ): Promise<RevenuePilotJob> {
+    return this.serializeMutation(async () => {
+      assertMoney(payment.amountUsd, "Collected revenue");
+      if (!SHA256_HEX.test(payment.paymentReferenceDigest) || /^0{64}$/i.test(payment.paymentReferenceDigest)) {
+        throw new Error("A non-zero SHA-256 payment reference digest is required.");
+      }
+      if (!Number.isFinite(Date.parse(payment.occurredAt))) throw new Error("Payment occurredAt must be an ISO timestamp.");
+      const targetId = `revenue-pilot:${jobId}:fulfillment`;
+      await this.authorize(principal, {
+        action: "contract_commitment",
+        targetId,
+        external: true,
+        approval,
+      });
+      const ledgerTarget = `ledger:revenue:revenue-pilot:${jobId}:${payment.paymentReferenceDigest.toLowerCase()}`;
+      await this.authorize(principal, {
+        action: "record_realized_financial_event",
+        targetId: ledgerTarget,
+        external: false,
+      });
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new Error(`Revenue pilot ${jobId} does not exist.`);
+      if (job.revenueEvidenceId) return structuredClone(job);
+      if (job.status !== "offer_ready") throw new Error("Only an offer-ready revenue pilot can be authorized.");
+      if (payment.amountUsd < job.plan.priceUsd) {
+        throw new Error(`At least $${job.plan.priceUsd.toFixed(2)} in collected revenue is required before fulfillment.`);
+      }
+      const description = `Revenue pilot ${jobId}; payment evidence ${payment.paymentReferenceDigest.toLowerCase()}`;
+      if (state.ledger.some((entry) => entry.description === description)) {
+        throw new Error("The payment reference is already recorded.");
+      }
+      const revenue: LedgerEntry = {
+        id: randomUUID(),
+        kind: "revenue",
+        source: "customer",
+        amountUsd: payment.amountUsd,
+        realized: true,
+        recurringMonthly: false,
+        description,
+        occurredAt: new Date(payment.occurredAt).toISOString(),
+      };
+      const authorized = authorizeRevenuePilot(job, {
+        collectedRevenueUsd: revenue.amountUsd,
+        revenueEvidenceId: revenue.id,
+        ownerApprovalTarget: approval.targetId,
+      });
+      await this.#store.append("ledger_recorded", principal, revenue);
+      await this.#store.append("revenue_pilot_snapshot", principal, authorized);
+      return structuredClone(authorized);
+    });
+  }
+
+  claimRevenuePilotRole(
+    principal: Principal,
+    workerId: string,
+    leaseSeconds = 300,
+  ): Promise<{ job: RevenuePilotJob; lease: RevenuePilotLease }> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, {
+        action: "sandbox_development",
+        targetId: `revenue-pilot-worker:${workerId}`,
+        external: false,
+      });
+      const state = await this.state();
+      const now = new Date();
+      const job = state.revenuePilotJobs.find((candidate) =>
+        candidate.status === "queued" ||
+        (candidate.status === "running" && candidate.activeLease !== null && Date.parse(candidate.activeLease.expiresAt) <= now.getTime())
+      );
+      if (!job) throw new Error("No revenue pilot role is available for execution.");
+      const claimed = claimPilotRole(job, workerId, now, leaseSeconds);
+      await this.#store.append("revenue_pilot_snapshot", principal, claimed.job);
+      return structuredClone(claimed);
+    });
+  }
+
+  completeRevenuePilotRole(
+    principal: Principal,
+    jobId: string,
+    result: Parameters<typeof completePilotRole>[1],
+  ): Promise<RevenuePilotJob> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, {
+        action: "sandbox_development",
+        targetId: `revenue-pilot:${jobId}:${result.role}`,
+        external: false,
+      });
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new Error(`Revenue pilot ${jobId} does not exist.`);
+      const completed = completePilotRole(job, result);
+      await this.#store.append("revenue_pilot_snapshot", principal, completed);
+      return structuredClone(completed);
+    });
+  }
+
+  async runRevenuePilotRoleWithModel(
+    principal: Principal,
+    input: {
+      jobId: string;
+      leaseId: string;
+      prompt: string;
+      taskKind: WorkerTaskKind;
+      dataClassification: WorkerDataClassification;
+      maximumTaskCostUsd: number;
+      allowGeminiFreeTier: boolean;
+      clients: readonly WorkerModelClient[];
+      verificationPassed: boolean | null;
+    },
+  ): Promise<{
+    outputText: string;
+    evidence: WorkerModelExecutionEvidence;
+    job: RevenuePilotJob;
+  }> {
+    await this.authorize(principal, {
+      action: "external_write",
+      targetId: `revenue-pilot:${input.jobId}:model-worker`,
+      external: true,
+    });
+    const now = new Date();
+    const state = await this.state();
+    const job = state.revenuePilotJobs.find((candidate) => candidate.id === input.jobId);
+    if (!job) throw new Error(`Revenue pilot ${input.jobId} does not exist.`);
+    if (job.status !== "running" || !job.activeLease || job.activeLease.id !== input.leaseId) {
+      throw new Error("The routed model execution does not match an active role lease.");
+    }
+    const remainingJobBudgetUsd = Math.round(
+      (job.plan.maximumExecutionCostUsd - job.actualExecutionCostUsd) * 100,
+    ) / 100;
+    if (input.maximumTaskCostUsd > remainingJobBudgetUsd) {
+      throw new RangeError("The model task cost cap exceeds the revenue pilot's remaining execution budget.");
+    }
+    const modelPlan = planWorkerModelTask({
+      taskKind: input.taskKind,
+      dataClassification: input.dataClassification,
+      maximumTaskCostUsd: input.maximumTaskCostUsd,
+      allowGeminiFreeTier: input.allowGeminiFreeTier,
+      pricedAt: now,
+    });
+    const clients = new Map(input.clients.map((client) => [client.routeKey, client]));
+    const maximumWorkerWallTimeMs = modelPlan.routes.reduce((total, route) => {
+      const client = clients.get(workerModelRouteKey(route));
+      if (!client) return total;
+      if (
+        !Number.isInteger(client.maximumWallTimeMs) ||
+        client.maximumWallTimeMs < 100 ||
+        client.maximumWallTimeMs > 120_000
+      ) {
+        throw new RangeError("Model clients must declare a wall-time limit between 100 and 120000 milliseconds.");
+      }
+      return total + client.maximumWallTimeMs;
+    }, 0);
+    const leaseRemainingMs = Date.parse(job.activeLease.expiresAt) - now.getTime();
+    if (leaseRemainingMs < maximumWorkerWallTimeMs + 5_000) {
+      throw new Error("The active role lease is too short for the bounded model route.");
+    }
+
+    let execution;
+    try {
+      execution = await executeWorkerModelTask(modelPlan, input.prompt, input.clients);
+    } catch (error) {
+      if (!(error instanceof WorkerModelExecutionError)) throw error;
+      const conservativeWholeCentCost = Math.ceil(
+        (error.evidence.accountedCostUsd - Number.EPSILON) * 100,
+      ) / 100;
+      await this.completeRevenuePilotRole(principal, input.jobId, {
+        leaseId: input.leaseId,
+        role: job.activeLease.role,
+        outputDigest: error.evidence.failureDigest,
+        costUsd: conservativeWholeCentCost,
+        verificationPassed: input.verificationPassed,
+        completedAt: new Date().toISOString(),
+        modelFailure: error.evidence,
+        executionFailed: true,
+      });
+      throw new Error("All bounded model routes failed; their conservative cost was recorded and the job stopped.");
+    }
+    const conservativeWholeCentCost = Math.ceil(
+      (execution.evidence.accountedCostUsd - Number.EPSILON) * 100,
+    ) / 100;
+    const completed = await this.completeRevenuePilotRole(principal, input.jobId, {
+      leaseId: input.leaseId,
+      role: job.activeLease.role,
+      outputDigest: execution.evidence.outputDigest,
+      costUsd: conservativeWholeCentCost,
+      verificationPassed: input.verificationPassed,
+      completedAt: new Date().toISOString(),
+      modelExecution: execution.evidence,
+    });
+    return { outputText: execution.outputText, evidence: execution.evidence, job: completed };
   }
 
   createSelfDevelopmentJob(
@@ -1026,6 +1357,7 @@ export class SaraKernel {
       capabilities: state.capabilities,
       jobs: state.jobs,
       mutations: state.mutations,
+      revenuePilotJobs: state.revenuePilotJobs,
       audit: { eventCount: state.events.length, headHash: state.events.at(-1)?.hash ?? null },
     };
   }
