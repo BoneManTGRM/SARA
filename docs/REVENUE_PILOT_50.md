@@ -1,6 +1,6 @@
 # SARA $50 revenue pilot
 
-Status: implementation candidate. It introduces no provider commitment, deployment, account, credential, or recurring charge.
+Status: CANARY runtime candidate. Activation requires the provider and deployment approvals in this work card.
 
 ## Work card
 
@@ -61,7 +61,7 @@ The router tries `gpt-5.6-luna` first for every current workload because its pai
 
 Each task is preflighted against a fixed input ceiling, output ceiling, declared client wall time, remaining lease duration, whole-cent task allowance, and the job's remaining `$3` cap. Failed calls are charged conservatively at the planned worst case. Durable receipts contain provider, model, billing mode, reasoning level, token counts, cost, outcomes, and a digest—not prompt text, generated output, credentials, or provider error bodies.
 
-The current implementation includes bounded adapters for OpenAI's Responses API and Google's Interactions API. It does not activate either account or read credentials by itself. Provider project limits remain the outer circuit breaker.
+The current implementation includes bounded adapters for OpenAI's Responses API and Google's Interactions API. When `OPENAI_API_KEY` is explicitly configured, the persistent operator wakes only for a collected-revenue job with target-bound owner fulfillment approval. It runs one logical role at a time, saves each private output to durable storage before advancing the job, uses a different worker identity for verification, and stops the final package at owner review. Provider project limits remain the outer circuit breaker.
 
 ## Skill learning
 
@@ -81,7 +81,7 @@ Before the loop can perform real customer work, the owner must provide all of th
 1. Approve the exact provider commitments and hard limits. The Luna-first starting allocation is Railway `$10`, OpenAI `$10`, contingency `$5`, and uncommitted reserve `$25`. Gemini paid spend starts at `$0` until measured results justify it.
 2. Create a dedicated owner-controlled OpenAI API project and credential with a `$10` hard limit. Add a Gemini credential only for the explicitly approved public-data fallback or later paid challenger evaluation.
 3. Create or select a dedicated SARA Railway project, attach durable storage, set Railway's project hard limit, and keep the service private unless an authenticated ingress is deliberately approved.
-4. Set `SARA_OWNER_TOKEN_SHA256`, `SARA_STATE_DIRECTORY`, `SARA_HOST=0.0.0.0`, and the separately managed `OPENAI_API_KEY` through the provider secret/configuration interface. Set `GEMINI_API_KEY` only if the fallback is enabled. Never commit a token, API key, or plaintext owner credential.
+4. Set `SARA_OWNER_TOKEN_SHA256`, `SARA_STATE_DIRECTORY`, `SARA_HOST=0.0.0.0`, `SARA_MONTHLY_MODEL_BUDGET_USD=10`, and the separately managed `OPENAI_API_KEY` through the provider secret/configuration interface. `SARA_LIVE_PROOF_ON_START=true` authorizes one persisted, fail-closed connectivity proof of no more than `$0.01`; leave it unset for normal deployments. Set `GEMINI_API_KEY` only if the fallback is enabled. Never commit a token, API key, or plaintext owner credential.
 5. Verify and promote each required capability through the existing staged mutation path.
 6. Bind an owner-controlled business email and payment destination under a separate mandate. Twilio or another messaging provider is optional and should remain disabled until a real service needs it.
 

@@ -43,7 +43,13 @@ describe("SARA owner dashboard HTTP boundary", () => {
         limitations: ["Public-repository readiness pilot only."],
       });
     }
-    server = createSaraServer(kernel, { ownerTokenSha256: tokenHash });
+    server = createSaraServer(kernel, {
+      ownerTokenSha256: tokenHash,
+      runtimeStatus: async () => ({
+        worker: { configured: true, running: true, monthlyBudgetUsd: 10 },
+        startupProof: { status: "succeeded", accountedCostUsd: 0.001 },
+      }),
+    });
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
       server.listen(0, "127.0.0.1", resolve);
@@ -77,9 +83,13 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.match(home.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     const health = await fetch(`${baseUrl}/health`);
     assert.equal(health.status, 200);
-    assert.equal((await health.json() as { constitutionVerified: boolean }).constitutionVerified, true);
+    const publicHealth = await health.json() as { constitutionVerified: boolean; workerConfigured: boolean };
+    assert.equal(publicHealth.constitutionVerified, true);
+    assert.equal(publicHealth.workerConfigured, true);
     assert.equal((await fetch(`${baseUrl}/api/status`)).status, 401);
-    assert.equal((await fetch(`${baseUrl}/api/status`, { headers: { Authorization: `Bearer ${token}` } })).status, 200);
+    const ownerStatus = await fetch(`${baseUrl}/api/status`, { headers: { Authorization: `Bearer ${token}` } });
+    assert.equal(ownerStatus.status, 200);
+    assert.equal((await ownerStatus.json() as { runtime: { startupProof: { status: string } } }).runtime.startupProof.status, "succeeded");
   });
 
   it("rejects unauthenticated promotion and accepts target-bound owner approval", async () => {
