@@ -18,6 +18,7 @@ Observable acceptance criteria:
 8. The constitutional emergency stop freezes discovery and worker mutations.
 9. GPT-5.6 Luna is the default paid worker. Gemini 3.8 Flash is a bounded fallback/challenger, never an automatic authority increase.
 10. Every routed call has token, attempt, wall-time, and task-cost ceilings; success and all-route failure both produce durable cost evidence without storing prompts or outputs.
+11. After collected revenue and job-bound owner approval, SARA gathers one anonymous, read-only public GitHub evidence snapshot pinned to an immutable commit; the bounded snapshot is integrity-checked, reused by every role, and collection failure stops before any model call.
 
 Out of scope for this candidate:
 
@@ -61,7 +62,7 @@ The router tries `gpt-5.6-luna` first for every current workload because its pai
 
 Each task is preflighted against a fixed input ceiling, output ceiling, declared client wall time, remaining lease duration, whole-cent task allowance, and the job's remaining `$3` cap. Failed calls are charged conservatively at the planned worst case. Durable receipts contain provider, model, billing mode, reasoning level, token counts, cost, outcomes, and a digest—not prompt text, generated output, credentials, or provider error bodies.
 
-The current implementation includes bounded adapters for OpenAI's Responses API and Google's Interactions API. When `OPENAI_API_KEY` is explicitly configured, the persistent operator wakes only for a collected-revenue job with target-bound owner fulfillment approval. It runs one logical role at a time, saves each private output to durable storage before advancing the job, uses a different worker identity for verification, and stops the final package at owner review. Provider project limits remain the outer circuit breaker.
+The current implementation includes bounded adapters for OpenAI's Responses API and Google's Interactions API. When `OPENAI_API_KEY` is explicitly configured, the persistent operator wakes only for a collected-revenue job with target-bound owner fulfillment approval. It gathers a credential-free GitHub inventory and a deliberately small set of high-value public files, pins all evidence to the default branch's exact commit, and passes one typed evidence packet through every logical role. It runs one logical role at a time, saves each private output to durable storage before advancing the job, uses a different worker identity for verification, and stops the final package at owner review. Provider project limits remain the outer circuit breaker.
 
 ## Skill learning
 

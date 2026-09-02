@@ -44,7 +44,7 @@ const EXCLUDED_ACTIVITIES = [
   "Legal, compliance, warranty, or certification claims",
 ] as const;
 
-function normalizePublicGitHubRepository(value: string): string | null {
+export function normalizePublicGitHubRepository(value: string): string | null {
   try {
     const url = new URL(value);
     const parts = url.pathname.split("/").filter(Boolean);
