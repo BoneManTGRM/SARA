@@ -159,6 +159,7 @@ describe("Cloudflare free candidate generator", () => {
       apiToken: API_TOKEN,
       workersPlan: "free",
       repairProposal: previous,
+      repairFeedback: 'Behavioral verification mismatches: [{"name":"strong","expected":"{\\"score\\":90}","actual":"{\\"score\\":85}"}]',
       async fetcher(_url, init) {
         requestBody = String(init?.body);
         return Response.json({ choices: [{ message: { content: JSON.stringify(candidate()) } }] });
@@ -168,5 +169,7 @@ describe("Cloudflare free candidate generator", () => {
     const request = JSON.parse(requestBody) as { messages: Array<{ content: string }> };
     assert.match(request.messages[1].content, /Previous rejected proposal:/);
     assert.match(request.messages[1].content, /Opportunity Scorer/);
+    assert.match(request.messages[1].content, /Bounded independent verifier feedback:/);
+    assert.match(request.messages[1].content, /actual.*score.*85/);
   });
 });

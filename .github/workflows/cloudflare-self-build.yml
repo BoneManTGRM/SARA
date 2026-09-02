@@ -15,7 +15,7 @@ on:
   push:
     branches: [main]
     paths:
-      - .github/sara/one-shot-opportunity-to-offer-v2
+      - .github/sara/one-shot-opportunity-to-offer-v3
 
 permissions:
   contents: write

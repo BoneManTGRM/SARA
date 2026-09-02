@@ -1,0 +1,7 @@
+schemaVersion: 1
+authorization: owner-approved-public-shadow-draft
+maximumCostUsd: 0
+maximumModelAttempts: 2
+productionAuthority: false
+purpose: one-shot-opportunity-to-offer-compiler
+failureRepair: exact-bounded-behavioral-mismatch-feedback

@@ -45,7 +45,14 @@ await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
 
 const kernel = await SaraKernel.boot({ stateDirectory });
 let previousProposal: SkillCandidateProposal | undefined;
+let repairFeedback: string | undefined;
 let candidate: Omit<CandidatePublication, "directiveId"> | undefined;
+
+function boundedVerifierFeedback(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/Behavioral verification mismatches: [^\n\r]*/u);
+  return (match?.[0] ?? "Independent isolated verification rejected at least one behavioral vector.").slice(0, 8_192);
+}
 
 for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
   const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
@@ -65,6 +72,7 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     apiToken: required("CLOUDFLARE_API_TOKEN"),
     workersPlan: required("SARA_WORKERS_PLAN"),
     repairProposal: previousProposal,
+    repairFeedback,
   });
   try {
     const execution = await kernel.runSelfBuildCycle(SARA_PRINCIPAL, job.id, {
@@ -88,6 +96,7 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     break;
   } catch (error) {
     if (attempt === MAX_ATTEMPTS || !previousProposal) throw error;
+    repairFeedback = boundedVerifierFeedback(error);
     console.log("Initial untrusted candidate was rejected; starting the single bounded repair attempt.");
   }
 }
