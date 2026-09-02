@@ -37,13 +37,53 @@ describe("site executor HTTP client", () => {
   });
 
   it("treats an empty claim queue as normal and never sends a non-zero budget", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
     const claim = await claimSiteDirective("o".repeat(64), "https://saraseed.app", async (_input, init) => {
       const body = JSON.parse(String(init?.body));
+      bodies.push(body);
       assert.equal(body.maximumBudgetUsd, 0);
-      assert.equal(body.recoveryDirectiveId, "488818de-840a-42cd-a951-1a69b2067f9d");
       return new Response(null, { status: 204 });
     });
     assert.equal(claim, null);
+    assert.deepEqual(bodies, [
+      { maximumBudgetUsd: 0, executorKind: "free_ai_pure_skill_candidate_v1" },
+      {
+        maximumBudgetUsd: 0,
+        executorKind: "deterministic_release_evidence_normalizer_v1",
+        recoveryDirectiveId: "488818de-840a-42cd-a951-1a69b2067f9d",
+      },
+    ]);
+  });
+
+  it("claims a generalized proposal before consulting the deterministic recovery queue", async () => {
+    let calls = 0;
+    const claim = await claimSiteDirective("o".repeat(64), "https://saraseed.app", async (_input, init) => {
+      calls += 1;
+      const body = JSON.parse(String(init?.body));
+      assert.equal(body.executorKind, "free_ai_pure_skill_candidate_v1");
+      return Response.json({
+        directive: { id: "b040e302-8188-45be-bc74-2e735e2c626d" },
+        claim: { id: "78e6fccc-d230-48cd-9049-8d41d83bc799", expiresAt: "2099-01-01T00:00:00.000Z" },
+      });
+    });
+    assert.equal(calls, 1);
+    assert.equal(claim?.directive.id, "b040e302-8188-45be-bc74-2e735e2c626d");
+  });
+
+  it("falls back safely when the live site has not enabled the generalized claim contract yet", async () => {
+    const kinds: string[] = [];
+    const claim = await claimSiteDirective("o".repeat(64), "https://saraseed.app", async (_input, init) => {
+      const body = JSON.parse(String(init?.body));
+      kinds.push(body.executorKind);
+      return body.executorKind === "free_ai_pure_skill_candidate_v1"
+        ? Response.json({ error: "Executor kind is unsupported." }, { status: 400 })
+        : new Response(null, { status: 204 });
+    });
+    assert.equal(claim, null);
+    assert.deepEqual(kinds, [
+      "free_ai_pure_skill_candidate_v1",
+      "deterministic_release_evidence_normalizer_v1",
+    ]);
   });
 
   it("records a claim-bound result only at the canonical executor origin", async () => {
