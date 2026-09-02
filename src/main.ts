@@ -10,11 +10,15 @@ const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? ".sara-state"
 const host = process.env.SARA_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 3000);
 const ownerTokenSha256 = process.env.SARA_OWNER_TOKEN_SHA256;
+const readOnlyBridgeTokenSha256 = process.env.SARA_READ_ONLY_BRIDGE_TOKEN_SHA256?.trim();
 const apiKey = process.env.OPENAI_API_KEY?.trim();
 const monthlyBudgetUsd = Number(process.env.SARA_MONTHLY_MODEL_BUDGET_USD ?? 10);
 const liveProofEnabled = process.env.SARA_LIVE_PROOF_ON_START === "true";
 if (!ownerTokenSha256 || !/^[a-f0-9]{64}$/i.test(ownerTokenSha256)) {
   throw new Error("Set SARA_OWNER_TOKEN_SHA256 to a SHA-256 digest before starting the owner dashboard.");
+}
+if (readOnlyBridgeTokenSha256 && !/^[a-f0-9]{64}$/i.test(readOnlyBridgeTokenSha256)) {
+  throw new Error("SARA_READ_ONLY_BRIDGE_TOKEN_SHA256 must be a SHA-256 digest when configured.");
 }
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("PORT must be a valid TCP port.");
 if (
@@ -42,6 +46,7 @@ let startupProof: LunaStartupProof = {
 };
 const server = createSaraServer(kernel, {
   ownerTokenSha256,
+  ...(readOnlyBridgeTokenSha256 ? { readOnlyBridgeTokenSha256 } : {}),
   ...(client ? {
     runtimeStatus: async () => ({
       worker: operator ? await operator.status() : {
