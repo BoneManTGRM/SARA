@@ -8,7 +8,7 @@ SARA now has a deliberately small self-development bootstrap around the original
 
 The complete revenue-gated design is preserved in [the definitive master plan](docs/SARA_SEED_MASTER_PLAN.md).
 
-The first bounded commercial implementation is documented in [the $50 revenue pilot](docs/REVENUE_PILOT_50.md). It adds a durable, deduplicated opportunity queue; a fixed `$149` public-repository offer; zero-cost skill-gap work cards; collected-revenue and owner-approval gates; expiring worker leases; independent verification; and an owner-review delivery stop. Its bounded multi-model seam uses GPT-5.6 Luna as the cheapest paid default and Gemini 3.8 Flash only as a policy-constrained fallback/challenger. It does not activate paid infrastructure or external commercial authority.
+The first bounded commercial implementation is documented in [the $50 revenue pilot](docs/REVENUE_PILOT_50.md). It adds a durable, deduplicated opportunity queue; a fixed `$149` public-repository offer; zero-cost skill-gap work cards; collected-revenue and owner-approval gates; expiring worker leases; anonymous read-only GitHub evidence pinned to an immutable commit; typed role packets; independent verification; and an owner-review delivery stop. Its bounded multi-model seam uses GPT-5.6 Luna as the cheapest paid default and Gemini 3.8 Flash only as a policy-constrained fallback/challenger. It does not activate paid infrastructure or external commercial authority.
 
 ## Bootstrap economics
 

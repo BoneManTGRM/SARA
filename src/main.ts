@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { SaraKernel } from "./kernel.ts";
 import { runLunaStartupProof, type LunaStartupProof } from "./luna-startup-proof.ts";
 import { OpenAIResponsesClient } from "./openai-worker.ts";
+import { GitHubPublicRepositoryEvidenceCollector } from "./public-repository-evidence.ts";
 import { RevenuePilotOperator } from "./revenue-pilot-operator.ts";
 import { createSaraServer } from "./server.ts";
 
@@ -74,6 +75,7 @@ server.listen(port, host, () => {
       operator = new RevenuePilotOperator({
         kernel,
         modelClient: client,
+        repositoryEvidenceCollector: new GitHubPublicRepositoryEvidenceCollector(),
         stateDirectory,
         monthlyBudgetUsd,
         monthlyCostOffsetUsd: proofIsCurrentMonth ? startupProof.accountedCostUsd : 0,
