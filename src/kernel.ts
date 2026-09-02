@@ -6,6 +6,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { compileWorkCard } from "./capabilities.ts";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import {
+  compoundMandateApprovalTarget,
+  decideCompoundingRate,
+  validateCompoundMandateInput,
+} from "./compounding.ts";
+import {
   buildDeterministicSkillScaffold,
   buildVerifiedSkillCandidate,
   verifyGenomeLabArtifact,
@@ -16,6 +21,7 @@ import { loadConstitution, type SaraConstitution } from "./constitution.ts";
 import {
   assertMoney,
   calculateProfitWaterfall,
+  compoundReinvestmentSpent,
   ownerFundedRecurringMonthly,
   type ProfitWaterfall,
 } from "./economics.ts";
@@ -31,6 +37,12 @@ import type {
   ActionRequest,
   CandidateGenerator,
   Capability,
+  CompoundMandate,
+  CompoundMandateInput,
+  CompoundPurchase,
+  CompoundPurchaseExecutor,
+  CompoundingDecision,
+  CompoundingOpportunity,
   Job,
   LedgerEntry,
   MemoryRecord,
@@ -328,10 +340,47 @@ function reservedSelfDevelopmentBudget(jobs: Job[]): number {
   return Math.round(total * 100) / 100;
 }
 
+function reservedCompoundPurchaseBudget(purchases: CompoundPurchase[]): number {
+  const total = purchases
+    .filter(
+      (purchase) =>
+        purchase.status === "reserved" || purchase.status === "reconciliation_required",
+    )
+    .reduce((sum, purchase) => sum + purchase.amountUsd, 0);
+  assertMoney(total, "Reserved Compound purchase budget");
+  return Math.round(total * 100) / 100;
+}
+
+function mandateCommittedUsd(purchases: CompoundPurchase[], mandateId: string): number {
+  const total = purchases
+    .filter(
+      (purchase) =>
+        purchase.mandateId === mandateId &&
+        (
+          purchase.status === "reserved" ||
+          purchase.status === "settled" ||
+          purchase.status === "reconciliation_required"
+        ),
+    )
+    .reduce((sum, purchase) => sum + purchase.amountUsd, 0);
+  assertMoney(total, "Mandate committed amount");
+  return Math.round(total * 100) / 100;
+}
+
+function currentReinvestmentRate(
+  decisions: CompoundingDecision[],
+  defaultRate: number,
+): number {
+  return decisions.at(-1)?.reinvestmentRate ?? defaultRate;
+}
+
 type KernelState = {
   emergencyStopped: boolean;
   memories: MemoryRecord[];
   ledger: LedgerEntry[];
+  compoundingDecisions: CompoundingDecision[];
+  compoundMandates: CompoundMandate[];
+  compoundPurchases: CompoundPurchase[];
   capabilities: Capability[];
   jobs: Job[];
   mutations: Mutation[];
@@ -343,8 +392,13 @@ export type SaraStatus = {
   emergencyStopped: boolean;
   ownerFundedRecurringMonthlyUsd: number;
   realizedProfit: ProfitWaterfall;
+  compoundingDecision: CompoundingDecision | null;
+  compoundReinvestmentSpentUsd: number;
+  reservedCompoundPurchaseBudgetUsd: number;
   reservedSelfDevelopmentBudgetUsd: number;
   availableCompoundReserveUsd: number;
+  compoundMandates: CompoundMandate[];
+  compoundPurchases: CompoundPurchase[];
   memoryCount: number;
   capabilities: Capability[];
   jobs: Job[];
@@ -461,6 +515,9 @@ export class SaraKernel {
     const events = await this.#store.readAll();
     const memories: MemoryRecord[] = [];
     const ledger: LedgerEntry[] = [];
+    const compoundingDecisions: CompoundingDecision[] = [];
+    const compoundMandateMap = new Map<string, CompoundMandate>();
+    const compoundPurchaseMap = new Map<string, CompoundPurchase>();
     const capabilityMap = new Map<string, Capability>();
     const jobMap = new Map<string, Job>();
     const mutationMap = new Map<string, Mutation>();
@@ -474,6 +531,50 @@ export class SaraKernel {
         memories.push(...structuredClone(data.memories as MemoryRecord[]));
       }
       if (event.type === "ledger_recorded") ledger.push(event.data as LedgerEntry);
+      if (event.type === "compounding_decision_recorded") {
+        compoundingDecisions.push(structuredClone(event.data as CompoundingDecision));
+      }
+      if (event.type === "compound_mandate_created") {
+        const mandate = event.data as CompoundMandate;
+        compoundMandateMap.set(mandate.id, structuredClone(mandate));
+      }
+      if (event.type === "compound_mandate_revoked") {
+        const data = event.data as { mandateId: string; revokedAt: string };
+        const mandate = compoundMandateMap.get(data.mandateId);
+        if (!mandate) throw new Error(`Audit event references missing mandate ${data.mandateId}.`);
+        mandate.status = "revoked";
+        mandate.revokedAt = data.revokedAt;
+      }
+      if (event.type === "compound_purchase_reserved") {
+        const purchase = event.data as CompoundPurchase;
+        compoundPurchaseMap.set(purchase.id, structuredClone(purchase));
+      }
+      if (event.type === "compound_purchase_settled") {
+        const data = event.data as {
+          purchaseId: string;
+          settledAt: string;
+          externalReference: string;
+        };
+        const purchase = compoundPurchaseMap.get(data.purchaseId);
+        if (!purchase) throw new Error(`Audit event references missing purchase ${data.purchaseId}.`);
+        purchase.status = "settled";
+        purchase.settledAt = data.settledAt;
+        purchase.externalReference = data.externalReference;
+      }
+      if (event.type === "compound_purchase_failed") {
+        const data = event.data as { purchaseId: string; failureCode: string };
+        const purchase = compoundPurchaseMap.get(data.purchaseId);
+        if (!purchase) throw new Error(`Audit event references missing purchase ${data.purchaseId}.`);
+        purchase.status = "failed";
+        purchase.failureCode = data.failureCode;
+      }
+      if (event.type === "compound_purchase_reconciliation_required") {
+        const data = event.data as { purchaseId: string; failureCode: string };
+        const purchase = compoundPurchaseMap.get(data.purchaseId);
+        if (!purchase) throw new Error(`Audit event references missing purchase ${data.purchaseId}.`);
+        purchase.status = "reconciliation_required";
+        purchase.failureCode = data.failureCode;
+      }
       if (event.type === "capability_registered") {
         const capability = event.data as Capability;
         capabilityMap.set(capability.id, capability);
@@ -513,6 +614,9 @@ export class SaraKernel {
       emergencyStopped,
       memories,
       ledger,
+      compoundingDecisions,
+      compoundMandates: [...compoundMandateMap.values()],
+      compoundPurchases: [...compoundPurchaseMap.values()],
       capabilities: [...capabilityMap.values()],
       jobs: [...jobMap.values()],
       mutations: [...mutationMap.values()],
@@ -595,6 +699,238 @@ export class SaraKernel {
     });
   }
 
+  recordCompoundingDecision(
+    principal: Principal,
+    opportunity: CompoundingOpportunity,
+  ): Promise<CompoundingDecision> {
+    return this.serializeMutation(async () => {
+      if (principal.kind === "sara" && principal !== SARA_PRINCIPAL) {
+        throw new PolicyDeniedError(
+          { allowed: false, code: "SARA_AUTHORITY_REQUIRED", reason: "The canonical SARA governor is required." },
+          "select_compounding_rate",
+        );
+      }
+      await this.authorize(principal, {
+        action: "select_compounding_rate",
+        targetId: opportunity.objective,
+        external: false,
+      });
+      const decision = decideCompoundingRate(opportunity, {
+        id: randomUUID(),
+        decidedAt: new Date().toISOString(),
+      });
+      await this.#store.append("compounding_decision_recorded", principal, decision);
+      return decision;
+    });
+  }
+
+  createCompoundMandate(
+    principal: Principal,
+    input: CompoundMandateInput,
+    approval: OwnerApproval,
+  ): Promise<CompoundMandate> {
+    return this.serializeMutation(async () => {
+      const validated = validateCompoundMandateInput(input);
+      const targetId = compoundMandateApprovalTarget(validated);
+      await this.authorize(principal, {
+        action: "money_transfer",
+        targetId,
+        external: true,
+        approval,
+      });
+      const mandate: CompoundMandate = {
+        ...validated,
+        id: randomUUID(),
+        status: "active",
+        approvalId: approval.approvalId,
+        createdAt: new Date().toISOString(),
+      };
+      await this.#store.append("compound_mandate_created", principal, mandate);
+      return mandate;
+    });
+  }
+
+  revokeCompoundMandate(
+    principal: Principal,
+    mandateId: string,
+    approval: OwnerApproval,
+  ): Promise<CompoundMandate> {
+    return this.serializeMutation(async () => {
+      const targetId = `compound-mandate-revoke:${mandateId}`;
+      await this.authorize(principal, {
+        action: "money_transfer",
+        targetId,
+        external: true,
+        approval,
+      });
+      const state = await this.state();
+      const mandate = state.compoundMandates.find((candidate) => candidate.id === mandateId);
+      if (!mandate) throw new Error(`Compound mandate ${mandateId} does not exist.`);
+      if (mandate.status === "revoked") return mandate;
+      const revokedAt = new Date().toISOString();
+      await this.#store.append("compound_mandate_revoked", principal, { mandateId, revokedAt });
+      return { ...mandate, status: "revoked", revokedAt };
+    });
+  }
+
+  async executeMandatedCompoundPurchase(
+    principal: Principal,
+    input: {
+      mandateId: string;
+      targetId: string;
+      amountUsd: number;
+      description: string;
+    },
+    executor: CompoundPurchaseExecutor,
+  ): Promise<CompoundPurchase> {
+    const purchase = await this.serializeMutation(async () => {
+      if (principal.kind === "sara" && principal !== SARA_PRINCIPAL) {
+        throw new PolicyDeniedError(
+          { allowed: false, code: "SARA_AUTHORITY_REQUIRED", reason: "The canonical SARA governor is required." },
+          "compound_reinvestment_purchase",
+        );
+      }
+      await this.authorize(principal, {
+        action: "compound_reinvestment_purchase",
+        targetId: input.targetId,
+        external: true,
+      });
+      assertMoney(input.amountUsd, "Compound purchase amount");
+      if (input.amountUsd <= 0) throw new RangeError("Compound purchase amount must be greater than zero.");
+      if (!input.description.trim() || input.description.length > 500) {
+        throw new Error("Compound purchase description must contain 1–500 characters.");
+      }
+      const state = await this.state();
+      const mandate = state.compoundMandates.find((candidate) => candidate.id === input.mandateId);
+      if (!mandate) throw new Error(`Compound mandate ${input.mandateId} does not exist.`);
+      if (mandate.status !== "active") throw new Error("Compound mandate is not active.");
+      if (Date.parse(mandate.expiresAt) <= Date.now()) throw new Error("Compound mandate has expired.");
+      if (
+        mandate.providerId !== executor.providerId ||
+        mandate.operation !== executor.operation ||
+        mandate.targetId !== input.targetId
+      ) {
+        throw new Error("Executor, operation, and target must exactly match the owner-issued mandate.");
+      }
+      if (input.amountUsd > mandate.maximumPerActionUsd) {
+        throw new RangeError("Compound purchase exceeds the mandate per-action limit.");
+      }
+      const mandateCommitted = mandateCommittedUsd(state.compoundPurchases, mandate.id);
+      if (Math.round((mandateCommitted + input.amountUsd) * 100) / 100 > mandate.maximumTotalUsd) {
+        throw new RangeError("Compound purchase exceeds the mandate total limit.");
+      }
+      const reinvestmentRate = currentReinvestmentRate(
+        state.compoundingDecisions,
+        this.#constitution.ownerAuthority.defaultReinvestmentRate,
+      );
+      const allocated = calculateProfitWaterfall(state.ledger, reinvestmentRate).reinvestmentUsd;
+      const available = Math.max(
+        0,
+        Math.round(
+          (
+            allocated +
+            this.#constitution.ownerAuthority.unearnedExpansionBudgetUsd -
+            compoundReinvestmentSpent(state.ledger) -
+            reservedSelfDevelopmentBudget(state.jobs) -
+            reservedCompoundPurchaseBudget(state.compoundPurchases)
+          ) * 100,
+        ) / 100,
+      );
+      if (input.amountUsd > available) {
+        throw new RangeError(`Compound purchase exceeds the $${available.toFixed(2)} available Compound Reserve.`);
+      }
+      const reserved: CompoundPurchase = {
+        id: randomUUID(),
+        mandateId: mandate.id,
+        providerId: mandate.providerId,
+        operation: mandate.operation,
+        targetId: mandate.targetId,
+        amountUsd: input.amountUsd,
+        description: input.description.trim(),
+        status: "reserved",
+        reservedAt: new Date().toISOString(),
+      };
+      await this.#store.append("compound_purchase_reserved", principal, reserved);
+      return reserved;
+    });
+
+    try {
+      const result = await executor.execute({
+        idempotencyKey: purchase.id,
+        targetId: purchase.targetId,
+        amountUsd: purchase.amountUsd,
+        description: purchase.description,
+      });
+      assertMoney(result.chargedUsd, "Executor charge");
+      if (
+        result.chargedUsd !== purchase.amountUsd ||
+        !result.externalReference.trim() ||
+        result.externalReference.length > 200 ||
+        /[\u0000-\u001f\u007f]/u.test(result.externalReference)
+      ) {
+        await this.serializeMutation(async () => {
+          const occurredAt = new Date().toISOString();
+          if (result.chargedUsd > 0) {
+            const breachEntry: LedgerEntry = {
+              id: randomUUID(),
+              kind: "reinvestment",
+              source: "sara",
+              amountUsd: result.chargedUsd,
+              realized: true,
+              recurringMonthly: false,
+              description: `Executor contract violation for purchase ${purchase.id}`,
+              occurredAt,
+            };
+            await this.#store.append("ledger_recorded", SARA_PRINCIPAL, breachEntry);
+          }
+          await this.#store.append("compound_purchase_failed", SARA_PRINCIPAL, {
+            purchaseId: purchase.id,
+            failureCode: "EXECUTOR_CONTRACT_VIOLATION",
+          });
+          await this.#store.append("emergency_stop_changed", SARA_PRINCIPAL, { active: true });
+        });
+        throw new Error("Compound executor violated its exact-charge contract; emergency stop engaged.");
+      }
+      return this.serializeMutation(async () => {
+        const settledAt = new Date().toISOString();
+        await this.#store.append("compound_purchase_settled", SARA_PRINCIPAL, {
+          purchaseId: purchase.id,
+          settledAt,
+          externalReference: result.externalReference.trim(),
+        });
+        const entry: LedgerEntry = {
+          id: randomUUID(),
+          kind: "reinvestment",
+          source: "sara",
+          amountUsd: result.chargedUsd,
+          realized: true,
+          recurringMonthly: false,
+          description: `Mandated ${purchase.providerId}/${purchase.operation}: ${purchase.description}`,
+          occurredAt: settledAt,
+        };
+        await this.#store.append("ledger_recorded", SARA_PRINCIPAL, entry);
+        return {
+          ...purchase,
+          status: "settled",
+          settledAt,
+          externalReference: result.externalReference.trim(),
+        };
+      });
+    } catch (error) {
+      if ((error as Error).message.includes("emergency stop engaged")) throw error;
+      await this.serializeMutation(async () => {
+        // A thrown connector call can be ambiguous: the provider may have
+        // charged before the response was lost. Keep the reservation
+        // fail-closed so a retry cannot spend the same Compound Reserve twice.
+        await this.#store.append("compound_purchase_reconciliation_required", SARA_PRINCIPAL, {
+          purchaseId: purchase.id,
+          failureCode: "EXECUTOR_OUTCOME_UNKNOWN",
+        });
+      });
+      throw error;
+    }
+  }
+
   registerCapability(principal: Principal, capability: Capability): Promise<Capability> {
     return this.serializeMutation(async () => {
       await this.authorize(principal, { action: "sandbox_development", targetId: capability.id, external: false });
@@ -623,15 +959,27 @@ export class SaraKernel {
       });
       const state = await this.state();
       assertMoney(input.maximumBudgetUsd, "Self-development maximum budget");
+      const reinvestmentRate = currentReinvestmentRate(
+        state.compoundingDecisions,
+        this.#constitution.ownerAuthority.defaultReinvestmentRate,
+      );
       const compoundReserve = calculateProfitWaterfall(
         state.ledger,
-        this.#constitution.ownerAuthority.defaultReinvestmentRate,
+        reinvestmentRate,
       ).reinvestmentUsd;
       const reservedBudget = reservedSelfDevelopmentBudget(state.jobs);
+      const reservedPurchases = reservedCompoundPurchaseBudget(state.compoundPurchases);
+      const spentReinvestment = compoundReinvestmentSpent(state.ledger);
       const availableBudget = Math.max(
         0,
         Math.round(
-          (compoundReserve + this.#constitution.ownerAuthority.unearnedExpansionBudgetUsd - reservedBudget) * 100,
+          (
+            compoundReserve +
+            this.#constitution.ownerAuthority.unearnedExpansionBudgetUsd -
+            reservedBudget -
+            reservedPurchases -
+            spentReinvestment
+          ) * 100,
         ) / 100,
       );
       if (input.maximumBudgetUsd > availableBudget) {
@@ -1005,23 +1353,35 @@ export class SaraKernel {
   async getStatus(reinvestmentRate = this.#constitution.ownerAuthority.defaultReinvestmentRate): Promise<SaraStatus> {
     await this.mutationTail;
     const state = await this.state();
-    const realizedProfit = calculateProfitWaterfall(state.ledger, reinvestmentRate);
+    const effectiveReinvestmentRate = state.compoundingDecisions.length > 0
+      ? currentReinvestmentRate(state.compoundingDecisions, reinvestmentRate)
+      : reinvestmentRate;
+    const realizedProfit = calculateProfitWaterfall(state.ledger, effectiveReinvestmentRate);
+    const compoundReinvestmentSpentUsd = compoundReinvestmentSpent(state.ledger);
+    const reservedCompoundPurchaseBudgetUsd = reservedCompoundPurchaseBudget(state.compoundPurchases);
     const reservedSelfDevelopmentBudgetUsd = reservedSelfDevelopmentBudget(state.jobs);
     return {
       constitution: { version: this.#constitution.version, digest: this.constitutionDigest, verified: true },
       emergencyStopped: state.emergencyStopped,
       ownerFundedRecurringMonthlyUsd: ownerFundedRecurringMonthly(state.ledger),
       realizedProfit,
+      compoundingDecision: state.compoundingDecisions.at(-1) ?? null,
+      compoundReinvestmentSpentUsd,
+      reservedCompoundPurchaseBudgetUsd,
       reservedSelfDevelopmentBudgetUsd,
       availableCompoundReserveUsd: Math.max(
         0,
         Math.round(
           (realizedProfit.reinvestmentUsd +
             this.#constitution.ownerAuthority.unearnedExpansionBudgetUsd -
+            compoundReinvestmentSpentUsd -
+            reservedCompoundPurchaseBudgetUsd -
             reservedSelfDevelopmentBudgetUsd) *
             100,
         ) / 100,
       ),
+      compoundMandates: state.compoundMandates,
+      compoundPurchases: state.compoundPurchases,
       memoryCount: state.memories.length,
       capabilities: state.capabilities,
       jobs: state.jobs,

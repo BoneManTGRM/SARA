@@ -15,6 +15,7 @@ export function evaluatePolicy(input: {
     principal.kind === "owner" &&
     principal.authenticated &&
     principal.id === constitution.ownerAuthority.ownerIdentity;
+  const isSara = principal.kind === "sara" && principal.authenticated && principal.id === "sara";
 
   if (
     request.action === "human_impersonation" ||
@@ -60,6 +61,18 @@ export function evaluatePolicy(input: {
       allowed: false,
       code: "OWNER_REQUIRED",
       reason: "Only the authenticated owner may attest that a financial event is realized during bootstrap.",
+    };
+  }
+
+  if (
+    (request.action === "select_compounding_rate" || request.action === "compound_reinvestment_purchase") &&
+    !isSara &&
+    !isOwner
+  ) {
+    return {
+      allowed: false,
+      code: "SARA_OR_OWNER_REQUIRED",
+      reason: "Only the SARA governor or the authenticated owner may allocate Compound Reserve authority.",
     };
   }
 

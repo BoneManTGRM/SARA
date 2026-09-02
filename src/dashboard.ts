@@ -681,9 +681,14 @@ export const DASHBOARD_HTML = `<!doctype html>
             <div class="card-pad">
               <div class="card-label">Economic core</div>
               <div class="card-value" id="compound-reserve">—</div>
-              <p class="card-copy"><strong>SARA compound reserve.</strong> Realized-profit allocation only; no live financial account or autonomous transfer authority is connected.</p>
+              <p class="card-copy"><strong>SARA compound reserve.</strong> Collected-profit capital only. Registered provider actions require an exact-target, revocable owner mandate; raw transfers and new destinations remain owner-only.</p>
               <div class="allocation" aria-label="Protected family and reinvestment ranges"><span class="family"></span><span class="compound"></span></div>
               <div class="allocation-legend"><span>Family distribution · 50–75%</span><span>Compound · 25–50%</span></div>
+              <div class="micro-stats">
+                <div class="micro-stat"><span>Current rate</span><strong id="compound-rate">—</strong></div>
+                <div class="micro-stat"><span>Spent</span><strong id="compound-spent">—</strong></div>
+                <div class="micro-stat"><span>Active mandates</span><strong id="compound-mandates">—</strong></div>
+              </div>
             </div>
           </article>
 
@@ -882,6 +887,9 @@ export const DASHBOARD_HTML = `<!doctype html>
       document.querySelector('#jobs').textContent = String(state.jobs.length);
       document.querySelector('#capabilities').textContent = String(state.capabilities.length);
       document.querySelector('#compound-reserve').textContent = money(state.availableCompoundReserveUsd);
+      document.querySelector('#compound-rate').textContent = Math.round(state.realizedProfit.reinvestmentRate * 100) + '%';
+      document.querySelector('#compound-spent').textContent = money(state.compoundReinvestmentSpentUsd);
+      document.querySelector('#compound-mandates').textContent = String(state.compoundMandates.filter((mandate) => mandate.status === 'active' && Date.parse(mandate.expiresAt) > Date.now()).length);
       document.querySelector('#constitution').textContent = 'Verified · v' + state.constitution.version;
       document.querySelector('#digest').textContent = state.constitution.digest;
       document.querySelector('#memories').textContent = String(state.memoryCount);

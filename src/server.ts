@@ -1,10 +1,16 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DASHBOARD_HTML } from "./dashboard.ts";
+import { compoundMandateApprovalTarget, validateCompoundMandateInput } from "./compounding.ts";
 import { compileExecutorHandoff } from "./handoff.ts";
 import { SaraKernel } from "./kernel.ts";
 import { PolicyDeniedError } from "./policy.ts";
-import type { MutationStage, SkillCandidateProposal } from "./types.ts";
+import type {
+  CompoundMandateInput,
+  CompoundingOpportunity,
+  MutationStage,
+  SkillCandidateProposal,
+} from "./types.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -105,6 +111,59 @@ export function createSaraServer(kernel: SaraKernel, options: { ownerTokenSha256
         if (typeof body.active !== "boolean") throw new Error("active must be boolean.");
         await kernel.setEmergencyStop(owner, body.active);
         json(response, 200, { active: body.active });
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/compound/decision") {
+        const body = await readJson(request);
+        const opportunity: CompoundingOpportunity = {
+          objective: String(body.objective ?? ""),
+          expectedOwnerValueUsd: Number(body.expectedOwnerValueUsd ?? 0),
+          maximumCostUsd: Number(body.maximumCostUsd ?? 0),
+          confidence: Number(body.confidence ?? Number.NaN),
+          riskScore: Number(body.riskScore ?? Number.NaN),
+          reserveCoverageMonths: Number(body.reserveCoverageMonths ?? Number.NaN),
+          evidence: Array.isArray(body.evidence) ? body.evidence.map(String) : [],
+        };
+        json(response, 201, await kernel.recordCompoundingDecision(owner, opportunity));
+        return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/compound/mandates") {
+        const body = await readJson(request);
+        const input = validateCompoundMandateInput({
+          providerId: String(body.providerId ?? ""),
+          operation: String(body.operation ?? ""),
+          targetId: String(body.targetId ?? ""),
+          maximumTotalUsd: Number(body.maximumTotalUsd ?? 0),
+          maximumPerActionUsd: Number(body.maximumPerActionUsd ?? 0),
+          expiresAt: String(body.expiresAt ?? ""),
+          purpose: String(body.purpose ?? ""),
+        } satisfies CompoundMandateInput);
+        const targetId = compoundMandateApprovalTarget(input);
+        const mandate = await kernel.createCompoundMandate(owner, input, {
+          approvalId: randomUUID(),
+          action: "money_transfer",
+          targetId,
+          approvedAt: new Date().toISOString(),
+          ownerId: owner.id,
+        });
+        json(response, 201, mandate);
+        return;
+      }
+      const revokeMandateMatch = url.pathname.match(/^\/api\/compound\/mandates\/([^/]+)\/revoke$/);
+      if (request.method === "POST" && revokeMandateMatch) {
+        const mandateId = decodeURIComponent(revokeMandateMatch[1]);
+        const targetId = `compound-mandate-revoke:${mandateId}`;
+        json(
+          response,
+          200,
+          await kernel.revokeCompoundMandate(owner, mandateId, {
+            approvalId: randomUUID(),
+            action: "money_transfer",
+            targetId,
+            approvedAt: new Date().toISOString(),
+            ownerId: owner.id,
+          }),
+        );
         return;
       }
       const handoffMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/handoff$/);

@@ -201,6 +201,72 @@ describe("SARA owner dashboard HTTP boundary", () => {
     );
   });
 
+  it("creates exact owner mandates and evidence-based compounding decisions only after authentication", async () => {
+    const decisionPayload = {
+      objective: "Fund one verified tool after revenue",
+      expectedOwnerValueUsd: 1_000,
+      maximumCostUsd: 100,
+      confidence: 0.9,
+      riskScore: 0.1,
+      reserveCoverageMonths: 6,
+      evidence: ["verified-demand", "measured-margin"],
+    };
+    assert.equal((await fetch(`${baseUrl}/api/compound/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(decisionPayload),
+    })).status, 401);
+    const decisionResponse = await fetch(`${baseUrl}/api/compound/decision`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(decisionPayload),
+    });
+    assert.equal(decisionResponse.status, 201);
+    const decision = await decisionResponse.json() as { reinvestmentRate: number };
+    assert.ok(decision.reinvestmentRate >= 0.25 && decision.reinvestmentRate <= 0.5);
+
+    const mandatePayload = {
+      providerId: "cloudflare",
+      operation: "workers-ai-inference",
+      targetId: "account:owner:workers-ai",
+      maximumTotalUsd: 100,
+      maximumPerActionUsd: 10,
+      expiresAt: "2027-08-31T00:00:00.000Z",
+      purpose: "Pay only for verified inference from collected Compound Reserve.",
+    };
+    assert.equal((await fetch(`${baseUrl}/api/compound/mandates`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(mandatePayload),
+    })).status, 401);
+    const mandateResponse = await fetch(`${baseUrl}/api/compound/mandates`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify(mandatePayload),
+    });
+    assert.equal(mandateResponse.status, 201);
+    const mandate = await mandateResponse.json() as { id: string; status: string; targetId: string };
+    assert.equal(mandate.status, "active");
+    assert.equal(mandate.targetId, mandatePayload.targetId);
+
+    const statusResponse = await fetch(`${baseUrl}/api/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const status = await statusResponse.json() as {
+      compoundingDecision: { reinvestmentRate: number };
+      compoundMandates: { id: string; status: string }[];
+    };
+    assert.equal(status.compoundingDecision.reinvestmentRate, decision.reinvestmentRate);
+    assert.equal(status.compoundMandates.at(-1)?.id, mandate.id);
+
+    const revoked = await fetch(`${baseUrl}/api/compound/mandates/${mandate.id}/revoke`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(revoked.status, 200);
+    assert.equal((await revoked.json() as { status: string }).status, "revoked");
+  });
+
   it("freezes new external work while preserving health and owner reads", async () => {
     const stopped = await fetch(`${baseUrl}/api/emergency-stop`, {
       method: "POST",

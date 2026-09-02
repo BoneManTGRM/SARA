@@ -44,6 +44,13 @@ export function ownerFundedRecurringMonthly(entries: LedgerEntry[]): number {
   return sumMoney(entries, (entry) => entry.source === "owner" && entry.recurringMonthly);
 }
 
+export function compoundReinvestmentSpent(entries: LedgerEntry[]): number {
+  return sumMoney(
+    entries,
+    (entry) => entry.kind === "reinvestment" && entry.source === "sara" && entry.realized,
+  );
+}
+
 export function calculateProfitWaterfall(entries: LedgerEntry[], reinvestmentRate: number): ProfitWaterfall {
   if (!Number.isFinite(reinvestmentRate) || reinvestmentRate < 0.25 || reinvestmentRate > 0.5) {
     throw new RangeError("Reinvestment must remain inside the protected 25–50% band.");

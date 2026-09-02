@@ -41,6 +41,9 @@ The kernel provides:
 - a kernel-private append-only, hash-chained event store with a cross-kernel writer lock for memory, audit, jobs, ledger, capabilities, and mutations;
 - the $0 bootstrap target and $300 hard ceiling;
 - realized-profit accounting that excludes projections and uncollected revenue;
+- an evidence-based Compounding Governor that can choose only 25–50% and preserves at least 50% for the owner;
+- revocable, exact-provider/operation/target spending mandates with per-action, total, and expiration limits;
+- a provider-neutral action executor contract with idempotency keys, reserve-before-call accounting, exact-charge settlement, and emergency stop on contract breach;
 - capability-gap compilation into testable work cards;
 - SANDBOX → SHADOW → CANARY → LIMITED PRODUCTION → BROADER PRODUCTION gates;
 - one authenticated owner dashboard and backend whose owner capability is token-verified and bound to the durable state;
@@ -50,9 +53,22 @@ The kernel provides:
 - an owner-controlled self-build cycle that invokes a replaceable zero-cost candidate generator, accepts only a small pure `runSkill(input)` TypeScript module, blocks imports, ambient authority, timers, network APIs, dynamic property access, and `any`, then compiler-checks and behaviorally tests the candidate in a restricted child process;
 - durable job states and an exhaustive candidate digest, with successful self-built skills stopping automatically at SHADOW and failed candidates leaving an immutable audit outcome instead of a production change.
 
-Real bank, payment, tax, beneficiary, and legal-entity actions are deliberately not autonomous. SARA may research and prepare them, but the account belongs to the owner or an owner-controlled legal entity and each consequential action requires target-bound owner approval. The ledger must preserve income truth; tax evasion and identity impersonation are prohibited.
+Real bank, payment, tax, beneficiary, and legal-entity authority remains owner-controlled. The owner may now issue a revocable operational mandate bound to one provider, operation, target, total limit, per-action limit, purpose, and expiration. After that exact approval, SARA may execute a registered provider action without asking again for each small purchase, but only from collected SARA Compound Reserve. Raw transfers, new destinations, financial-account creation, borrowing, speculative instruments, and changes of legal ownership remain owner-gated. The ledger preserves income and expense truth; tax evasion and identity impersonation are prohibited.
 
-The dashboard labels SARA's earned 25–50% allocation as the **SARA Compound Reserve**. It begins at $0 and represents only her share of collected, realized distributable profit. It is an internal capital account until the owner establishes a legally titled, segregated bank or payment subaccount; the bootstrap cannot open, fund, or connect one by itself.
+The dashboard labels SARA's earned 25–50% allocation as the **SARA Compound Reserve**. It begins at $0 and represents only her share of collected, realized distributable profit. The Compounding Governor selects a rate inside the protected band from evidence, risk-adjusted owner value, and reserve coverage; zero-cost opportunities remain at the 25% default. Settled reinvestment and pending reservations are deducted before another action can be authorized, including across concurrent kernels. It remains an internal capital account until the owner establishes a legally titled, segregated bank or payment subaccount and registers a provider connector; the repository does not silently open, fund, or connect one.
+
+## Bounded action and spending runtime
+
+The kernel now supports a real provider-neutral execution seam:
+
+1. Collected customer revenue is owner-attested into the append-only ledger.
+2. SARA records an evidence-backed Compounding Governor decision inside the protected 25–50% band.
+3. The owner issues one digest-bound mandate for an exact provider, operation, target, total limit, per-action limit, purpose, and expiration.
+4. SARA reserves the amount atomically against the available Compound Reserve before a connector can run.
+5. The connector receives an idempotency key and the exact approved target and maximum charge—never general bank authority.
+6. Exact settlement becomes a realized reinvestment ledger entry. An ambiguous connector failure remains reserved for reconciliation so a retry cannot double-spend it. An amount mismatch records the observed charge and engages the emergency stop.
+
+This makes safe autonomous purchasing possible after a real payment provider is connected. No live payment connector or financial credential is included in source control, so this commit does not itself move money.
 
 The selected family-succession model makes `spouse` the primary recipient at 100%, including when the owner is unavailable or deceased. After a spouse-death/incapacity scenario, `owner` and `child` receive 50% each; if the owner is already unavailable or deceased, `child` receives 100%, and if the child is unavailable the owner receives 100%. After a separation or owner-revocation scenario, `owner` receives 100%, falling through to `child` only if the owner is unavailable. The kernel accepts a scenario only from the exact authenticated constitutional owner with approval bound to the complete amount, eligibility flags, status, evidence class, and non-zero evidence digest. The result explicitly reports `OWNER_ATTESTED_SCENARIO_ONLY`, `externalAuthorityVerified: false`, and `UNCONFIGURED_PENDING_LEGAL_INSTRUMENT`. It is a tested calculation, not an active payment instruction or proof of a legal event. SARA may not infer relationship status from behavior. Personal identities never belong in source control, and legal activation remains locked pending actual authoritative documents, accounts, qualified review, and a successor human fiduciary.
 

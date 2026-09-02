@@ -136,4 +136,28 @@ describe("SARA family, identity, and financial safety policy", () => {
     assert.equal(decision.allowed, false);
     assert.equal(decision.code, "EMERGENCY_STOP");
   });
+
+  it("allows only SARA or the owner to allocate Compound Reserve authority", async () => {
+    const { constitution } = await loadConstitution();
+    const child: Principal = { id: "child-1", kind: "child", authenticated: true };
+    for (const action of ["select_compounding_rate", "compound_reinvestment_purchase"] as const) {
+      const denied = evaluatePolicy({
+        constitution,
+        principal: child,
+        request: { action, targetId: "compound:probe", external: action === "compound_reinvestment_purchase" },
+        currentOwnerRecurringMonthlyUsd: 0,
+        emergencyStopped: false,
+      });
+      assert.equal(denied.allowed, false);
+      assert.equal(denied.code, "SARA_OR_OWNER_REQUIRED");
+      const allowed = evaluatePolicy({
+        constitution,
+        principal: sara,
+        request: { action, targetId: "compound:probe", external: action === "compound_reinvestment_purchase" },
+        currentOwnerRecurringMonthlyUsd: 0,
+        emergencyStopped: false,
+      });
+      assert.equal(allowed.allowed, true);
+    }
+  });
 });

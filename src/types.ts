@@ -17,6 +17,8 @@ export type ActionType =
   | "record_memory"
   | "record_ledger"
   | "record_realized_financial_event"
+  | "select_compounding_rate"
+  | "compound_reinvestment_purchase"
   | "owner_recurring_commitment"
   | "emergency_stop_change"
   | "human_impersonation"
@@ -116,6 +118,73 @@ export type LedgerEntry = {
   recurringMonthly: boolean;
   description: string;
   occurredAt: string;
+};
+
+export type CompoundingOpportunity = {
+  objective: string;
+  expectedOwnerValueUsd: number;
+  maximumCostUsd: number;
+  confidence: number;
+  riskScore: number;
+  reserveCoverageMonths: number;
+  evidence: string[];
+};
+
+export type CompoundingDecision = CompoundingOpportunity & {
+  id: string;
+  riskAdjustedOwnerValueUsd: number;
+  valueMultiple: number;
+  reinvestmentRate: number;
+  reasons: string[];
+  decidedAt: string;
+};
+
+export type CompoundMandateStatus = "active" | "revoked";
+
+export type CompoundMandateInput = {
+  providerId: string;
+  operation: string;
+  targetId: string;
+  maximumTotalUsd: number;
+  maximumPerActionUsd: number;
+  expiresAt: string;
+  purpose: string;
+};
+
+export type CompoundMandate = CompoundMandateInput & {
+  id: string;
+  status: CompoundMandateStatus;
+  approvalId: string;
+  createdAt: string;
+  revokedAt?: string;
+};
+
+export type CompoundPurchaseStatus = "reserved" | "settled" | "failed" | "reconciliation_required";
+
+export type CompoundPurchase = {
+  id: string;
+  mandateId: string;
+  providerId: string;
+  operation: string;
+  targetId: string;
+  amountUsd: number;
+  description: string;
+  status: CompoundPurchaseStatus;
+  reservedAt: string;
+  settledAt?: string;
+  externalReference?: string;
+  failureCode?: string;
+};
+
+export type CompoundPurchaseExecutor = {
+  providerId: string;
+  operation: string;
+  execute(input: {
+    idempotencyKey: string;
+    targetId: string;
+    amountUsd: number;
+    description: string;
+  }): Promise<{ chargedUsd: number; externalReference: string }>;
 };
 
 export type CapabilityStatus = "available" | "limited" | "missing";
