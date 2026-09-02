@@ -75,16 +75,69 @@ function stripSingleFence(value: string): string {
   return match ? match[1].trim() : trimmed;
 }
 
+function balancedJsonObjects(value: string): string[] {
+  const objects: string[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      continue;
+    }
+    if (character === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+      continue;
+    }
+    if (character === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        objects.push(value.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+  return objects;
+}
+
+function parseOneJsonObject(content: string): unknown {
+  const stripped = stripSingleFence(content);
+  try {
+    return JSON.parse(stripped) as unknown;
+  } catch {
+    const parsed = balancedJsonObjects(stripped).flatMap((candidate) => {
+      try {
+        return [JSON.parse(candidate) as unknown];
+      } catch {
+        return [];
+      }
+    });
+    if (parsed.length !== 1) {
+      throw new Error("Cloudflare candidate proposal was not valid JSON or was ambiguous.");
+    }
+    return parsed[0];
+  }
+}
+
 function parseProposal(content: string): SkillCandidateProposal {
   if (!content || Buffer.byteLength(content, "utf8") > MAX_PROPOSAL_BYTES) {
     throw new Error("Cloudflare candidate proposal is empty or exceeds 64 KiB.");
   }
-  let value: unknown;
-  try {
-    value = JSON.parse(stripSingleFence(content));
-  } catch {
-    throw new Error("Cloudflare candidate proposal was not valid JSON.");
-  }
+  const value = parseOneJsonObject(content);
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Cloudflare candidate proposal must be one JSON object.");
   }
@@ -146,7 +199,7 @@ export function createCloudflareFreeCandidateGenerator(
           response_format: { type: "json_object" },
           stream: false,
           temperature: 0,
-          max_completion_tokens: 4_096,
+          max_completion_tokens: 8_192,
           seed: 1,
         }),
       });

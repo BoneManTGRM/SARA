@@ -48,10 +48,30 @@ describe("Cloudflare free candidate generator", () => {
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/ai/v1/chat/completions`);
     assert.equal((calls[0].init?.headers as Record<string, string>).authorization, `Bearer ${API_TOKEN}`);
-    const request = JSON.parse(String(calls[0].init?.body)) as { model: string; stream: boolean; messages: unknown[] };
+    const request = JSON.parse(String(calls[0].init?.body)) as {
+      max_completion_tokens: number;
+      messages: unknown[];
+      model: string;
+      stream: boolean;
+    };
     assert.equal(request.model, CLOUDFLARE_FREE_MODEL);
     assert.equal(request.stream, false);
     assert.equal(request.messages.length, 2);
+    assert.equal(request.max_completion_tokens, 8_192);
+  });
+
+  it("extracts one complete proposal from bounded model commentary", async () => {
+    const generator = createCloudflareFreeCandidateGenerator({
+      accountId: ACCOUNT_ID,
+      apiToken: API_TOKEN,
+      workersPlan: "free",
+      async fetcher() {
+        const content = `I verified the candidate.\n\`\`\`json\n${JSON.stringify(candidate())}\n\`\`\`\nComplete.`;
+        return Response.json({ choices: [{ message: { content } }] });
+      },
+    });
+
+    assert.deepEqual(await generator.generate(input()), candidate());
   });
 
   it("rejects any plan other than free before inference", () => {
@@ -97,6 +117,28 @@ describe("Cloudflare free candidate generator", () => {
       },
     });
     await assert.rejects(() => malformed.generate(input()), /not valid JSON/);
+
+    const ambiguous = createCloudflareFreeCandidateGenerator({
+      accountId: ACCOUNT_ID,
+      apiToken: API_TOKEN,
+      workersPlan: "free",
+      async fetcher() {
+        return Response.json({
+          choices: [{ message: { content: `${JSON.stringify(candidate())}\n${JSON.stringify(candidate())}` } }],
+        });
+      },
+    });
+    await assert.rejects(() => ambiguous.generate(input()), /ambiguous/);
+
+    const truncated = createCloudflareFreeCandidateGenerator({
+      accountId: ACCOUNT_ID,
+      apiToken: API_TOKEN,
+      workersPlan: "free",
+      async fetcher() {
+        return Response.json({ choices: [{ message: { content: '{"schemaVersion":1' } }] });
+      },
+    });
+    await assert.rejects(() => truncated.generate(input()), /not valid JSON/);
 
     const oversized = createCloudflareFreeCandidateGenerator({
       accountId: ACCOUNT_ID,

@@ -12,7 +12,7 @@ describe("Cloudflare self-build workflow authority", () => {
     assert.match(workflow, /CLOUDFLARE_API_TOKEN: \$\{\{ secrets\.CLOUDFLARE_API_TOKEN \}\}/);
     assert.doesNotMatch(workflow, /\bschedule:/);
     assert.doesNotMatch(workflow, /\bdeploy\b|\bmerge\b|payments?: write/iu);
-    assert.match(workflow, /paths:\n\s+- \.github\/sara\/one-shot-opportunity-to-offer-v1/);
+    assert.match(workflow, /paths:\n\s+- \.github\/sara\/one-shot-opportunity-to-offer-v2/);
     assert.match(workflow, /github\.event_name == 'push'/);
   });
 });
