@@ -18,6 +18,7 @@ export type SaraRuntimeStatus = {
 
 type ServerOptions = {
   ownerTokenSha256: string;
+  readOnlyBridgeTokenSha256?: string;
   runtimeStatus?: () => Promise<SaraRuntimeStatus>;
 };
 
@@ -62,6 +63,11 @@ function json(response: ServerResponse, status: number, body: unknown): void {
 function unauthorized(response: ServerResponse): void {
   response.setHeader("www-authenticate", "Bearer");
   json(response, 401, { error: "Owner authentication required." });
+}
+
+function bridgeUnauthorized(response: ServerResponse): void {
+  response.setHeader("www-authenticate", "Bearer");
+  json(response, 401, { error: "Read-only bridge authentication required." });
 }
 
 type OwnerSession = ReturnType<SaraKernel["authenticateOwnerToken"]>;
@@ -301,6 +307,20 @@ async function routeSaraRequest(
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (await handlePublicRequest(request, response, url, kernel, options)) return;
+
+  if (request.method === "GET" && url.pathname === "/api/bridge/catalog") {
+    if (!options.readOnlyBridgeTokenSha256 || !authenticatedToken(request, options.readOnlyBridgeTokenSha256)) {
+      bridgeUnauthorized(response);
+      return;
+    }
+    json(response, 200, {
+      schemaVersion: 1,
+      access: "read_only",
+      tools: listSaraTools({ lunaConfigured: Boolean(options.runtimeStatus) }),
+      services: listRevenueServices(),
+    });
+    return;
+  }
 
   const token = authenticatedToken(request, options.ownerTokenSha256);
   if (!token) {
