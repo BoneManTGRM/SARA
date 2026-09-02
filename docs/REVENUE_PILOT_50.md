@@ -4,12 +4,12 @@ Status: CANARY runtime candidate. Activation requires the provider and deploymen
 
 ## Work card
 
-Objective: turn the existing public opportunity scout and governed self-build path into the smallest durable opportunity-to-delivery loop that can safely support one standardized paid service.
+Objective: turn the existing public opportunity scout and governed self-build path into the smallest durable opportunity-to-delivery loop that can safely support a bounded catalog of standardized public-repository services.
 
 Observable acceptance criteria:
 
 1. SARA accepts a public opportunity record, rejects automation-prohibited or unsafe scope, and deduplicates it durably.
-2. The only initial service is the `$149 Public Repository Readiness Snapshot` with a `$3.00` per-job execution cap.
+2. Every selectable service comes from the fixed catalog below and has its own immutable customer price, per-job execution cap, compatible goal, required capabilities, and deliverables.
 3. Missing service capabilities become zero-cost self-development jobs whose candidates stop at `SHADOW`.
 4. Fulfillment cannot begin until exact realized customer revenue is recorded and the authenticated owner separately approves the job-bound contract target.
 5. Director, specialist, verifier, and delivery roles run sequentially through expiring leases and survive restart.
@@ -20,6 +20,7 @@ Observable acceptance criteria:
 10. Every routed call has token, attempt, wall-time, and task-cost ceilings; success and all-route failure both produce durable cost evidence without storing prompts or outputs.
 11. After collected revenue and job-bound owner approval, SARA gathers one anonymous, read-only public GitHub evidence snapshot pinned to an immutable commit; the bounded snapshot is integrity-checked, reused by every role, and collection failure stops before any model call.
 12. Genome Lab accepts either a pure skill or a dependency-free multi-file TypeScript program candidate, validates every path and import, type-checks the complete project, runs its tests without network, child-process, or filesystem-write authority, hashes all source and evidence, and stops at `SHADOW`.
+13. The owner API reports the tools SARA actually has and whether runtime configuration is missing; it may not imply a capability merely because a model can describe it.
 
 Out of scope for this candidate:
 
@@ -30,18 +31,30 @@ Out of scope for this candidate:
 - claiming that a generated skill is production-ready before staged evidence and owner promotion;
 - installing arbitrary dependencies, granting generated programs network or secret access, or letting a candidate merge, deploy, or rewrite SARA;
 - adding a second backend, policy authority, ledger, memory system, or dashboard.
+- autonomous financial trading, brokerage access, wallets, speculative asset purchases, or financial-account credentials.
 
 ## Fixed commercial envelope
 
 | Control | Pilot value |
 | --- | ---: |
-| Standard service | Public Repository Readiness Snapshot |
-| Customer price | `$149` |
-| Maximum execution cost per paid job | `$3` |
+| Standard services | Fixed public-repository catalog |
+| Customer price | `$79–$149`, selected before authorization |
+| Maximum execution cost per paid job | `$1–$3`, fixed by service |
 | Owner-funded monthly operating envelope | `$50` |
 | Concurrent paid jobs | `1` |
 | Automated external delivery | Disabled |
 | Final state | Owner review |
+
+### Initial service catalog
+
+| Service | Goal | Price | Execution cap |
+| --- | --- | ---: | ---: |
+| Public Repository Readiness Snapshot | security, release, or dependency readiness | `$149` | `$3` |
+| Documentation Clarity Review | release readiness | `$79` | `$1` |
+| CI Workflow Readiness Review | security baseline or release readiness | `$99` | `$2` |
+| Dependency Hygiene Brief | dependency health | `$79` | `$1` |
+
+Every service uses only anonymous public GitHub evidence pinned to an immutable commit. The catalog does not authorize solicitation, application submission, contracts, payment handling, customer delivery, repository mutation, or production access. Adding a new service requires code review and verification; free-form model output cannot invent one at runtime.
 
 The `$50` value is an operating envelope for this pilot, not a change to the Constitution's protected `$300` ceiling and not a recurring commitment. Provider-side hard limits remain required before any paid runtime or API is activated.
 
@@ -68,7 +81,7 @@ The current implementation includes bounded adapters for OpenAI's Responses API 
 
 ## Skill learning
 
-The first service requires four explicit capabilities:
+Each service requires public-repository inventory, independent verification, delivery-package generation, and its named analysis capability. The original readiness service requires:
 
 - `public-repository-inventory`
 - `readiness-analysis`

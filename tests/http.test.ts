@@ -92,6 +92,31 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.equal((await ownerStatus.json() as { runtime: { startupProof: { status: string } } }).runtime.startupProof.status, "succeeded");
   });
 
+  it("exposes tools and service choices only to the authenticated owner", async () => {
+    assert.equal((await fetch(`${baseUrl}/api/tools`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/revenue-pilot/services`)).status, 401);
+
+    const toolsResponse = await fetch(`${baseUrl}/api/tools`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(toolsResponse.status, 200);
+    const tools = await toolsResponse.json() as Array<{ id: string; status: string }>;
+    assert.equal(tools.find((tool) => tool.id === "luna-worker")?.status, "available");
+
+    const servicesResponse = await fetch(`${baseUrl}/api/revenue-pilot/services`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(servicesResponse.status, 200);
+    const services = await servicesResponse.json() as Array<{ id: string; priceUsd: number }>;
+    assert.deepEqual(services.map((service) => service.id), [
+      "public-repository-readiness-snapshot",
+      "documentation-clarity-review",
+      "ci-workflow-readiness-review",
+      "dependency-hygiene-brief",
+    ]);
+    assert.deepEqual(services.map((service) => service.priceUsd), [149, 79, 99, 79]);
+  });
+
   it("rejects unauthenticated promotion and accepts target-bound owner approval", async () => {
     const unauthenticated = await fetch(`${baseUrl}/api/mutations/${mutationId}/promote`, {
       method: "POST",

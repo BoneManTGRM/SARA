@@ -8,7 +8,7 @@ SARA now has a deliberately small self-development bootstrap around the original
 
 The complete revenue-gated design is preserved in [the definitive master plan](docs/SARA_SEED_MASTER_PLAN.md).
 
-The first bounded commercial implementation is documented in [the $50 revenue pilot](docs/REVENUE_PILOT_50.md). It adds a durable, deduplicated opportunity queue; a fixed `$149` public-repository offer; zero-cost skill-gap work cards; collected-revenue and owner-approval gates; expiring worker leases; anonymous read-only GitHub evidence pinned to an immutable commit; typed role packets; independent verification; and an owner-review delivery stop. Its bounded multi-model seam uses GPT-5.6 Luna as the cheapest paid default and Gemini 3.8 Flash only as a policy-constrained fallback/challenger. It does not activate paid infrastructure or external commercial authority.
+The first bounded commercial implementation is documented in [the $50 revenue pilot](docs/REVENUE_PILOT_50.md). It adds a durable, deduplicated opportunity queue; a fixed catalog of four `$79–$149` public-repository services; zero-cost skill-gap work cards; collected-revenue and owner-approval gates; expiring worker leases; anonymous read-only GitHub evidence pinned to an immutable commit; typed role packets; independent verification; and an owner-review delivery stop. Its bounded multi-model seam uses GPT-5.6 Luna as the cheapest paid default and Gemini 3.8 Flash only as a policy-constrained fallback/challenger. It does not activate paid infrastructure or external commercial authority.
 
 ## Bootstrap economics
 
@@ -75,6 +75,8 @@ npm start
 ```
 
 Open the local dashboard, choose **Unlock owner controls**, and paste the value held in `SARA_OWNER_TOKEN`. The server verifies it in constant time and the kernel issues an owner capability bound to the state’s original authentication digest; caller-authored `authenticated: true` objects have no authority. `/health` remains readable so recovery can be verified during emergency stop. Never commit the token or its plaintext value.
+
+The authenticated owner API exposes `GET /api/tools` for a truthful runtime-aware capability inventory and `GET /api/revenue-pilot/services` for the fixed commercial catalog. `POST /api/revenue-pilot/opportunities` accepts an optional `requestedServiceId`; it still creates only a reviewed plan, and fulfillment remains blocked until exact collected revenue and separate job-bound owner approval are recorded. These endpoints do not connect an external chat bot by themselves. A Telegram or site relay must call them server-to-server without placing owner credentials in a browser or chat transcript.
 
 The local kernel server binds to `127.0.0.1` by default. Do not expose it directly to the public internet. The separate `saraseed.app` owner channel is served over HTTPS and keeps its session, rate limits, directives, and executor bridge at the Cloudflare boundary; it does not expose this local server.
 

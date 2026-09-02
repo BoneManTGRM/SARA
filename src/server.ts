@@ -5,6 +5,8 @@ import { compileExecutorHandoff } from "./handoff.ts";
 import { SaraKernel } from "./kernel.ts";
 import { PolicyDeniedError } from "./policy.ts";
 import type { RevenuePilotInput } from "./revenue-pilot.ts";
+import { listRevenueServices } from "./revenue-service-catalog.ts";
+import { listSaraTools } from "./tool-registry.ts";
 import type { CandidateProposal, MutationStage } from "./types.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -136,6 +138,7 @@ async function handleRevenuePilotOpportunity(
     requestsExploitValidation: body.requestsExploitValidation === true,
     primaryGoal: String(body.primaryGoal ?? "other") as RevenuePilotInput["primaryGoal"],
     customerBudgetUsd: Number(body.customerBudgetUsd),
+    ...(body.requestedServiceId === undefined ? {} : { requestedServiceId: String(body.requestedServiceId) as RevenuePilotInput["requestedServiceId"] }),
     desiredTurnaroundDays: Number(body.desiredTurnaroundDays),
     recentCommitDays: body.recentCommitDays === null ? null : Number(body.recentCommitDays),
   };
@@ -234,6 +237,14 @@ async function handleAuthenticatedRequest(
       ...status,
       runtime: options.runtimeStatus ? await options.runtimeStatus() : null,
     });
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/api/tools") {
+    json(response, 200, listSaraTools({ lunaConfigured: Boolean(options.runtimeStatus) }));
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/api/revenue-pilot/services") {
+    json(response, 200, listRevenueServices());
     return;
   }
   if (request.method === "POST" && url.pathname === "/api/objectives") {

@@ -79,6 +79,42 @@ describe("$50 revenue pilot policy", () => {
     assert.equal(plan.learningObjectives.length, 3);
     assert.ok(plan.learningObjectives.every((objective) => objective.maximumBudgetUsd === 0));
   });
+
+  it("supports several bounded public-repository services without increasing authority", () => {
+    const cases = [
+      ["documentation-clarity-review", "release_readiness", 79, 1],
+      ["ci-workflow-readiness-review", "security_baseline", 99, 2],
+      ["dependency-hygiene-brief", "dependency_health", 79, 1],
+    ] as const;
+
+    for (const [requestedServiceId, primaryGoal, priceUsd, maximumExecutionCostUsd] of cases) {
+      const plan = compileRevenuePilot(qualified({
+        requestedServiceId,
+        primaryGoal,
+        customerBudgetUsd: priceUsd,
+      }));
+
+      assert.equal(plan.decision, "offer_ready");
+      assert.equal(plan.serviceId, requestedServiceId);
+      assert.equal(plan.priceUsd, priceUsd);
+      assert.equal(plan.maximumExecutionCostUsd, maximumExecutionCostUsd);
+      assert.equal(plan.mayBeginFulfillment, false);
+    }
+  });
+
+  it("rejects unknown services and holds mismatched goals for owner review", () => {
+    assert.throws(
+      () => compileRevenuePilot(qualified({ requestedServiceId: "not-a-service" as RevenuePilotInput["requestedServiceId"] })),
+      /service/i,
+    );
+    const plan = compileRevenuePilot(qualified({
+      requestedServiceId: "dependency-hygiene-brief",
+      primaryGoal: "security_baseline",
+      customerBudgetUsd: 79,
+    }));
+    assert.equal(plan.decision, "owner_review");
+    assert.match(plan.evidenceGaps.join(" "), /goal/i);
+  });
 });
 
 describe("durable sequential revenue worker", () => {
@@ -102,6 +138,26 @@ describe("durable sequential revenue worker", () => {
       }),
       /target-bound owner approval/i,
     );
+  });
+
+  it("binds payment authorization to the selected service price", () => {
+    const job = createRevenuePilotJob(qualified({
+      requestedServiceId: "documentation-clarity-review",
+      primaryGoal: "release_readiness",
+      customerBudgetUsd: 79,
+    }), undefined, new Date("2026-09-02T00:00:00.000Z"));
+
+    assert.equal(job.plan.priceUsd, 79);
+    assert.throws(() => authorizeRevenuePilot(job, {
+      collectedRevenueUsd: 78.99,
+      revenueEvidenceId: "ledger-docs",
+      ownerApprovalTarget: `revenue-pilot:${job.id}:fulfillment`,
+    }), /79\.00/);
+    assert.equal(authorizeRevenuePilot(job, {
+      collectedRevenueUsd: 79,
+      revenueEvidenceId: "ledger-docs",
+      ownerApprovalTarget: `revenue-pilot:${job.id}:fulfillment`,
+    }).status, "queued");
   });
 
   it("leases one role at a time, survives expiry, and stops at owner-reviewed delivery", () => {
