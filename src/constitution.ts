@@ -80,21 +80,37 @@ export function defaultConstitutionPath(): string {
   return fileURLToPath(new URL("../constitution/constitution.v1.json", import.meta.url));
 }
 
-function assertConstitutionShape(value: unknown): asserts value is SaraConstitution {
-  if (!value || typeof value !== "object") throw new ConstitutionIntegrityError("Constitution must be an object.");
-  const c = value as Partial<SaraConstitution>;
-  const authority = c.ownerAuthority;
-  const stewardship = c.stewardship;
-  const succession = c.familySuccession;
+function unsupportedConstitution(): never {
+  throw new ConstitutionIntegrityError("Constitution schema or version is unsupported.");
+}
+
+function assertCoreCollections(c: Partial<SaraConstitution>): void {
   if (
     c.version !== 1 ||
-    !authority ||
+    !Array.isArray(c.priorityHierarchy) ||
+    !Array.isArray(c.protectedActions) ||
+    !Array.isArray(c.principles) ||
+    !Array.isArray(c.longTermTrajectory)
+  ) {
+    unsupportedConstitution();
+  }
+}
+
+function assertStewardship(stewardship: SaraConstitution["stewardship"] | undefined): void {
+  if (
     !stewardship ||
     !Array.isArray(stewardship.beneficiaries) ||
     !stewardship.duty ||
     !stewardship.truthfulIdentity ||
     !stewardship.financialSafety ||
-    !stewardship.taxCompliance ||
+    !stewardship.taxCompliance
+  ) {
+    unsupportedConstitution();
+  }
+}
+
+function assertSuccession(succession: SaraConstitution["familySuccession"] | undefined): void {
+  if (
     !succession ||
     succession.status !== "UNCONFIGURED_PENDING_LEGAL_INSTRUMENT" ||
     succession.distributionModel !== "SPOUSE_PRIMARY_REASON_AWARE_FALLBACK" ||
@@ -102,14 +118,14 @@ function assertConstitutionShape(value: unknown): asserts value is SaraConstitut
     succession.spouseDeathOrIncapacityFallback !== "OWNER_CHILD_EQUAL_THEN_SURVIVOR" ||
     succession.spouseSeparationOrOwnerRevocationFallback !== "OWNER_THEN_CHILD" ||
     !Array.isArray(succession.activationRequirements) ||
-    succession.activationRequirements.length === 0 ||
-    !Array.isArray(c.priorityHierarchy) ||
-    !Array.isArray(c.protectedActions) ||
-    !Array.isArray(c.principles) ||
-    !Array.isArray(c.longTermTrajectory)
+    succession.activationRequirements.length === 0
   ) {
-    throw new ConstitutionIntegrityError("Constitution schema or version is unsupported.");
+    unsupportedConstitution();
   }
+}
+
+function assertOwnerAuthority(authority: SaraConstitution["ownerAuthority"] | undefined): void {
+  if (!authority) unsupportedConstitution();
   if (authority.ownerFundedRecurringMonthlyUsdMaximum !== 300) {
     throw new ConstitutionIntegrityError("The protected owner-funded recurring ceiling must remain $300.");
   }
@@ -124,6 +140,15 @@ function assertConstitutionShape(value: unknown): asserts value is SaraConstitut
   ) {
     throw new ConstitutionIntegrityError("Protected distribution and reinvestment limits changed.");
   }
+}
+
+export function assertConstitutionShape(value: unknown): asserts value is SaraConstitution {
+  if (!value || typeof value !== "object") throw new ConstitutionIntegrityError("Constitution must be an object.");
+  const c = value as Partial<SaraConstitution>;
+  assertCoreCollections(c);
+  assertStewardship(c.stewardship);
+  assertSuccession(c.familySuccession);
+  assertOwnerAuthority(c.ownerAuthority);
 }
 
 export async function loadConstitution(path = defaultConstitutionPath()): Promise<{
