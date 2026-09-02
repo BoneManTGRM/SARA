@@ -1,0 +1,42 @@
+name: SARA zero-cost revenue scout
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sara-zero-cost-revenue-scout
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Refresh bounded public opportunity ledger
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger SARA's idempotent public scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="${RUNNER_TEMP}/sara-revenue-scan.json"
+          curl --fail-with-body --silent --show-error \
+            --max-time 30 \
+            --retry 1 \
+            --retry-delay 5 \
+            --request POST \
+            --header "accept: application/json" \
+            --output "${output}" \
+            "https://saraseed.app/api/revenue/scan"
+          node -e '
+            const fs = require("node:fs");
+            const result = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+            if (result.ok !== true) throw new Error("SARA scan did not complete.");
+            if (result?.summary?.maximumOwnerCostUsd !== 0) throw new Error("Non-zero owner cost rejected.");
+            if (result?.summary?.externalActions !== 0) throw new Error("External action rejected.");
+            if (result?.protections?.paidRetries !== false) throw new Error("Paid retry protection missing.");
+            console.log("SARA bounded revenue scan completed at $0 with zero external actions.");
+          ' "${output}"
