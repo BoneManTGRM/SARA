@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -18,6 +18,8 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const execFileAsync = promisify(execFile);
 const MAX_SOURCE_BYTES = 32 * 1024;
 const MAX_TEST_VECTORS = 16;
+const MAX_SKILL_INPUT_BYTES = 16 * 1024;
+const MAX_SKILL_OUTPUT_BYTES = 64 * 1024;
 const BLOCKED_IDENTIFIERS = new Set([
   "Bun",
   "Date",
@@ -264,9 +266,24 @@ export async function buildVerifiedSkillCandidate(
     }).outputText;
     const runtimeSkillPath = join(runtimeDirectory, "skill.mjs");
     const runtimeVerificationPath = join(runtimeDirectory, "verification.mjs");
+    const runtimeExecutionPath = join(runtimeDirectory, "execute.mjs");
+    const runtimeExecution = [
+      'import { runSkill } from "./skill.mjs";',
+      'let raw = "";',
+      'process.stdin.setEncoding("utf8");',
+      'for await (const chunk of process.stdin) raw += chunk;',
+      `if (Buffer.byteLength(raw, "utf8") > ${MAX_SKILL_INPUT_BYTES}) throw new Error("Skill input exceeds the runtime limit.");`,
+      "const input = JSON.parse(raw);",
+      "const output = await Promise.resolve(runSkill(structuredClone(input)));",
+      "const serialized = JSON.stringify({ output });",
+      'if (serialized === undefined) throw new Error("Skill output is not JSON serializable.");',
+      "process.stdout.write(serialized);",
+      "",
+    ].join("\n");
     await Promise.all([
       writeFile(runtimeSkillPath, runtimeSkill, { encoding: "utf8", mode: 0o600 }),
       writeFile(runtimeVerificationPath, runtimeVerification, { encoding: "utf8", mode: 0o600 }),
+      writeFile(runtimeExecutionPath, runtimeExecution, { encoding: "utf8", mode: 0o600 }),
     ]);
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
@@ -346,6 +363,75 @@ export async function verifyGenomeLabArtifact(
 }
 
 export const verifyDeterministicSkillScaffold = verifyGenomeLabArtifact;
+
+export async function executeVerifiedSkillCandidate(
+  stateDirectory: string,
+  artifactRelativePath: string,
+  expectedDigest: string,
+  input: unknown,
+): Promise<unknown> {
+  const serializedInput = canonicalJson(input);
+  if (Buffer.byteLength(serializedInput, "utf8") > MAX_SKILL_INPUT_BYTES) {
+    throw new Error("Skill input exceeds the 16 KiB runtime limit.");
+  }
+  await verifyGenomeLabArtifact(stateDirectory, artifactRelativePath, expectedDigest);
+  const parts = artifactRelativePath.split(/[\\/]/);
+  const runtimeDirectory = join(stateDirectory, parts[0], parts[1], "runtime");
+  const runtimeExecutionPath = join(runtimeDirectory, "execute.mjs");
+  return await new Promise<unknown>((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["--permission", `--allow-fs-read=${runtimeDirectory}`, "--max-old-space-size=64", runtimeExecutionPath],
+      {
+        cwd: runtimeDirectory,
+        env: { NODE_NO_WARNINGS: "1" },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const rejectOnce = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.kill("SIGKILL");
+      reject(error);
+    };
+    const timeout = setTimeout(() => rejectOnce(new Error("Skill execution exceeded the 3 second limit.")), 3_000);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+      if (Buffer.byteLength(stdout, "utf8") > MAX_SKILL_OUTPUT_BYTES) {
+        rejectOnce(new Error("Skill output exceeds the 64 KiB runtime limit."));
+      }
+    });
+    child.stderr.on("data", (chunk: string) => {
+      stderr += chunk;
+      if (Buffer.byteLength(stderr, "utf8") > MAX_SKILL_OUTPUT_BYTES) {
+        rejectOnce(new Error("Skill error output exceeds the runtime limit."));
+      }
+    });
+    child.once("error", (error) => rejectOnce(error));
+    child.once("close", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (code !== 0) {
+        reject(new Error(`Skill execution failed closed (exit ${String(code)}): ${stderr.trim().slice(0, 500)}`));
+        return;
+      }
+      try {
+        const envelope = JSON.parse(stdout) as { output?: unknown };
+        resolve(envelope.output);
+      } catch {
+        reject(new Error("Skill execution returned malformed JSON output."));
+      }
+    });
+    child.stdin.end(serializedInput);
+  });
+}
 
 export async function buildDeterministicSkillScaffold(
   handoff: ExecutorHandoff,

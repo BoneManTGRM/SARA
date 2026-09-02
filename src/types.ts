@@ -162,6 +162,44 @@ export type SkillCandidateProposal = {
   limitations: string[];
 };
 
+export type SkillLifecycleStatus = "shadow" | "canary" | "available" | "quarantined";
+
+export type SkillRecord = {
+  id: string;
+  mutationId: string;
+  jobId: string;
+  skillName: string;
+  summary: string;
+  limitations: string[];
+  testNames: string[];
+  artifactRelativePath: string;
+  candidateDigest: string;
+  capabilityId?: string;
+  capabilityName?: string;
+  status: SkillLifecycleStatus;
+  source: {
+    generatorId: string;
+    external: boolean;
+    maximumCostUsd: number;
+  };
+  createdAt: string;
+  executionCount: number;
+  lastExecution?: {
+    succeeded: boolean;
+    inputDigest: string;
+    outputDigest?: string;
+    observedAt: string;
+  };
+};
+
+export type SkillExecutionResult = {
+  skillId: string;
+  capabilityId: string;
+  output: unknown;
+  inputDigest: string;
+  outputDigest: string;
+};
+
 export type CandidateGenerator = {
   id: string;
   external: boolean;

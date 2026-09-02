@@ -57,6 +57,13 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.match(html, /Owner state locked/);
     assert.match(html, /Owner directive channel/);
     assert.match(html, /id="directive-fields" disabled/);
+    assert.match(html, /Digital job desk/);
+    assert.match(html, /id="digital-job-fields" disabled/);
+    assert.match(html, /Verified skill registry/);
+    assert.match(html, /id="skill-list"/);
+    const inlineScript = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+    assert.ok(inlineScript, "dashboard must contain its owner-control script");
+    assert.doesNotThrow(() => new Function(inlineScript), "dashboard owner-control script must parse");
     assert.match(html, /prefers-reduced-motion: reduce/);
     assert.match(html, /@media \(max-width: 720px\)/);
     assert.match(html, /No deployment, live banking, or general autonomous coder implied/);

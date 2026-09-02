@@ -2,6 +2,7 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DASHBOARD_HTML } from "./dashboard.ts";
 import { compileExecutorHandoff } from "./handoff.ts";
+import { compileDigitalWorkHandoff, type DigitalJobKind, type DigitalJobSafetyDeclaration, type DigitalWorkResult } from "./digital-work.ts";
 import { SaraKernel } from "./kernel.ts";
 import { PolicyDeniedError } from "./policy.ts";
 import type { MutationStage, SkillCandidateProposal } from "./types.ts";
@@ -138,6 +139,112 @@ async function handleSelfBuild(
   );
 }
 
+async function handleCreateDigitalJob(
+  request: IncomingMessage,
+  response: ServerResponse,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+): Promise<void> {
+  const body = await readJson(request);
+  const safety = body.safety && typeof body.safety === "object" && !Array.isArray(body.safety)
+    ? body.safety as DigitalJobSafetyDeclaration
+    : {} as DigitalJobSafetyDeclaration;
+  const job = await kernel.createDigitalWorkJob(owner, {
+    kind: String(body.kind ?? "") as DigitalJobKind,
+    objective: String(body.objective ?? ""),
+    ...(typeof body.sourceUrl === "string" ? { sourceUrl: body.sourceUrl } : {}),
+    ...(typeof body.buyerReference === "string" ? { buyerReference: body.buyerReference } : {}),
+    authorizedScope: String(body.authorizedScope ?? ""),
+    expectedDeliverables: Array.isArray(body.expectedDeliverables) ? body.expectedDeliverables.map(String) : [],
+    acceptanceCriteria: Array.isArray(body.acceptanceCriteria) ? body.acceptanceCriteria.map(String) : [],
+    acceptanceCriteriaAutomatable: body.acceptanceCriteriaAutomatable === true,
+    maximumBudgetUsd: Number(body.maximumBudgetUsd ?? Number.NaN),
+    ...(body.offeredCompensationUsd === undefined ? {} : { offeredCompensationUsd: Number(body.offeredCompensationUsd) }),
+    safety,
+  });
+  json(response, 201, job);
+}
+
+async function handleDigitalJobAction(
+  request: IncomingMessage,
+  response: ServerResponse,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+  jobId: string,
+  action: string,
+): Promise<void> {
+  if (action === "authorize") {
+    json(response, 200, await kernel.authorizeDigitalWorkJob(owner, jobId, {
+      approvalId: randomUUID(),
+      action: "contract_commitment",
+      targetId: `digital-job:${jobId}:accept`,
+      approvedAt: new Date().toISOString(),
+      ownerId: owner.id,
+    }));
+    return;
+  }
+  if (action === "handoff" && request.method === "GET") {
+    const job = (await kernel.getStatus()).digitalJobs.find((candidate) => candidate.id === jobId);
+    if (!job) {
+      json(response, 404, { error: "Digital job not found." });
+      return;
+    }
+    json(response, 200, compileDigitalWorkHandoff(job, kernel.constitutionDigest));
+    return;
+  }
+  const body = await readJson(request);
+  if (action === "start") {
+    json(response, 200, await kernel.startDigitalWorkJob(
+      owner,
+      jobId,
+      String(body.executorId ?? ""),
+      Number(body.maximumCostUsd ?? Number.NaN),
+    ));
+    return;
+  }
+  if (action === "complete") {
+    json(response, 200, await kernel.completeDigitalWorkJob(owner, jobId, body.result as DigitalWorkResult));
+    return;
+  }
+  if (action === "human-review") {
+    json(response, 200, await kernel.recordDigitalWorkHumanReview(owner, jobId, {
+      reviewer: String(body.reviewer ?? "") as "owner" | "qualified_human",
+      decision: String(body.decision ?? "") as "approved" | "rejected",
+      evidenceDigest: String(body.evidenceDigest ?? ""),
+    }));
+    return;
+  }
+  if (action === "authorize-delivery") {
+    const job = (await kernel.getStatus()).digitalJobs.find((candidate) => candidate.id === jobId);
+    if (!job?.result) {
+      json(response, 409, { error: "Digital job is not ready for delivery authorization." });
+      return;
+    }
+    json(response, 200, await kernel.authorizeDigitalWorkDelivery(owner, jobId, {
+      approvalId: randomUUID(),
+      action: "contract_commitment",
+      targetId: `digital-job:${jobId}:deliver:${job.result.artifactDigest}`,
+      approvedAt: new Date().toISOString(),
+      ownerId: owner.id,
+    }));
+    return;
+  }
+  if (action === "record-delivery") {
+    json(response, 200, await kernel.recordDigitalWorkDelivery(owner, jobId, String(body.evidenceDigest ?? "")));
+    return;
+  }
+  if (action === "record-payment") {
+    json(response, 200, await kernel.recordDigitalWorkPayment(
+      owner,
+      jobId,
+      Number(body.amountUsd ?? Number.NaN),
+      String(body.evidenceDigest ?? ""),
+    ));
+    return;
+  }
+  json(response, 404, { error: "Unknown digital job action." });
+}
+
 async function handleMutationPromotion(
   request: IncomingMessage,
   response: ServerResponse,
@@ -157,6 +264,34 @@ async function handleMutationPromotion(
   json(response, 200, mutation);
 }
 
+async function handleSkillCapabilityBinding(
+  request: IncomingMessage,
+  response: ServerResponse,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+  skillId: string,
+): Promise<void> {
+  const body = await readJson(request);
+  json(response, 200, await kernel.bindSkillCapability(
+    owner,
+    skillId,
+    String(body.capabilityId ?? ""),
+    String(body.capabilityName ?? ""),
+  ));
+}
+
+async function handleSkillExecution(
+  request: IncomingMessage,
+  response: ServerResponse,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+  capabilityId: string,
+): Promise<void> {
+  const body = await readJson(request);
+  if (!("input" in body)) throw new Error("Skill execution requires a JSON input field.");
+  json(response, 200, await kernel.executeRegisteredSkill(owner, capabilityId, body.input));
+}
+
 async function handleAuthenticatedRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -170,6 +305,10 @@ async function handleAuthenticatedRequest(
   }
   if (request.method === "POST" && url.pathname === "/api/objectives") {
     await handleObjectives(request, response, kernel, owner);
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/digital-jobs") {
+    await handleCreateDigitalJob(request, response, kernel, owner);
     return;
   }
   if (request.method === "POST" && url.pathname === "/api/emergency-stop") {
@@ -189,6 +328,28 @@ async function handleAuthenticatedRequest(
   const selfBuildMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/self-build$/);
   if (request.method === "POST" && selfBuildMatch) {
     await handleSelfBuild(request, response, kernel, owner, decodeURIComponent(selfBuildMatch[1]));
+    return;
+  }
+  const digitalJobMatch = url.pathname.match(/^\/api\/digital-jobs\/([^/]+)\/(authorize|handoff|start|complete|human-review|authorize-delivery|record-delivery|record-payment)$/);
+  if (digitalJobMatch && (request.method === "POST" || (request.method === "GET" && digitalJobMatch[2] === "handoff"))) {
+    await handleDigitalJobAction(
+      request,
+      response,
+      kernel,
+      owner,
+      decodeURIComponent(digitalJobMatch[1]),
+      digitalJobMatch[2],
+    );
+    return;
+  }
+  const bindSkillMatch = url.pathname.match(/^\/api\/skills\/([^/]+)\/bind-capability$/);
+  if (request.method === "POST" && bindSkillMatch) {
+    await handleSkillCapabilityBinding(request, response, kernel, owner, decodeURIComponent(bindSkillMatch[1]));
+    return;
+  }
+  const executeSkillMatch = url.pathname.match(/^\/api\/capabilities\/([^/]+)\/execute$/);
+  if (request.method === "POST" && executeSkillMatch) {
+    await handleSkillExecution(request, response, kernel, owner, decodeURIComponent(executeSkillMatch[1]));
     return;
   }
   const promoteMatch = url.pathname.match(/^\/api\/mutations\/([^/]+)\/promote$/);

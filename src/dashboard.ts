@@ -470,6 +470,17 @@ export const DASHBOARD_HTML = `<!doctype html>
     .mutation-row { display: grid; grid-template-columns: 1fr auto; gap: 15px; align-items: center; padding: 12px 13px; border: 1px solid rgba(162, 233, 199, .1); border-radius: 13px; background: rgba(3, 9, 7, .35); }
     .mutation-title { min-width: 0; overflow: hidden; color: #cce4d8; font-family: var(--mono); font-size: .67rem; text-overflow: ellipsis; white-space: nowrap; }
     .stage { padding: 4px 7px; border: 1px solid rgba(255, 195, 110, .25); border-radius: 999px; color: var(--amber); font-family: var(--mono); font-size: .55rem; }
+    .skill-registry { margin-top: 17px; border: 1px solid rgba(162, 233, 199, .12); border-radius: 14px; background: rgba(3, 9, 7, .28); }
+    .skill-registry summary { display: flex; justify-content: space-between; gap: 12px; padding: 12px 13px; color: #a9c8b8; cursor: pointer; font: .62rem var(--mono); list-style: none; text-transform: uppercase; }
+    .skill-registry summary::-webkit-details-marker { display: none; }
+    .skill-registry summary::after { color: var(--mint); content: "+"; }
+    .skill-registry[open] summary::after { content: "−"; }
+    .skill-list { display: grid; gap: 8px; max-height: 250px; padding: 0 10px 10px; overflow: auto; }
+    .skill-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; border: 1px solid rgba(162, 233, 199, .1); border-radius: 11px; }
+    .skill-row strong, .skill-row span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .skill-row strong { color: #cce4d8; font: .65rem var(--mono); }
+    .skill-row span { margin-top: 4px; color: #789185; font: .54rem var(--mono); text-transform: uppercase; }
+    .skill-row .button { min-height: 31px; padding: 0 9px; font-size: .52rem; }
 
     .memory-cells { position: absolute; inset: auto -15px -20px auto; width: 180px; height: 150px; opacity: .34; }
     .memory-cells span { position: absolute; width: 42px; height: 42px; border: 1px solid rgba(125, 247, 189, .3); border-radius: 50% 50% 46% 54%; }
@@ -496,12 +507,20 @@ export const DASHBOARD_HTML = `<!doctype html>
     .directive-form fieldset { display: contents; }
     .directive-form label { display: grid; gap: 8px; color: #b9cbbf; font-size: .63rem; font-weight: 720; letter-spacing: .09em; text-transform: uppercase; }
     .directive-form label.wide { grid-column: 1 / -1; }
-    .directive-form input, .directive-form textarea { width: 100%; border: 1px solid var(--line-bright); border-radius: 13px; background: rgba(4, 12, 8, .7); color: var(--text); font: .77rem var(--sans); text-transform: none; letter-spacing: 0; }
-    .directive-form input { min-height: 45px; padding: 0 13px; }
+    .directive-form input, .directive-form textarea, .directive-form select { width: 100%; border: 1px solid var(--line-bright); border-radius: 13px; background: rgba(4, 12, 8, .7); color: var(--text); font: .77rem var(--sans); text-transform: none; letter-spacing: 0; }
+    .directive-form input, .directive-form select { min-height: 45px; padding: 0 13px; }
     .directive-form textarea { min-height: 88px; padding: 12px 13px; resize: vertical; }
-    .directive-form input:disabled, .directive-form textarea:disabled { opacity: .45; cursor: not-allowed; }
+    .directive-form input:disabled, .directive-form textarea:disabled, .directive-form select:disabled { opacity: .45; cursor: not-allowed; }
+    .directive-form .check { display: flex; grid-column: 1 / -1; grid-template-columns: auto 1fr; align-items: start; gap: 10px; color: var(--muted); font: .64rem/1.55 var(--mono); letter-spacing: 0; text-transform: none; }
+    .directive-form .check input { width: 18px; min-height: 18px; margin-top: 2px; padding: 0; accent-color: var(--mint); }
     .directive-actions { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 15px; }
     .directive-hint { max-width: 420px; color: var(--muted); font: .62rem/1.55 var(--mono); }
+    .digital-jobs { display: grid; gap: 9px; margin-top: 20px; }
+    .digital-job { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 13px; border: 1px solid rgba(162, 233, 199, .12); border-radius: 13px; background: rgba(3, 9, 7, .38); }
+    .digital-job strong, .digital-job span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .digital-job strong { color: #cce4d8; font: .69rem var(--mono); }
+    .digital-job span { margin-top: 5px; color: #789185; font: .58rem var(--mono); text-transform: uppercase; }
+    .digital-job .button { min-height: 35px; padding: 0 11px; font-size: .58rem; }
 
     .emergency {
       display: grid;
@@ -720,6 +739,10 @@ export const DASHBOARD_HTML = `<!doctype html>
               <div class="card-value small">Champion / Challenger</div>
               <p class="card-copy">Candidate code begins in isolation. Evidence, semantic compilation, artifact integrity, stage gates, and owner approval stand between a mutation and production.</p>
               <div class="mutation-list" id="mutations"><div class="mutation-empty">Owner state locked<br>Mutation history remains private</div></div>
+              <details class="skill-registry">
+                <summary><span>Verified skill registry</span><span id="skill-count">—</span></summary>
+                <div class="skill-list" id="skill-list"><div class="mutation-empty">Owner state locked</div></div>
+              </details>
             </div>
           </article>
 
@@ -775,8 +798,62 @@ export const DASHBOARD_HTML = `<!doctype html>
             </div>
           </article>
 
-          <article class="card span-12 emergency">
+          <article class="card span-12 directive-card">
             <span class="card-number">01.09</span>
+            <div class="card-pad directive-layout">
+              <div>
+                <div class="card-label">Digital job desk</div>
+                <div class="card-value small">Seven bounded job families.</div>
+                <p class="card-copy">Qualify software, testing, documentation, localization, public research, data transformation, or repository-assessment work. Creation does not accept a contract. External work requires a second, exact owner authorization.</p>
+                <div class="digital-jobs" id="digital-jobs"><div class="mutation-empty">Owner state locked<br>Digital jobs remain private</div></div>
+              </div>
+              <form class="directive-form" id="digital-job-form">
+                <fieldset id="digital-job-fields" disabled>
+                  <label>Job family
+                    <select id="digital-kind" required>
+                      <option value="software_change">Software change</option>
+                      <option value="software_testing">Software testing</option>
+                      <option value="documentation">Documentation</option>
+                      <option value="localization">Localization</option>
+                      <option value="public_research">Public research</option>
+                      <option value="data_transformation">Data transformation</option>
+                      <option value="repository_assessment">Repository assessment</option>
+                    </select>
+                  </label>
+                  <label>Public source URL (optional)
+                    <input id="digital-source" type="url" maxlength="2048" placeholder="https://example.com/opportunity">
+                  </label>
+                  <label class="wide">Objective
+                    <textarea id="digital-objective" maxlength="1200" required placeholder="Produce a reviewable, zero-cost artifact without production changes."></textarea>
+                  </label>
+                  <label class="wide">Authorized scope
+                    <textarea id="digital-scope" maxlength="1200" required placeholder="Public or owner-provided non-sensitive inputs; isolated draft output only."></textarea>
+                  </label>
+                  <label>Buyer or program reference (optional)
+                    <input id="digital-buyer" maxlength="300" placeholder="Program or customer reference">
+                  </label>
+                  <label>Offered compensation (optional)
+                    <input id="digital-compensation" type="number" min="0" step="0.01" placeholder="149">
+                  </label>
+                  <label class="wide">Expected deliverables — one per line
+                    <textarea id="digital-deliverables" maxlength="3000" required placeholder="Reviewable draft artifact&#10;Verification record"></textarea>
+                  </label>
+                  <label class="wide">Acceptance criteria — one per line
+                    <textarea id="digital-acceptance" maxlength="5000" required placeholder="All focused tests pass&#10;No production deployment occurs"></textarea>
+                  </label>
+                  <label class="check"><input id="digital-automatable" type="checkbox"><span>Every acceptance criterion is machine-verifiable. Leave unchecked when a human must judge quality, meaning, safety, or correctness.</span></label>
+                  <label class="check"><input id="digital-safe" type="checkbox" required><span>I confirm the input is public or owner-provided and non-sensitive, and the job needs no credentials, private customer data, human identity, regulated judgment, exploit testing, or new external account.</span></label>
+                  <div class="directive-actions">
+                    <span class="directive-hint">Execution is locked to $0 and isolated draft artifacts. Delivery, contracts, production, and money stay owner-gated.</span>
+                    <button class="button primary" type="submit">Qualify exact job</button>
+                  </div>
+                </fieldset>
+              </form>
+            </div>
+          </article>
+
+          <article class="card span-12 emergency">
+            <span class="card-number">01.10</span>
             <div class="card-pad">
               <div class="card-label">Constitutional emergency stop</div>
               <div class="card-value small">Owner remains above the machine.</div>
@@ -826,6 +903,8 @@ export const DASHBOARD_HTML = `<!doctype html>
     const dialogError = document.querySelector('#dialog-error');
     const directiveForm = document.querySelector('#directive-form');
     const directiveFields = document.querySelector('#directive-fields');
+    const digitalJobForm = document.querySelector('#digital-job-form');
+    const digitalJobFields = document.querySelector('#digital-job-fields');
     const auth = () => ({ Authorization: 'Bearer ' + (sessionStorage.getItem('sara-owner-token') || '') });
     const money = (value) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 
@@ -839,6 +918,39 @@ export const DASHBOARD_HTML = `<!doctype html>
       connectButton.textContent = connected ? 'Disconnect' : 'Owner access';
       document.querySelector('#connection-state').textContent = connected ? 'Owner link verified' : 'Owner state locked';
       directiveFields.disabled = !connected;
+      digitalJobFields.disabled = !connected;
+    }
+
+    function renderDigitalJobs(jobs) {
+      const container = document.querySelector('#digital-jobs');
+      container.replaceChildren();
+      if (!jobs.length) {
+        const empty = document.createElement('div');
+        empty.className = 'mutation-empty';
+        empty.textContent = 'No digital jobs qualified yet.';
+        container.append(empty);
+        return;
+      }
+      jobs.slice(-8).reverse().forEach((job) => {
+        const row = document.createElement('div');
+        row.className = 'digital-job';
+        const copy = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = job.card.objective;
+        const meta = document.createElement('span');
+        meta.textContent = job.card.kind.replaceAll('_', ' ') + ' · ' + job.status;
+        copy.append(title, meta);
+        row.append(copy);
+        if (job.status === 'qualified') {
+          const authorize = document.createElement('button');
+          authorize.className = 'button';
+          authorize.type = 'button';
+          authorize.dataset.authorizeJob = job.id;
+          authorize.textContent = job.card.requiresOwnerAcceptance ? 'Authorize exact job' : 'Authorize internal job';
+          row.append(authorize);
+        }
+        container.append(row);
+      });
     }
 
     function renderMutations(mutations) {
@@ -865,6 +977,53 @@ export const DASHBOARD_HTML = `<!doctype html>
       });
     }
 
+    function renderSkills(skills) {
+      document.querySelector('#skill-count').textContent = String(skills.length);
+      const container = document.querySelector('#skill-list');
+      container.replaceChildren();
+      if (!skills.length) {
+        const empty = document.createElement('div');
+        empty.className = 'mutation-empty';
+        empty.textContent = 'No verified skill candidates yet.';
+        container.append(empty);
+        return;
+      }
+      skills.slice(-8).reverse().forEach((skill) => {
+        const row = document.createElement('div');
+        row.className = 'skill-row';
+        const copy = document.createElement('div');
+        const title = document.createElement('strong');
+        title.textContent = skill.skillName;
+        const meta = document.createElement('span');
+        meta.textContent = (skill.capabilityId || 'unbound') + ' · ' + skill.status + ' · ' + skill.executionCount + ' runs';
+        copy.append(title, meta);
+        row.append(copy);
+        const action = document.createElement('button');
+        action.className = 'button';
+        action.type = 'button';
+        if (!skill.capabilityId && skill.status !== 'quarantined') {
+          action.dataset.bindSkill = skill.id;
+          action.textContent = 'Bind';
+        } else if (skill.status === 'shadow') {
+          action.dataset.promoteSkill = skill.mutationId;
+          action.dataset.nextStage = 'CANARY';
+          action.textContent = 'Canary';
+        } else if (skill.status === 'canary') {
+          action.dataset.promoteSkill = skill.mutationId;
+          action.dataset.nextStage = 'LIMITED_PRODUCTION';
+          action.textContent = 'Limited';
+        } else if (skill.status === 'available') {
+          action.dataset.executeSkill = skill.capabilityId;
+          action.textContent = 'Test run';
+        } else {
+          action.disabled = true;
+          action.textContent = 'Quarantined';
+        }
+        row.append(action);
+        container.append(row);
+      });
+    }
+
     async function loadPrivateState() {
       const response = await fetch('/api/status', { headers: auth() });
       if (!response.ok) {
@@ -879,7 +1038,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       operating.querySelector('span:last-child').textContent = state.emergencyStopped ? 'Stopped' : 'Operating';
       document.querySelector('#operating-copy').textContent = state.emergencyStopped ? 'Constitutional stop is active. Protected reads and recovery remain available.' : 'The verified kernel is available inside its current authority boundary.';
       document.querySelector('#owner-cost').textContent = money(state.ownerFundedRecurringMonthlyUsd);
-      document.querySelector('#jobs').textContent = String(state.jobs.length);
+      document.querySelector('#jobs').textContent = String(state.jobs.length + state.digitalJobs.length);
       document.querySelector('#capabilities').textContent = String(state.capabilities.length);
       document.querySelector('#compound-reserve').textContent = money(state.availableCompoundReserveUsd);
       document.querySelector('#constitution').textContent = 'Verified · v' + state.constitution.version;
@@ -889,6 +1048,8 @@ export const DASHBOARD_HTML = `<!doctype html>
       document.querySelector('#events').textContent = String(state.audit.eventCount);
       document.querySelector('#audit-head').textContent = state.audit.headHash || 'Genesis state · no audit head';
       renderMutations(state.mutations);
+      renderSkills(state.skills);
+      renderDigitalJobs(state.digitalJobs);
       const stop = document.querySelector('#stop');
       stop.disabled = false;
       stop.textContent = state.emergencyStopped ? 'Release stop' : 'Engage stop';
@@ -958,7 +1119,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       event.preventDefault();
       const objective = document.querySelector('#directive-objective').value.trim();
       const acceptanceCriteria = document.querySelector('#directive-criteria').value
-        .split(/\n+/)
+        .split(/\\n+/)
         .map((line) => line.trim())
         .filter(Boolean);
       if (!objective || !acceptanceCriteria.length) {
@@ -991,6 +1152,143 @@ export const DASHBOARD_HTML = `<!doctype html>
         setMessage(error.message, true);
       } finally {
         submit.disabled = false;
+      }
+    });
+
+    function lines(selector) {
+      return document.querySelector(selector).value.split(/\\n+/).map((line) => line.trim()).filter(Boolean);
+    }
+
+    digitalJobForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const submit = digitalJobForm.querySelector('button[type="submit"]');
+      submit.disabled = true;
+      setMessage('Compiling a least-authority digital work card…', false);
+      try {
+        const compensation = document.querySelector('#digital-compensation').value;
+        const response = await fetch('/api/digital-jobs', {
+          method: 'POST',
+          headers: Object.assign({}, auth(), { 'content-type': 'application/json' }),
+          body: JSON.stringify({
+            kind: document.querySelector('#digital-kind').value,
+            objective: document.querySelector('#digital-objective').value.trim(),
+            sourceUrl: document.querySelector('#digital-source').value.trim() || undefined,
+            buyerReference: document.querySelector('#digital-buyer').value.trim() || undefined,
+            authorizedScope: document.querySelector('#digital-scope').value.trim(),
+            expectedDeliverables: lines('#digital-deliverables'),
+            acceptanceCriteria: lines('#digital-acceptance'),
+            acceptanceCriteriaAutomatable: document.querySelector('#digital-automatable').checked,
+            maximumBudgetUsd: 0,
+            offeredCompensationUsd: compensation === '' ? undefined : Number(compensation),
+            safety: {
+              publicOrOwnerProvidedNonSensitiveInput: document.querySelector('#digital-safe').checked,
+              requiresCredentials: false,
+              containsPrivateCustomerData: false,
+              requiresHumanIdentity: false,
+              requiresRegulatedJudgment: false,
+              requiresSecurityExploitation: false,
+              requiresExternalAccountCreation: false
+            }
+          })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Digital job was rejected.');
+        digitalJobForm.reset();
+        await loadPrivateState();
+        setMessage('Job qualified but not yet accepted: ' + result.id, false);
+      } catch (error) {
+        setMessage(error.message, true);
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    document.querySelector('#digital-jobs').addEventListener('click', async (event) => {
+      const button = event.target.closest('[data-authorize-job]');
+      if (!button) return;
+      if (!window.confirm('Authorize this exact bounded job? This records owner acceptance, but does not authorize delivery, spending, deployment, or payment.')) return;
+      button.disabled = true;
+      try {
+        const response = await fetch('/api/digital-jobs/' + encodeURIComponent(button.dataset.authorizeJob) + '/authorize', {
+          method: 'POST',
+          headers: Object.assign({}, auth(), { 'content-type': 'application/json' }),
+          body: '{}'
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Digital job authorization was rejected.');
+        await loadPrivateState();
+        setMessage('Exact digital job authorized for a compatible $0 executor.', false);
+      } catch (error) {
+        setMessage(error.message, true);
+        button.disabled = false;
+      }
+    });
+
+    document.querySelector('#skill-list').addEventListener('click', async (event) => {
+      const bind = event.target.closest('[data-bind-skill]');
+      const promote = event.target.closest('[data-promote-skill]');
+      const execute = event.target.closest('[data-execute-skill]');
+      if (bind) {
+        const capabilityId = window.prompt('Stable capability id (lowercase letters, numbers, hyphens):');
+        if (!capabilityId) return;
+        const capabilityName = window.prompt('Capability display name:');
+        if (!capabilityName) return;
+        bind.disabled = true;
+        try {
+          const response = await fetch('/api/skills/' + encodeURIComponent(bind.dataset.bindSkill) + '/bind-capability', {
+            method: 'POST',
+            headers: Object.assign({}, auth(), { 'content-type': 'application/json' }),
+            body: JSON.stringify({ capabilityId, capabilityName })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Skill binding was rejected.');
+          await loadPrivateState();
+          setMessage('Verified skill bound to capability ' + result.capabilityId + '.', false);
+        } catch (error) {
+          setMessage(error.message, true);
+          bind.disabled = false;
+        }
+        return;
+      }
+      if (promote) {
+        const stage = promote.dataset.nextStage;
+        if (!window.confirm('Owner approval required: promote this exact verified skill to ' + stage + '?')) return;
+        promote.disabled = true;
+        try {
+          const response = await fetch('/api/mutations/' + encodeURIComponent(promote.dataset.promoteSkill) + '/promote', {
+            method: 'POST',
+            headers: Object.assign({}, auth(), { 'content-type': 'application/json' }),
+            body: JSON.stringify({ stage })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Skill promotion was rejected.');
+          await loadPrivateState();
+          setMessage('Verified skill promoted to ' + stage + '.', false);
+        } catch (error) {
+          setMessage(error.message, true);
+          promote.disabled = false;
+        }
+        return;
+      }
+      if (execute) {
+        const raw = window.prompt('JSON input for the isolated test run:', 'null');
+        if (raw === null) return;
+        execute.disabled = true;
+        try {
+          const input = JSON.parse(raw);
+          const response = await fetch('/api/capabilities/' + encodeURIComponent(execute.dataset.executeSkill) + '/execute', {
+            method: 'POST',
+            headers: Object.assign({}, auth(), { 'content-type': 'application/json' }),
+            body: JSON.stringify({ input })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Skill execution failed closed.');
+          await loadPrivateState();
+          setMessage('Skill output: ' + JSON.stringify(result.output).slice(0, 300), false);
+        } catch (error) {
+          setMessage(error.message, true);
+          execute.disabled = false;
+        }
       }
     });
 
