@@ -94,6 +94,12 @@ The GitHub workflow has no model, account, payment, merge, deployment, Constitut
 
 The deliberate stopping point is the safe takeover boundary: SARA can accept, write, and reject a bounded pure skill and create a reviewable draft PR. This proves a generalized self-building seam, not general autonomous software engineering. It cannot edit the champion, use tools, merge, deploy, spend, or open financial accounts. Any future broader coding capability must pass the same work-card, Genome Lab, verification, draft-only, and owner-promotion boundaries. No bank, paid API, new account, merge, or production deployment is silently provisioned.
 
+### Free-model recovery path
+
+If the site-to-executor queue is unavailable, an owner may manually dispatch **SARA free-model self-build** from GitHub Actions. The workflow requires a bounded objective plus an explicit public-draft checkbox. It makes one non-retried request to the fixed Cloudflare Workers AI model `@cf/zai-org/glm-4.7-flash`, treats the response as untrusted, runs the existing Genome Lab restrictions and behavioral verification, and stops at a draft `SHADOW` pull request.
+
+This recovery path is locked to a Workers **Free** account. Add `CLOUDFLARE_ACCOUNT_ID` and a restricted `CLOUDFLARE_API_TOKEN` as GitHub Actions repository secrets; never place either value in an objective, workflow input, issue, log, or committed file. Do not use this workflow after upgrading Workers: its `$0` guarantee depends on the Free plan failing closed when the daily allocation is unavailable. The workflow has no schedule, retries, paid overflow, merge, deployment, outreach, contract, account, payment, or production authority.
+
 SARA is a repair layer around a frontier LLM. It does not make the model smarter. It makes the *system* stay intact:
 
 1. **Test** the output against rules and the last verified-good snapshot
