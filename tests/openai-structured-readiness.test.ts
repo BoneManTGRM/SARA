@@ -11,7 +11,7 @@ describe("SARA readiness Structured Output transport", () => {
       apiKey: "test-openai-key",
       fetchImpl: async (url, init) => {
         const target = String(url);
-        requests.push({ target, url: target, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+        requests.push({ url: target, body: JSON.parse(String(init?.body)) as Record<string, unknown> });
         if (target.endsWith("/input_tokens")) {
           return new Response(JSON.stringify({ input_tokens: 321 }), {
             status: 200,
