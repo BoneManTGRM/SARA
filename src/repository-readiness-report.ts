@@ -187,7 +187,7 @@ export function compileRepositoryReadinessReport(
     if (seenFindingIds.has(finding.id)) throw new Error(`Duplicate finding id: ${finding.id}.`);
     seenFindingIds.add(finding.id);
     if (!CATEGORIES.includes(finding.category)) throw new Error("Finding contains an unsupported category.");
-    if (!(finding.priority in PRIORITY_RANK)) throw new Error("Finding priority is invalid.");
+    if (!Object.hasOwn(PRIORITY_RANK, finding.priority)) throw new Error("Finding priority is invalid.");
     if (!["confirmed", "supported", "tentative"].includes(finding.confidence)) {
       throw new Error("Finding confidence is invalid.");
     }
@@ -232,7 +232,7 @@ export function compileRepositoryReadinessReport(
   const status = evidenceGaps.length === 0 ? "ready_for_owner_review" : "needs_evidence";
   const readiness = status === "needs_evidence"
     ? "incomplete"
-    : findings.some((finding) => finding.priority === "urgent" || finding.priority === "high")
+    : findings.length > 0
       ? "attention_required"
       : "baseline_observed";
 

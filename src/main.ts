@@ -68,6 +68,7 @@ let startupProof: LunaStartupProof = {
 };
 const server = createSaraServer(kernel, {
   ownerTokenSha256,
+  stateDirectory,
   ...(readOnlyBridgeTokenSha256 ? { readOnlyBridgeTokenSha256 } : {}),
   ...(telegramBridgeTokenSha256 ? { telegramBridgeTokenSha256 } : {}),
   ...(ownerAssistant ? { ownerAssistant } : {}),

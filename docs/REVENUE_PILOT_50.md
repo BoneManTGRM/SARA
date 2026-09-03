@@ -79,6 +79,8 @@ Each task is preflighted against a fixed input ceiling, output ceiling, declared
 
 The current implementation includes bounded adapters for OpenAI's Responses API and Google's Interactions API. When `OPENAI_API_KEY` is explicitly configured, the persistent operator wakes only for a collected-revenue job with target-bound owner fulfillment approval. It gathers a credential-free GitHub inventory and a deliberately small set of high-value public files, pins all evidence to the default branch's exact commit, and passes one typed evidence packet through every logical role. It runs one logical role at a time, saves each private output to durable storage before advancing the job, uses a different worker identity for verification, and stops the final package at owner review. Provider project limits remain the outer circuit breaker.
 
+For the `$149 Public Repository Readiness Snapshot`, the final delivery-role output must pass the deterministic repository-readiness report compiler before the job may enter owner review. The compiler binds the repository and exact commit from collected evidence, accepts only sampled evidence URLs and visible source-line citations, requires all four readiness categories, rejects unsupported assurances, and stores an integrity-bound private report. The authenticated owner may read that report at `GET /api/revenue-pilot/jobs/:jobId/report`; bridge and Telegram credentials cannot access it. Compilation never authorizes external delivery.
+
 ## Skill learning
 
 Each service requires public-repository inventory, independent verification, delivery-package generation, and its named analysis capability. The original readiness service requires:

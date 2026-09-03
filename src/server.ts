@@ -7,6 +7,7 @@ import type { OwnerAssistant } from "./owner-assistant.ts";
 import { PolicyDeniedError } from "./policy.ts";
 import type { RevenuePilotInput } from "./revenue-pilot.ts";
 import { listRevenueServices } from "./revenue-service-catalog.ts";
+import { readRepositoryReadinessReportArtifact } from "./repository-readiness-report-artifacts.ts";
 import { listSaraTools } from "./tool-registry.ts";
 import type { CandidateProposal, MutationStage } from "./types.ts";
 
@@ -23,6 +24,7 @@ type ServerOptions = {
   telegramBridgeTokenSha256?: string;
   ownerAssistant?: OwnerAssistant;
   runtimeStatus?: () => Promise<SaraRuntimeStatus>;
+  stateDirectory?: string;
 };
 
 function tokenDigest(token: string): Buffer {
@@ -265,6 +267,41 @@ async function handleAuthenticatedRequest(
   }
   if (request.method === "GET" && url.pathname === "/api/revenue-pilot/services") {
     json(response, 200, listRevenueServices());
+    return;
+  }
+  const revenueReportMatch = url.pathname.match(/^\/api\/revenue-pilot\/jobs\/([^/]+)\/report$/);
+  if (request.method === "GET" && revenueReportMatch) {
+    if (!options.stateDirectory) {
+      json(response, 503, { error: "Private report storage is not configured." });
+      return;
+    }
+    const jobId = decodeURIComponent(revenueReportMatch[1]);
+    const job = (await kernel.getStatus()).revenuePilotJobs.find((candidate) => candidate.id === jobId);
+    if (!job) {
+      json(response, 404, { error: "Revenue pilot job not found." });
+      return;
+    }
+    if (job.status !== "owner_review" || job.externalDeliveryAuthorized !== false) {
+      json(response, 409, { error: "The report has not passed its owner-review gate." });
+      return;
+    }
+    try {
+      const artifact = await readRepositoryReadinessReportArtifact({
+        stateDirectory: options.stateDirectory,
+        jobId,
+      });
+      const receipt = job.receipts.find((candidate) => candidate.role === "delivery_operator");
+      if (!receipt?.reportDigest || receipt.reportDigest !== artifact.reportDigest) {
+        throw new Error("Repository-readiness report does not match the completed delivery receipt.");
+      }
+      json(response, 200, artifact);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        json(response, 404, { error: "Repository-readiness report not found." });
+        return;
+      }
+      throw error;
+    }
     return;
   }
   if (request.method === "POST" && url.pathname === "/api/objectives") {

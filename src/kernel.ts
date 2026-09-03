@@ -857,7 +857,7 @@ export class SaraKernel {
         outputText: string;
         evidence: WorkerModelExecutionEvidence;
         role: RevenuePilotLease["role"];
-      }) => Promise<void>;
+      }) => Promise<void | { reportDigest?: string }>;
     },
   ): Promise<{
     outputText: string;
@@ -934,9 +934,10 @@ export class SaraKernel {
     const verificationPassed = typeof input.verificationPassed === "function"
       ? input.verificationPassed(execution.outputText)
       : input.verificationPassed;
+    let persistenceResult: void | { reportDigest?: string } = undefined;
     if (input.persistOutput) {
       try {
-        await input.persistOutput({
+        persistenceResult = await input.persistOutput({
           outputText: execution.outputText,
           evidence: execution.evidence,
           role: job.activeLease.role,
@@ -964,6 +965,7 @@ export class SaraKernel {
       verificationPassed,
       completedAt: new Date().toISOString(),
       modelExecution: execution.evidence,
+      ...(persistenceResult?.reportDigest ? { reportDigest: persistenceResult.reportDigest } : {}),
     });
     return { outputText: execution.outputText, evidence: execution.evidence, job: completed };
   }
