@@ -2,7 +2,8 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DASHBOARD_HTML } from "./dashboard.ts";
 import { compileExecutorHandoff } from "./handoff.ts";
-import { SaraKernel } from "./kernel.ts";
+import { SaraKernel, SARA_PRINCIPAL } from "./kernel.ts";
+import type { OwnerAssistant } from "./owner-assistant.ts";
 import { PolicyDeniedError } from "./policy.ts";
 import type { RevenuePilotInput } from "./revenue-pilot.ts";
 import { listRevenueServices } from "./revenue-service-catalog.ts";
@@ -19,6 +20,8 @@ export type SaraRuntimeStatus = {
 type ServerOptions = {
   ownerTokenSha256: string;
   readOnlyBridgeTokenSha256?: string;
+  telegramBridgeTokenSha256?: string;
+  ownerAssistant?: OwnerAssistant;
   runtimeStatus?: () => Promise<SaraRuntimeStatus>;
 };
 
@@ -65,9 +68,17 @@ function unauthorized(response: ServerResponse): void {
   json(response, 401, { error: "Owner authentication required." });
 }
 
-function bridgeUnauthorized(response: ServerResponse): void {
+function bridgeUnauthorized(response: ServerResponse, label = "Read-only bridge"): void {
   response.setHeader("www-authenticate", "Bearer");
-  json(response, 401, { error: "Read-only bridge authentication required." });
+  json(response, 401, { error: `${label} authentication required.` });
+}
+
+function boundedText(value: unknown, minimum: number, maximum: number, label: string): string {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (text.length < minimum || text.length > maximum || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) {
+    throw new Error(`${label} must contain ${minimum}–${maximum} safe characters.`);
+  }
+  return text;
 }
 
 type OwnerSession = ReturnType<SaraKernel["authenticateOwnerToken"]>;
@@ -246,7 +257,10 @@ async function handleAuthenticatedRequest(
     return;
   }
   if (request.method === "GET" && url.pathname === "/api/tools") {
-    json(response, 200, listSaraTools({ lunaConfigured: Boolean(options.runtimeStatus) }));
+    json(response, 200, listSaraTools({
+      lunaConfigured: Boolean(options.runtimeStatus),
+      ownerAssistantConfigured: Boolean(options.ownerAssistant),
+    }));
     return;
   }
   if (request.method === "GET" && url.pathname === "/api/revenue-pilot/services") {
@@ -299,6 +313,101 @@ async function handleAuthenticatedRequest(
   json(response, 404, { error: "Not found." });
 }
 
+async function handleTelegramBridgeRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  kernel: SaraKernel,
+  options: ServerOptions,
+): Promise<void> {
+  if (request.method === "GET" && url.pathname === "/api/bridge/actions/status") {
+    const status = await kernel.getStatus();
+    json(response, 200, {
+      schemaVersion: 1,
+      access: "telegram_explicit_actions",
+      emergencyStopped: status.emergencyStopped,
+      jobs: status.jobs.length,
+      mutations: status.mutations.length,
+      ownerAssistant: options.ownerAssistant ? await options.ownerAssistant.status() : null,
+      prohibitedActions: [
+        "outreach",
+        "applications",
+        "contracts",
+        "payments",
+        "customer delivery",
+        "account creation",
+        "merge",
+        "deployment",
+        "production mutation",
+      ],
+    });
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/bridge/actions/luna") {
+    if (!options.ownerAssistant) {
+      json(response, 503, { error: "Bounded Luna analysis is not configured." });
+      return;
+    }
+    if ((await kernel.getStatus()).emergencyStopped) {
+      json(response, 423, { error: "Emergency stop is active. No paid request was made." });
+      return;
+    }
+    const body = await readJson(request);
+    const requestId = boundedText(body.requestId, 8, 160, "requestId");
+    const text = boundedText(body.text, 3, 1_200, "text");
+    json(response, 200, await options.ownerAssistant.analyze({ requestId, text }));
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/bridge/actions/tasks") {
+    const body = await readJson(request);
+    boundedText(body.requestId, 8, 160, "requestId");
+    const objective = boundedText(body.objective, 3, 1_000, "objective");
+    const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
+      objective,
+      expectedOwnerValue: 1,
+      requiredCapabilities: ["owner-requested-capability"],
+      acceptanceCriteria: [
+        "Produce a reviewable candidate artifact.",
+        "Pass deterministic verification before SHADOW.",
+        "Never promote, spend, deploy, merge, contact anyone, or make commitments without a separate owner gate.",
+      ],
+      maximumBudgetUsd: 0,
+      external: true,
+    });
+    json(response, 201, { schemaVersion: 1, outcome: "work_card_created", job });
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/bridge/actions/scaffolds") {
+    const body = await readJson(request);
+    boundedText(body.requestId, 8, 160, "requestId");
+    const objective = boundedText(body.objective, 3, 1_000, "objective");
+    const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
+      objective,
+      expectedOwnerValue: 1,
+      requiredCapabilities: ["typescript-skill-scaffold"],
+      acceptanceCriteria: [
+        "Create a dependency-free TypeScript scaffold in Genome Lab.",
+        "Compile the scaffold and bind evidence to its candidate digest.",
+        "Stop in SANDBOX without promotion or production mutation.",
+      ],
+      maximumBudgetUsd: 0,
+      external: true,
+    });
+    const scaffold = await kernel.executeDeterministicSkillScaffold(SARA_PRINCIPAL, job.id);
+    json(response, 201, {
+      schemaVersion: 1,
+      outcome: "sandbox_scaffold_verified",
+      jobId: job.id,
+      mutationId: scaffold.mutation.id,
+      stage: scaffold.mutation.stage,
+      candidateDigest: scaffold.mutation.candidateDigest,
+      evidence: scaffold.evidence,
+    });
+    return;
+  }
+  json(response, 404, { error: "Not found." });
+}
+
 async function routeSaraRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -316,9 +425,21 @@ async function routeSaraRequest(
     json(response, 200, {
       schemaVersion: 1,
       access: "read_only",
-      tools: listSaraTools({ lunaConfigured: Boolean(options.runtimeStatus) }),
+      tools: listSaraTools({
+        lunaConfigured: Boolean(options.runtimeStatus),
+        ownerAssistantConfigured: Boolean(options.ownerAssistant),
+      }),
       services: listRevenueServices(),
     });
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/bridge/actions/")) {
+    if (!options.telegramBridgeTokenSha256 || !authenticatedToken(request, options.telegramBridgeTokenSha256)) {
+      bridgeUnauthorized(response, "Telegram action bridge");
+      return;
+    }
+    await handleTelegramBridgeRequest(request, response, url, kernel, options);
     return;
   }
 

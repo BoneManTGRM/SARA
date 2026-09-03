@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
+import type { WorkerModelClient } from "../src/model-router.ts";
+import { OwnerAssistant } from "../src/owner-assistant.ts";
 import { createSaraServer } from "../src/server.ts";
 import { PILOT_REQUIRED_CAPABILITIES } from "../src/revenue-pilot.ts";
 
@@ -14,6 +16,8 @@ describe("SARA owner dashboard HTTP boundary", () => {
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const bridgeToken = "test-read-only-bridge-token";
   const bridgeTokenHash = createHash("sha256").update(bridgeToken).digest("hex");
+  const telegramBridgeToken = "test-telegram-action-bridge-token";
+  const telegramBridgeTokenHash = createHash("sha256").update(telegramBridgeToken).digest("hex");
   let directory: string;
   let baseUrl: string;
   let kernel: SaraKernel;
@@ -48,6 +52,19 @@ describe("SARA owner dashboard HTTP boundary", () => {
     server = createSaraServer(kernel, {
       ownerTokenSha256: tokenHash,
       readOnlyBridgeTokenSha256: bridgeTokenHash,
+      telegramBridgeTokenSha256: telegramBridgeTokenHash,
+      ownerAssistant: new OwnerAssistant({
+        stateDirectory: directory,
+        monthlyBudgetUsd: 2,
+        modelClient: {
+          routeKey: "openai:gpt-5.6-luna:paid",
+          maximumWallTimeMs: 1_000,
+          async countInputTokens() { return 100; },
+          async execute() {
+            return { outputText: "Bounded HTTP Luna analysis.", inputTokens: 100, billableOutputTokens: 50 };
+          },
+        } satisfies WorkerModelClient,
+      }),
       runtimeStatus: async () => ({
         worker: { configured: true, running: true, monthlyBudgetUsd: 10 },
         startupProof: { status: "succeeded", accountedCostUsd: 0.001 },
@@ -154,6 +171,61 @@ describe("SARA owner dashboard HTTP boundary", () => {
       headers: { Authorization: `Bearer ${bridgeToken}`, "content-type": "application/json" },
       body: JSON.stringify({ objective: "must remain unauthorized" }),
     })).status, 401);
+  });
+
+  it("gives the Telegram action credential only bounded explicit actions", async () => {
+    const headers = { Authorization: `Bearer ${telegramBridgeToken}`, "content-type": "application/json" };
+    assert.equal((await fetch(`${baseUrl}/api/bridge/actions/status`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/bridge/catalog`, { headers })).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/status`, { headers })).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/revenue-pilot/opportunities`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ opportunityId: "must-not-pass" }),
+    })).status, 401);
+
+    const statusResponse = await fetch(`${baseUrl}/api/bridge/actions/status`, { headers });
+    assert.equal(statusResponse.status, 200);
+    const actionStatus = await statusResponse.json() as {
+      access: string;
+      ownerAssistant: { monthlyBudgetUsd: number };
+      prohibitedActions: string[];
+    };
+    assert.equal(actionStatus.access, "telegram_explicit_actions");
+    assert.equal(actionStatus.ownerAssistant.monthlyBudgetUsd, 2);
+    assert.ok(actionStatus.prohibitedActions.includes("deployment"));
+
+    const luna = await fetch(`${baseUrl}/api/bridge/actions/luna`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ requestId: "telegram:http:luna", text: "Plan a safe documentation review." }),
+    });
+    assert.equal(luna.status, 200);
+    const lunaResult = await luna.json() as { outputText: string; accountedCostUsd: number };
+    assert.equal(lunaResult.outputText, "Bounded HTTP Luna analysis.");
+    assert.equal(lunaResult.accountedCostUsd, 0.00008);
+
+    const task = await fetch(`${baseUrl}/api/bridge/actions/tasks`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ requestId: "telegram:http:task", objective: "Prepare a deterministic documentation gap skill." }),
+    });
+    assert.equal(task.status, 201);
+    const taskResult = await task.json() as { outcome: string; job: { workCard: { maximumBudgetUsd: number }; status: string } };
+    assert.equal(taskResult.outcome, "work_card_created");
+    assert.equal(taskResult.job.workCard.maximumBudgetUsd, 0);
+    assert.equal(taskResult.job.status, "authorized");
+
+    const scaffold = await fetch(`${baseUrl}/api/bridge/actions/scaffolds`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ requestId: "telegram:http:scaffold", objective: "Create an isolated release checklist scaffold." }),
+    });
+    assert.equal(scaffold.status, 201);
+    const scaffoldResult = await scaffold.json() as { outcome: string; stage: string; candidateDigest: string };
+    assert.equal(scaffoldResult.outcome, "sandbox_scaffold_verified");
+    assert.equal(scaffoldResult.stage, "SANDBOX");
+    assert.match(scaffoldResult.candidateDigest, /^[a-f0-9]{64}$/u);
   });
 
   it("rejects unauthenticated promotion and accepts target-bound owner approval", async () => {
@@ -447,6 +519,13 @@ describe("SARA owner dashboard HTTP boundary", () => {
       body: JSON.stringify({ opportunityId: "blocked-opportunity" }),
     });
     assert.equal(blockedOpportunity.status, 423);
+    const blockedLuna = await fetch(`${baseUrl}/api/bridge/actions/luna`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${telegramBridgeToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ requestId: "telegram:stopped:luna", text: "analyze while stopped" }),
+    });
+    assert.equal(blockedLuna.status, 423);
+    assert.match(await blockedLuna.text(), /No paid request was made/iu);
     assert.equal((await fetch(`${baseUrl}/health`)).status, 200);
     assert.equal((await fetch(`${baseUrl}/api/status`, { headers: { Authorization: `Bearer ${token}` } })).status, 200);
   });

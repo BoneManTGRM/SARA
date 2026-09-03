@@ -23,7 +23,7 @@ function descriptor(input: Omit<SaraToolDescriptor, "prohibitedActions">): SaraT
   return { ...input, prohibitedActions: [...COMMON_PROHIBITIONS] };
 }
 
-export function listSaraTools(options: { lunaConfigured: boolean }): SaraToolDescriptor[] {
+export function listSaraTools(options: { lunaConfigured: boolean; ownerAssistantConfigured?: boolean }): SaraToolDescriptor[] {
   return [
     descriptor({
       id: "luna-worker",
@@ -33,6 +33,15 @@ export function listSaraTools(options: { lunaConfigured: boolean }): SaraToolDes
       purpose: "Analyze bounded work packets and produce private artifacts within token, cost, retry, and time limits.",
       invocationBoundary: "Only an owner-approved job backed by collected revenue may invoke paid work.",
       requiredApproval: "job-bound fulfillment approval",
+    }),
+    descriptor({
+      id: "bounded-owner-analyst",
+      name: "Bounded Owner Analyst",
+      status: options.ownerAssistantConfigured ? "available" : "configuration_required",
+      mode: "read_only",
+      purpose: "Answer an explicit private owner /luna request without tools, storage at OpenAI, or action authority.",
+      invocationBoundary: "Private paired Telegram command only; separate monthly, daily, and per-request cost limits.",
+      requiredApproval: "explicit owner /luna command",
     }),
     descriptor({
       id: "public-github-evidence",
