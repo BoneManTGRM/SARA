@@ -1,5 +1,32 @@
 import type { WorkerModelClient } from "./model-router.ts";
 
+const SAFE_RESPONSE_STATUSES = new Set([
+  "cancelled",
+  "completed",
+  "failed",
+  "in_progress",
+  "incomplete",
+  "queued",
+]);
+const SAFE_INCOMPLETE_REASONS = new Set(["content_filter", "max_output_tokens"]);
+
+function safeResponseCompletionError(body: Record<string, unknown>): Error {
+  const status = typeof body.status === "string" && SAFE_RESPONSE_STATUSES.has(body.status)
+    ? body.status
+    : "unknown";
+  let reason: string | null = null;
+  if (
+    status === "incomplete" &&
+    body.incomplete_details &&
+    typeof body.incomplete_details === "object" &&
+    !Array.isArray(body.incomplete_details)
+  ) {
+    const candidate = (body.incomplete_details as Record<string, unknown>).reason;
+    if (typeof candidate === "string" && SAFE_INCOMPLETE_REASONS.has(candidate)) reason = candidate;
+  }
+  return new Error(`OpenAI response ended with status ${status}${reason ? `: ${reason}` : ""}.`);
+}
+
 export class OpenAIResponsesClient implements WorkerModelClient {
   readonly routeKey = "openai:gpt-5.6-luna:paid";
   readonly maximumWallTimeMs: number;
@@ -109,7 +136,7 @@ export class OpenAIResponsesClient implements WorkerModelClient {
       throw new Error("OpenAI returned a malformed response.");
     }
     const body = payload as Record<string, unknown>;
-    if (body.status !== "completed") throw new Error("OpenAI did not complete the response.");
+    if (body.status !== "completed") throw safeResponseCompletionError(body);
     const output = Array.isArray(body.output) ? body.output : [];
     const text = output.flatMap((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
