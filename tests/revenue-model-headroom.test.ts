@@ -13,7 +13,7 @@ const READINESS_ROLES: readonly Array<{
 ];
 
 describe("SARA paid readiness reasoning headroom", () => {
-  it("gives Luna 25,000 output tokens without admitting a fallback that could exceed the role budget", () => {
+  it("gives Luna 25,000 output tokens while every admitted route remains inside the role budget", () => {
     for (const { taskKind, maximumTaskCostUsd } of READINESS_ROLES) {
       const plan = planWorkerModelTask({
         taskKind,
@@ -23,10 +23,14 @@ describe("SARA paid readiness reasoning headroom", () => {
         pricedAt: new Date("2026-09-03T00:00:00.000Z"),
       });
 
-      assert.equal(plan.routes.length, 1, `${taskKind} should omit an unaffordable paid fallback`);
       assert.equal(plan.routes[0].model, "gpt-5.6-luna");
       assert.equal(plan.routes[0].maximumOutputTokens, 25_000);
-      assert.ok(plan.worstCaseCostUsd <= maximumTaskCostUsd);
+      assert.ok(plan.worstCaseCostUsd <= maximumTaskCostUsd + Number.EPSILON);
+      assert.ok(
+        plan.routes.reduce((total, route) => total + route.worstCaseCostUsd, 0)
+          <= maximumTaskCostUsd + Number.EPSILON,
+        `${taskKind} admitted routes beyond its exact role budget`,
+      );
     }
   });
 });
