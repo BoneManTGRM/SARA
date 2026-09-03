@@ -67,7 +67,10 @@ describe("deterministic readiness category evidence binding", () => {
     assert.deepEqual(byCategory.get("dependencies")?.evidenceUrls, [snapshot.sampledFiles[0].permalink]);
     assert.deepEqual(byCategory.get("code")?.evidenceUrls, [snapshot.sampledFiles[1].permalink]);
     assert.deepEqual(byCategory.get("release_controls")?.evidenceUrls, [snapshot.sampledFiles[2].permalink]);
-    assert.deepEqual(byCategory.get("secret_exposure")?.evidenceUrls, snapshot.sampledFiles.map((file) => file.permalink));
+    assert.deepEqual(
+      byCategory.get("secret_exposure")?.evidenceUrls,
+      snapshot.sampledFiles.map((file) => file.permalink).sort(),
+    );
     assert.ok(report.categoryEvidence.every((entry) => entry.status === "reviewed"));
     assert.ok(report.limitations.includes(
       "SARA deterministically derived category evidence availability and immutable URLs from the bounded sampled-file paths; reviewed means only that eligible sampled evidence was available, not that the category passed or was complete.",

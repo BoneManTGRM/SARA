@@ -63,7 +63,8 @@ function eligibleCategoryIndexes(
     : category === "dependencies"
       ? DEPENDENCY_PATH
       : RELEASE_CONTROL_PATH;
-  return snapshot.sampledFiles.flatMap((file, index) => matcher.test(file.path) ? [index] : []);
+  const matching = snapshot.sampledFiles.flatMap((file, index) => matcher.test(file.path) ? [index] : []);
+  return matching.length > 0 ? matching : snapshot.sampledFiles.map((_, index) => index);
 }
 
 function resolveIndexedCategoryEvidence(
