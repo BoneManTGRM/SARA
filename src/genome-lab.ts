@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import * as ts from "typescript";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import type { ExecutorHandoff } from "./handoff.ts";
+import { compileOperationalSkillProvenance } from "./operational-skills.ts";
 import type { CandidateProposal, ProgramCandidateProposal, SkillCandidateProposal } from "./types.ts";
 
 export type GeneratedSkillCandidate = {
@@ -122,6 +123,7 @@ function validateSkillCandidateProposal(proposal: SkillCandidateProposal): void 
     canonicalJson(vector.input);
     canonicalJson(vector.expected);
   }
+  if (proposal.operational) compileOperationalSkillProvenance(proposal.operational);
 }
 
 function assertPureSkillSource(source: string): void {
@@ -480,6 +482,9 @@ export async function buildVerifiedSkillCandidate(
       skillName: proposal.skillName,
       summary: proposal.summary.trim(),
       limitations: proposal.limitations,
+      ...(proposal.operational
+        ? { operational: compileOperationalSkillProvenance(proposal.operational) }
+        : {}),
       testNames: proposal.tests.map((test) => test.name),
       maximumBudgetUsd: handoff.maximumBudgetUsd,
       constitutionDigest: handoff.constitutionDigest,

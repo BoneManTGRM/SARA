@@ -88,5 +88,14 @@ export function listSaraTools(options: { lunaConfigured: boolean; ownerAssistant
       invocationBoundary: "Zero-cost candidate work that stops at SHADOW and cannot modify SARA production.",
       requiredApproval: "owner-authenticated candidate submission",
     }),
+    descriptor({
+      id: "operational-skill-router",
+      name: "Operational Skill Router",
+      status: "available",
+      mode: "read_only",
+      purpose: "Select only relevant, immutable-source, license-cleared, execution-checked skills for bounded context.",
+      invocationBoundary: "SHADOW candidates remain catalog-only; loading requires owner-promoted CANARY or later evidence.",
+      requiredApproval: "owner promotion bound to the exact verified candidate",
+    }),
   ];
 }
