@@ -5,7 +5,7 @@ import { OpenAIResponsesClient } from "../src/openai-worker.ts";
 const DELIVERY_CONTRACT = "OUTPUT CONTRACT: Return only one JSON object without Markdown fences.";
 
 describe("SARA readiness Structured Output transport", () => {
-  it("binds the delivery contract to a strict JSON schema in both token counting and generation", async () => {
+  it("binds the delivery contract to a strict indexed-citation JSON schema in token counting and generation", async () => {
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
     const client = new OpenAIResponsesClient({
       apiKey: "test-openai-key",
@@ -34,14 +34,29 @@ describe("SARA readiness Structured Output transport", () => {
     for (const request of requests) {
       const text = request.body.text as { format?: Record<string, unknown> } | undefined;
       assert.equal(text?.format?.type, "json_schema");
-      assert.equal(text?.format?.name, "sara_repository_readiness_report_v1");
+      assert.equal(text?.format?.name, "sara_repository_readiness_report_v2");
       assert.equal(text?.format?.strict, true);
       const schema = text?.format?.schema as Record<string, unknown>;
       assert.deepEqual(schema.required, ["categoryEvidence", "findings", "evidenceLimitations"]);
       assert.equal(schema.additionalProperties, false);
       const properties = schema.properties as Record<string, unknown>;
-      assert.ok(properties.categoryEvidence);
-      assert.ok(properties.findings);
+      const categoryEvidence = properties.categoryEvidence as Record<string, unknown>;
+      const categoryItem = categoryEvidence.items as Record<string, unknown>;
+      assert.deepEqual(categoryItem.required, ["category", "status", "evidenceFileIndexes", "note"]);
+      const findings = properties.findings as Record<string, unknown>;
+      const findingItem = findings.items as Record<string, unknown>;
+      assert.deepEqual(findingItem.required, [
+        "id",
+        "category",
+        "priority",
+        "confidence",
+        "title",
+        "observation",
+        "recommendation",
+        "evidenceFileIndex",
+        "evidenceLineStart",
+        "evidenceLineEnd",
+      ]);
       assert.ok(properties.evidenceLimitations);
     }
   });
