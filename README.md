@@ -135,6 +135,12 @@ SARA is a repair layer around a frontier LLM. It does not make the model smarter
 
 That loop is **TGRM** (Targeted Gradient Repair Mechanism). **RYE** (repair yield per energy) is the score: how much constraint-hold you got per token, or per local patch.
 
+### Durable Reparodynamics learning
+
+Production boot applies a versioned, digest-bound Reparodynamics curriculum to SARA's existing memory fabric. Each paid Luna role receives only bounded global and service-scoped memories; stale and superseded records are excluded, customer scopes remain isolated, and the context digest is preserved in the work packet. Repository investigation and report compilation use medium reasoning, while the independent verifier uses high reasoning, all within the existing task and `$3` job ceilings.
+
+SARA records a service lesson only from measured outcome evidence. A successful lesson requires both a distinct independent-verifier receipt and the deterministic report compiler's digest. A verifier rejection may be recorded as a measured failure, but raw prompts, raw outputs, credentials, and customer-private text are never copied into durable learning. Identical lessons are content-addressed so replay and restart do not create duplicates. One passing cycle remains scoped evidence rather than a universal rule.
+
 ## Proof (run this)
 
 ```bash

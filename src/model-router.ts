@@ -112,7 +112,7 @@ export type WorkerModelPlanInput = {
 type TaskProfile = {
   maximumInputTokens: number;
   maximumOutputTokens: number;
-  geminiReasoning: WorkerModelRoute["reasoningLevel"];
+  reasoningLevel: WorkerModelRoute["reasoningLevel"];
   primary: WorkerModelRoute["model"];
   requiresIndependentVerification: boolean;
 };
@@ -121,63 +121,63 @@ const TASK_PROFILES: Record<WorkerTaskKind, TaskProfile> = {
   opportunity_filter: {
     maximumInputTokens: 5_000,
     maximumOutputTokens: 1_000,
-    geminiReasoning: "low",
+    reasoningLevel: "low",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: false,
   },
   requirements_analysis: {
     maximumInputTokens: 10_000,
     maximumOutputTokens: 3_000,
-    geminiReasoning: "medium",
+    reasoningLevel: "medium",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: false,
   },
   routine_code: {
     maximumInputTokens: 30_000,
     maximumOutputTokens: 8_000,
-    geminiReasoning: "medium",
+    reasoningLevel: "medium",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
   },
   test_repair: {
     maximumInputTokens: 30_000,
     maximumOutputTokens: 8_000,
-    geminiReasoning: "medium",
+    reasoningLevel: "medium",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
   },
   repository_investigation: {
     maximumInputTokens: 20_000,
     maximumOutputTokens: 6_000,
-    geminiReasoning: "medium",
+    reasoningLevel: "medium",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
   },
   documentation: {
     maximumInputTokens: 12_000,
     maximumOutputTokens: 4_000,
-    geminiReasoning: "low",
+    reasoningLevel: "low",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: false,
   },
   customer_deliverable: {
     maximumInputTokens: 20_000,
     maximumOutputTokens: 6_000,
-    geminiReasoning: "medium",
+    reasoningLevel: "medium",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
   },
   complex_architecture: {
     maximumInputTokens: 40_000,
     maximumOutputTokens: 12_000,
-    geminiReasoning: "high",
+    reasoningLevel: "high",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
   },
   critical_security_verification: {
     maximumInputTokens: 30_000,
     maximumOutputTokens: 8_000,
-    geminiReasoning: "high",
+    reasoningLevel: "high",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
   },
@@ -225,7 +225,7 @@ function route(
     provider,
     model,
     billingMode,
-    reasoningLevel: model === "gemini-3.8-flash" ? profile.geminiReasoning : "low",
+    reasoningLevel: profile.reasoningLevel,
     maximumInputTokens: profile.maximumInputTokens,
     maximumOutputTokens: profile.maximumOutputTokens,
     inputUsdPerMillionTokens: rates.input,
