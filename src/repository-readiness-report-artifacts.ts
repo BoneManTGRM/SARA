@@ -36,6 +36,80 @@ function reportPath(stateDirectory: string, jobId: string): string {
   return join(reportDirectory(stateDirectory), `${jobId}.json`);
 }
 
+function sampledFileAt(
+  snapshot: PublicRepositoryEvidenceSnapshot,
+  value: unknown,
+  label: string,
+): PublicRepositoryEvidenceSnapshot["sampledFiles"][number] {
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= snapshot.sampledFiles.length) {
+    throw new Error(`${label} must identify one supplied sampled evidence file.`);
+  }
+  return snapshot.sampledFiles[value as number]!;
+}
+
+function resolveIndexedCategoryEvidence(
+  value: unknown,
+  snapshot: PublicRepositoryEvidenceSnapshot,
+): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+    const candidate = record as Record<string, unknown>;
+    if (!("evidenceFileIndexes" in candidate)) return record;
+    if (!Array.isArray(candidate.evidenceFileIndexes)) {
+      throw new Error("Category evidenceFileIndexes must be an array.");
+    }
+    return {
+      category: candidate.category,
+      status: candidate.status,
+      evidenceUrls: candidate.evidenceFileIndexes.map((index) =>
+        sampledFileAt(snapshot, index, "Category evidenceFileIndex").permalink
+      ),
+      note: candidate.note,
+    };
+  });
+}
+
+function resolveIndexedFindings(
+  value: unknown,
+  snapshot: PublicRepositoryEvidenceSnapshot,
+): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+    const candidate = record as Record<string, unknown>;
+    if (!("evidenceFileIndex" in candidate)) return record;
+    const file = sampledFileAt(snapshot, candidate.evidenceFileIndex, "Finding evidenceFileIndex");
+    const firstLine = candidate.evidenceLineStart;
+    const lastLine = candidate.evidenceLineEnd;
+    if (
+      !Number.isInteger(firstLine) ||
+      !Number.isInteger(lastLine) ||
+      (firstLine as number) < 1 ||
+      (lastLine as number) < (firstLine as number)
+    ) {
+      throw new Error("Finding evidence lines must be positive integers in ascending order.");
+    }
+    const visibleLineCount = file.sourceText.split(/\r?\n/u).length;
+    if ((lastLine as number) > visibleLineCount) {
+      throw new Error("Finding evidence line range must exist in the sampled source text.");
+    }
+    const anchor = firstLine === lastLine
+      ? `#L${firstLine as number}`
+      : `#L${firstLine as number}-L${lastLine as number}`;
+    return {
+      id: candidate.id,
+      category: candidate.category,
+      priority: candidate.priority,
+      confidence: candidate.confidence,
+      title: candidate.title,
+      observation: candidate.observation,
+      recommendation: candidate.recommendation,
+      evidenceUrl: `${file.permalink}${anchor}`,
+    };
+  });
+}
+
 function repairCategoryEvidenceNotes(value: unknown): {
   categoryEvidence: RepositoryReadinessReportInput["categoryEvidence"];
   repairedCount: number;
@@ -69,10 +143,10 @@ function categoryNoteRepairLimitation(repairedCount: number): string {
   return `SARA deterministically replaced ${repairedCount} missing or malformed category evidence ${repairedCount === 1 ? "note" : "notes"}; no evidence URL, finding, priority, confidence, or recommendation was invented.`;
 }
 
-function workerDraft(outputText: string): Pick<
-  RepositoryReadinessReportInput,
-  "categoryEvidence" | "findings" | "evidenceLimitations"
-> {
+function workerDraft(
+  outputText: string,
+  snapshot: PublicRepositoryEvidenceSnapshot,
+): Pick<RepositoryReadinessReportInput, "categoryEvidence" | "findings" | "evidenceLimitations"> {
   if (Buffer.byteLength(outputText, "utf8") > MAX_ARTIFACT_BYTES) {
     throw new Error("Repository-readiness worker output exceeds 256 KiB.");
   }
@@ -89,9 +163,11 @@ function workerDraft(outputText: string): Pick<
   if (keys.length !== DRAFT_KEYS.length || keys.some((key, index) => key !== DRAFT_KEYS[index])) {
     throw new Error(`Repository-readiness worker output must contain exactly: ${DRAFT_KEYS.join(", ")}.`);
   }
-  const draft = parsed as Partial<RepositoryReadinessReportInput>;
-  const repaired = repairCategoryEvidenceNotes(draft.categoryEvidence);
-  const evidenceLimitations = Array.isArray(draft.evidenceLimitations as unknown)
+  const draft = parsed as Record<string, unknown>;
+  const resolvedCategoryEvidence = resolveIndexedCategoryEvidence(draft.categoryEvidence, snapshot);
+  const resolvedFindings = resolveIndexedFindings(draft.findings, snapshot);
+  const repaired = repairCategoryEvidenceNotes(resolvedCategoryEvidence);
+  const evidenceLimitations = Array.isArray(draft.evidenceLimitations)
     ? [
       ...(draft.evidenceLimitations as readonly string[]),
       ...(repaired.repairedCount > 0 ? [categoryNoteRepairLimitation(repaired.repairedCount)] : []),
@@ -99,7 +175,7 @@ function workerDraft(outputText: string): Pick<
     : draft.evidenceLimitations as RepositoryReadinessReportInput["evidenceLimitations"];
   return {
     categoryEvidence: repaired.categoryEvidence,
-    findings: draft.findings as RepositoryReadinessReportInput["findings"],
+    findings: resolvedFindings as RepositoryReadinessReportInput["findings"],
     evidenceLimitations,
   };
 }
@@ -135,7 +211,7 @@ export function compileRepositoryReadinessWorkerOutput(input: {
   outputText: string;
   snapshot: PublicRepositoryEvidenceSnapshot;
 }): RepositoryReadinessReport {
-  const draft = workerDraft(input.outputText);
+  const draft = workerDraft(input.outputText, input.snapshot);
   const report = compileRepositoryReadinessReport({
     repository: input.snapshot.repository,
     immutableCommitSha: input.snapshot.immutableCommitSha,
