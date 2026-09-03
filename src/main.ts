@@ -5,6 +5,7 @@ import { OpenAIResponsesClient } from "./openai-worker.ts";
 import { GitHubPublicRepositoryEvidenceCollector } from "./public-repository-evidence.ts";
 import { OwnerAssistant } from "./owner-assistant.ts";
 import { RevenuePilotOperator } from "./revenue-pilot-operator.ts";
+import { PILOT_REQUIRED_CAPABILITIES } from "./revenue-pilot.ts";
 import { createSaraServer } from "./server.ts";
 import { compileCommercialTerms } from "./commercial-terms.ts";
 
@@ -81,6 +82,16 @@ const kernel = await SaraKernel.boot({
   ownerTokenSha256,
   bootstrapRevenueCapabilities: true,
 });
+const bootStatus = await kernel.getStatus();
+const capabilityReadiness = PILOT_REQUIRED_CAPABILITIES.map((id) => ({
+  id,
+  status: bootStatus.capabilities.find((capability) => capability.id === id)?.status ?? "missing",
+}));
+console.log(`SARA revenue readiness proof ${JSON.stringify({
+  schemaVersion: 1,
+  capabilities: capabilityReadiness,
+  commerceConfigured: commerce !== null,
+})}`);
 const client = apiKey ? new OpenAIResponsesClient({ apiKey }) : null;
 const ownerAssistant = client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
   ? new OwnerAssistant({ modelClient: client, stateDirectory, monthlyBudgetUsd: telegramMonthlyBudgetUsd })

@@ -121,7 +121,10 @@ describe("secure revenue delivery", () => {
     const downloaded = recordRevenueDeliveryDownload(delivery, SECRET, new Date("2026-09-03T12:30:00.000Z"));
     assert.equal(downloaded.status, "delivered");
     assert.equal(downloaded.downloadCount, 1);
-    assert.throws(() => recordRevenueDeliveryDownload(downloaded, SECRET), /limit/iu);
+    assert.throws(
+      () => recordRevenueDeliveryDownload(downloaded, SECRET, new Date("2026-09-03T12:31:00.000Z")),
+      /limit/iu,
+    );
     assert.throws(
       () => recordRevenueDeliveryDownload(delivery, SECRET, new Date("2026-09-03T13:00:00.001Z")),
       /expired/iu,
