@@ -7,7 +7,7 @@ import { OwnerAssistant } from "./owner-assistant.ts";
 import { RevenuePilotOperator } from "./revenue-pilot-operator.ts";
 import { PILOT_REQUIRED_CAPABILITIES } from "./revenue-pilot.ts";
 import { createSaraServer } from "./server.ts";
-import { compileCommercialTerms } from "./commercial-terms.ts";
+import { compileCommercialTerms, compilePreviousCommercialTermsDigest } from "./commercial-terms.ts";
 import { NicoOperatorClient } from "./nico-operator.ts";
 
 const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? ".sara-state");
@@ -59,10 +59,22 @@ const compiledTerms = termsBusinessName && termsContactEmail && termsGoverningLa
     governingLaw: termsGoverningLaw,
   })
   : null;
-if (approvedTermsDigest && (!compiledTerms || approvedTermsDigest !== compiledTerms.digest)) {
+const previousTermsDigest = termsBusinessName && termsContactEmail && termsGoverningLaw
+  ? compilePreviousCommercialTermsDigest({
+    businessName: termsBusinessName,
+    contactEmail: termsContactEmail,
+    governingLaw: termsGoverningLaw,
+  })
+  : null;
+const termsApproved = Boolean(
+  approvedTermsDigest
+  && compiledTerms
+  && (approvedTermsDigest === compiledTerms.digest || approvedTermsDigest === previousTermsDigest),
+);
+if (approvedTermsDigest && !termsApproved) {
   throw new Error("SARA_COMMERCIAL_TERMS_APPROVED_SHA256 does not match the exact compiled commercial terms.");
 }
-const commerce = paymentWalletAddress && compiledTerms && approvedTermsDigest === compiledTerms.digest
+const commerce = paymentWalletAddress && compiledTerms && termsApproved
   ? {
     recipientAddress: paymentWalletAddress,
     rpcUrl: baseRpcUrl,
@@ -94,6 +106,9 @@ console.log(`SARA revenue readiness proof ${JSON.stringify({
   schemaVersion: 1,
   capabilities: capabilityReadiness,
   commerceConfigured: commerce !== null,
+  commercialTermsVersion: compiledTerms?.version ?? null,
+  commercialTermsDigest: compiledTerms?.digest ?? null,
+  commercialTermsApproval: approvedTermsDigest === compiledTerms?.digest ? "exact" : termsApproved ? "v1_to_v2_migration" : "missing",
 })}`);
 const client = apiKey ? new OpenAIResponsesClient({ apiKey }) : null;
 const ownerAssistant = client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
