@@ -242,28 +242,27 @@ async function handleMutationPromotion(
   json(response, 200, mutation);
 }
 
-async function handleAuthenticatedRequest(
+async function handleOwnerCatalogRead(
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
   kernel: SaraKernel,
-  owner: OwnerSession,
   options: ServerOptions,
-): Promise<void> {
+): Promise<boolean> {
   if (request.method === "GET" && url.pathname === "/api/status") {
     const status = await kernel.getStatus();
     json(response, 200, {
       ...status,
       runtime: options.runtimeStatus ? await options.runtimeStatus() : null,
     });
-    return;
+    return true;
   }
   if (request.method === "GET" && url.pathname === "/api/tools") {
     json(response, 200, listSaraTools({
       lunaConfigured: Boolean(options.runtimeStatus),
       ownerAssistantConfigured: Boolean(options.ownerAssistant),
     }));
-    return;
+    return true;
   }
   if (request.method === "GET" && url.pathname === "/api/operational-skills") {
     const rawQuery = url.searchParams.get("query")?.trim();
@@ -273,58 +272,73 @@ async function handleAuthenticatedRequest(
       ...catalog,
       routes: query ? await kernel.routeOperationalSkillContext(query) : [],
     });
-    return;
+    return true;
   }
   if (request.method === "GET" && url.pathname === "/api/revenue-pilot/services") {
     json(response, 200, listRevenueServices());
-    return;
+    return true;
   }
+  return false;
+}
+
+async function handleOwnerReportRead(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  kernel: SaraKernel,
+  options: ServerOptions,
+): Promise<boolean> {
   const revenueReportMatch = url.pathname.match(/^\/api\/revenue-pilot\/jobs\/([^/]+)\/report$/);
-  if (request.method === "GET" && revenueReportMatch) {
-    if (!options.stateDirectory) {
-      json(response, 503, { error: "Private report storage is not configured." });
-      return;
-    }
-    const jobId = decodeURIComponent(revenueReportMatch[1]);
-    const job = (await kernel.getStatus()).revenuePilotJobs.find((candidate) => candidate.id === jobId);
-    if (!job) {
-      json(response, 404, { error: "Revenue pilot job not found." });
-      return;
-    }
-    if (job.status !== "owner_review" || job.externalDeliveryAuthorized !== false) {
-      json(response, 409, { error: "The report has not passed its owner-review gate." });
-      return;
-    }
-    try {
-      const artifact = await readRepositoryReadinessReportArtifact({
-        stateDirectory: options.stateDirectory,
-        jobId,
-      });
-      const receipt = job.receipts.find((candidate) => candidate.role === "delivery_operator");
-      if (!receipt?.reportDigest || receipt.reportDigest !== artifact.reportDigest) {
-        throw new Error("Repository-readiness report does not match the completed delivery receipt.");
-      }
-      json(response, 200, artifact);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        json(response, 404, { error: "Repository-readiness report not found." });
-        return;
-      }
-      throw error;
-    }
-    return;
+  if (request.method !== "GET" || !revenueReportMatch) return false;
+  if (!options.stateDirectory) {
+    json(response, 503, { error: "Private report storage is not configured." });
+    return true;
   }
+  const jobId = decodeURIComponent(revenueReportMatch[1]);
+  const job = (await kernel.getStatus()).revenuePilotJobs.find((candidate) => candidate.id === jobId);
+  if (!job) {
+    json(response, 404, { error: "Revenue pilot job not found." });
+    return true;
+  }
+  if (job.status !== "owner_review" || job.externalDeliveryAuthorized !== false) {
+    json(response, 409, { error: "The report has not passed its owner-review gate." });
+    return true;
+  }
+  try {
+    const artifact = await readRepositoryReadinessReportArtifact({
+      stateDirectory: options.stateDirectory,
+      jobId,
+    });
+    const receipt = job.receipts.find((candidate) => candidate.role === "delivery_operator");
+    if (!receipt?.reportDigest || receipt.reportDigest !== artifact.reportDigest) {
+      throw new Error("Repository-readiness report does not match the completed delivery receipt.");
+    }
+    json(response, 200, artifact);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    json(response, 404, { error: "Repository-readiness report not found." });
+  }
+  return true;
+}
+
+async function handleOwnerRevenueWrite(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+): Promise<boolean> {
   if (request.method === "POST" && url.pathname === "/api/objectives") {
     await handleObjectives(request, response, kernel, owner);
-    return;
+    return true;
   }
   if (request.method === "POST" && url.pathname === "/api/emergency-stop") {
     await handleEmergencyStop(request, response, kernel, owner);
-    return;
+    return true;
   }
   if (request.method === "POST" && url.pathname === "/api/revenue-pilot/opportunities") {
     await handleRevenuePilotOpportunity(request, response, kernel, owner);
-    return;
+    return true;
   }
   const revenueAuthorizationMatch = url.pathname.match(/^\/api\/revenue-pilot\/jobs\/([^/]+)\/authorize$/);
   if (request.method === "POST" && revenueAuthorizationMatch) {
@@ -335,28 +349,53 @@ async function handleAuthenticatedRequest(
       owner,
       decodeURIComponent(revenueAuthorizationMatch[1]),
     );
-    return;
+    return true;
   }
+  return false;
+}
+
+async function handleOwnerDevelopmentRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+): Promise<boolean> {
   const handoffMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/handoff$/);
   if (request.method === "GET" && handoffMatch) {
     await handleJobHandoff(response, kernel, decodeURIComponent(handoffMatch[1]));
-    return;
+    return true;
   }
   const executeScaffoldMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/execute-scaffold$/);
   if (request.method === "POST" && executeScaffoldMatch) {
     json(response, 201, await kernel.executeDeterministicSkillScaffold(owner, decodeURIComponent(executeScaffoldMatch[1])));
-    return;
+    return true;
   }
   const selfBuildMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/self-build$/);
   if (request.method === "POST" && selfBuildMatch) {
     await handleSelfBuild(request, response, kernel, owner, decodeURIComponent(selfBuildMatch[1]));
-    return;
+    return true;
   }
   const promoteMatch = url.pathname.match(/^\/api\/mutations\/([^/]+)\/promote$/);
   if (request.method === "POST" && promoteMatch) {
     await handleMutationPromotion(request, response, kernel, owner, decodeURIComponent(promoteMatch[1]));
-    return;
+    return true;
   }
+  return false;
+}
+
+async function handleAuthenticatedRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+  options: ServerOptions,
+): Promise<void> {
+  if (await handleOwnerCatalogRead(request, response, url, kernel, options)) return;
+  if (await handleOwnerReportRead(request, response, url, kernel, options)) return;
+  if (await handleOwnerRevenueWrite(request, response, url, kernel, owner)) return;
+  if (await handleOwnerDevelopmentRequest(request, response, url, kernel, owner)) return;
   json(response, 404, { error: "Not found." });
 }
 
