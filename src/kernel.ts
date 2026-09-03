@@ -4,6 +4,18 @@ import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { compileWorkCard } from "./capabilities.ts";
+import {
+  compileBusinessCandidate,
+  compileStandingMandate,
+  evaluateRoutineAction,
+  type AutonomyDecision,
+  type AutonomyException,
+  type BusinessCandidate,
+  type BusinessCandidateInput,
+  type RoutineActionRequest,
+  type StandingMandate,
+  type StandingMandateInput,
+} from "./autonomy.ts";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import {
   buildDeterministicSkillScaffold,
@@ -387,6 +399,10 @@ type KernelState = {
   revenuePilotJobs: RevenuePilotJob[];
   revenuePaymentIntents: RevenuePaymentIntent[];
   revenueDeliveries: RevenueDelivery[];
+  standingMandate: StandingMandate | null;
+  autonomyDecisions: AutonomyDecision[];
+  autonomyExceptions: AutonomyException[];
+  businessCandidates: BusinessCandidate[];
   events: StoredEvent[];
 };
 
@@ -404,6 +420,10 @@ export type SaraStatus = {
   revenuePilotJobs: RevenuePilotJob[];
   revenuePaymentIntents: RevenuePaymentIntent[];
   revenueDeliveries: RevenueDelivery[];
+  standingMandate: StandingMandate | null;
+  autonomyDecisions: AutonomyDecision[];
+  autonomyExceptions: AutonomyException[];
+  businessCandidates: BusinessCandidate[];
   audit: { eventCount: number; headHash: string | null };
 };
 
@@ -538,6 +558,10 @@ export class SaraKernel {
     const revenuePilotMap = new Map<string, RevenuePilotJob>();
     const revenuePaymentIntentMap = new Map<string, RevenuePaymentIntent>();
     const revenueDeliveryMap = new Map<string, RevenueDelivery>();
+    let standingMandate: StandingMandate | null = null;
+    const autonomyDecisions: AutonomyDecision[] = [];
+    const autonomyExceptions: AutonomyException[] = [];
+    const businessCandidateMap = new Map<string, BusinessCandidate>();
     let emergencyStopped = false;
 
     for (const event of events) {
@@ -590,6 +614,13 @@ export class SaraKernel {
         const delivery = event.data as RevenueDelivery;
         revenueDeliveryMap.set(delivery.id, structuredClone(delivery));
       }
+      if (event.type === "standing_mandate_snapshot") standingMandate = structuredClone(event.data as StandingMandate);
+      if (event.type === "autonomy_decision") autonomyDecisions.push(structuredClone(event.data as AutonomyDecision));
+      if (event.type === "autonomy_exception_opened") autonomyExceptions.push(structuredClone(event.data as AutonomyException));
+      if (event.type === "business_candidate_compiled") {
+        const candidate = event.data as BusinessCandidate;
+        businessCandidateMap.set(candidate.id, structuredClone(candidate));
+      }
       if (event.type === "emergency_stop_changed") {
         emergencyStopped = (event.data as { active: boolean }).active;
       }
@@ -605,6 +636,10 @@ export class SaraKernel {
       revenuePilotJobs: [...revenuePilotMap.values()],
       revenuePaymentIntents: [...revenuePaymentIntentMap.values()],
       revenueDeliveries: [...revenueDeliveryMap.values()],
+      standingMandate,
+      autonomyDecisions,
+      autonomyExceptions,
+      businessCandidates: [...businessCandidateMap.values()],
       events,
     };
   }
@@ -1711,6 +1746,127 @@ export class SaraKernel {
     });
   }
 
+  activateStandingMandate(
+    principal: Principal,
+    input: StandingMandateInput,
+    approval?: OwnerApproval,
+  ): Promise<StandingMandate> {
+    return this.serializeMutation(async () => {
+      const targetId = `standing-mandate:${input.id}`;
+      await this.authorize(principal, {
+        action: "required_owner_approval_change",
+        targetId,
+        external: false,
+        ...(approval ? { approval } : {}),
+      });
+      if (input.ownerId !== principal.id) throw new Error("The mandate owner must match the authenticated owner.");
+      const mandate = compileStandingMandate(input);
+      const existing = (await this.state()).standingMandate;
+      if (existing && !existing.revokedAt && existing.id !== mandate.id) {
+        throw new Error("Revoke the active standing mandate before activating another one.");
+      }
+      if (existing?.id === mandate.id && existing.digest === mandate.digest && !existing.revokedAt) return existing;
+      await this.#store.append("standing_mandate_snapshot", principal, mandate);
+      return mandate;
+    });
+  }
+
+  revokeStandingMandate(principal: Principal, mandateId: string, reason: string): Promise<StandingMandate> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, {
+        action: "required_owner_approval_change",
+        targetId: `standing-mandate:${mandateId}:revoke`,
+        external: false,
+        approval: {
+          approvalId: randomUUID(),
+          action: "required_owner_approval_change",
+          targetId: `standing-mandate:${mandateId}:revoke`,
+          approvedAt: new Date().toISOString(),
+          ownerId: principal.id,
+        },
+      });
+      const existing = (await this.state()).standingMandate;
+      if (!existing || existing.id !== mandateId) throw new Error("Standing mandate not found.");
+      if (existing.revokedAt) return existing;
+      const safeReason = reason.trim();
+      if (safeReason.length < 3 || safeReason.length > 300) throw new Error("A concise revocation reason is required.");
+      const revoked: StandingMandate = { ...existing, revokedAt: new Date().toISOString(), revocationReason: safeReason };
+      await this.#store.append("standing_mandate_snapshot", principal, revoked);
+      return revoked;
+    });
+  }
+
+  evaluateAutonomousAction(principal: Principal, request: RoutineActionRequest): Promise<AutonomyDecision> {
+    return this.serializeMutation(async () => {
+      if (principal.kind !== "sara" || !principal.authenticated) throw new Error("Only the authenticated SARA principal may request autonomous execution.");
+      const state = await this.state();
+      const date = request.requestedAt.slice(0, 10);
+      const completedToday = state.autonomyDecisions.filter((decision) =>
+        decision.outcome === "automatic" && decision.decidedAt.slice(0, 10) === date
+      ).length;
+      const decision = evaluateRoutineAction({
+        mandate: state.standingMandate,
+        request,
+        emergencyStopped: state.emergencyStopped,
+        completedToday,
+        activeActions: 0,
+      });
+      await this.#store.append("autonomy_decision", principal, decision);
+      if (decision.outcome === "owner_approval" || decision.outcome === "deny") {
+        const exception: AutonomyException = {
+          id: `exception:${request.id}`,
+          request: structuredClone(request),
+          decision,
+          status: "open",
+        };
+        await this.#store.append("autonomy_exception_opened", principal, exception);
+      }
+      return decision;
+    });
+  }
+
+  createBusinessCandidate(principal: Principal, input: BusinessCandidateInput, requestedAt = new Date().toISOString()): Promise<BusinessCandidate> {
+    return this.serializeMutation(async () => {
+      if (principal.kind !== "sara" || !principal.authenticated) throw new Error("Only SARA may compile an autonomous business candidate.");
+      const state = await this.state();
+      const existing = state.businessCandidates.find((candidate) => candidate.id === input.id);
+      if (existing) return existing;
+      const request: RoutineActionRequest = {
+        id: `business-candidate:${input.id}`,
+        kind: "business_candidate_development",
+        targetId: input.id,
+        channel: "public_web",
+        serviceId: input.serviceId,
+        estimatedCostUsd: 0,
+        external: false,
+        requestedAt,
+        platform: "owner_site",
+      };
+      const completedToday = state.autonomyDecisions.filter((decision) =>
+        decision.outcome === "automatic" && decision.decidedAt.slice(0, 10) === requestedAt.slice(0, 10)
+      ).length;
+      const decision = evaluateRoutineAction({
+        mandate: state.standingMandate,
+        request,
+        emergencyStopped: state.emergencyStopped,
+        completedToday,
+        activeActions: 0,
+      });
+      await this.#store.append("autonomy_decision", principal, decision);
+      if (decision.outcome !== "automatic") {
+        const exception: AutonomyException = { id: `exception:${request.id}`, request, decision, status: "open" };
+        await this.#store.append("autonomy_exception_opened", principal, exception);
+        throw new PolicyDeniedError(
+          { allowed: false, code: decision.code, reason: decision.reason },
+          "business_candidate_development",
+        );
+      }
+      const candidate = compileBusinessCandidate(input);
+      await this.#store.append("business_candidate_compiled", principal, candidate);
+      return candidate;
+    });
+  }
+
   async getStatus(reinvestmentRate = this.#constitution.ownerAuthority.defaultReinvestmentRate): Promise<SaraStatus> {
     await this.mutationTail;
     const state = await this.state();
@@ -1738,6 +1894,10 @@ export class SaraKernel {
       revenuePilotJobs: state.revenuePilotJobs,
       revenuePaymentIntents: state.revenuePaymentIntents,
       revenueDeliveries: state.revenueDeliveries,
+      standingMandate: state.standingMandate,
+      autonomyDecisions: state.autonomyDecisions,
+      autonomyExceptions: state.autonomyExceptions,
+      businessCandidates: state.businessCandidates,
       audit: { eventCount: state.events.length, headHash: state.events.at(-1)?.hash ?? null },
     };
   }
