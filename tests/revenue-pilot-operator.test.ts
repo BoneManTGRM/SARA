@@ -268,6 +268,8 @@ describe("bounded persistent Luna revenue operator", () => {
     assert.ok(calls[2].includes("SPECIALIST: owner-review assessment draft"));
     assert.ok(calls[3].includes("VERDICT: PASS"));
     assert.ok(calls[3].includes("OUTPUT CONTRACT: Return only one JSON object"));
+    assert.ok(calls[3].includes("evidenceFileIndexes"));
+    assert.ok(calls[3].includes("evidenceLineStart"));
     assert.ok(calls.every((prompt) => prompt.includes(`"immutableCommitSha":"${"a".repeat(40)}"`)));
     assert.ok(calls.every((prompt) => prompt.includes("WORK_PACKET_JSON")));
     assert.ok(calls.every((prompt) => prompt.includes("Reparodynamics")));

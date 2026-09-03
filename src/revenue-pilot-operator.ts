@@ -166,8 +166,8 @@ function readinessReportInstruction(job: RevenuePilotJob, role: RevenuePilotLeas
     "OUTPUT CONTRACT: Return only one JSON object without Markdown fences.",
     "The object must contain exactly categoryEvidence, findings, and evidenceLimitations.",
     "Include exactly one categoryEvidence record for code, dependencies, secret_exposure, and release_controls.",
-    "Use status reviewed only with evidenceUrls copied exactly from repositoryEvidence.sampledFiles[].permalink; otherwise use status unavailable with no URLs.",
-    "Every finding must cite one reviewed evidence URL plus a real visible #Lx or #Lx-Ly range from its supplied sourceText.",
+    "Use status reviewed only with evidenceFileIndexes containing zero-based indexes into repositoryEvidence.sampledFiles; otherwise use status unavailable with no indexes.",
+    "Every finding must cite one reviewed sampled file by evidenceFileIndex plus real visible evidenceLineStart and evidenceLineEnd values from that file's sourceText.",
     "Do not include repository, commit, status, readiness, authority, or delivery fields; SARA binds and computes those deterministically.",
   ].join(" ");
 }
