@@ -5,7 +5,6 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import type { PublicRepositoryEvidenceSnapshot } from "./public-repository-evidence.ts";
 import {
   compileRepositoryReadinessReport,
-  type ReadinessCategory,
   type RepositoryReadinessReport,
   type RepositoryReadinessReportInput,
 } from "./repository-readiness-report.ts";
@@ -63,8 +62,7 @@ function eligibleCategoryIndexes(
     : category === "dependencies"
       ? DEPENDENCY_PATH
       : RELEASE_CONTROL_PATH;
-  const matching = snapshot.sampledFiles.flatMap((file, index) => matcher.test(file.path) ? [index] : []);
-  return matching.length > 0 ? matching : snapshot.sampledFiles.map((_, index) => index);
+  return snapshot.sampledFiles.flatMap((file, index) => matcher.test(file.path) ? [index] : []);
 }
 
 function resolveIndexedCategoryEvidence(
