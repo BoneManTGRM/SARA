@@ -699,6 +699,45 @@ export class SaraKernel {
     return decision;
   }
 
+  private async authorizeAutonomousRoutine(
+    principal: Principal,
+    state: KernelState,
+    request: RoutineActionRequest,
+    throwOnDenied = true,
+  ): Promise<AutonomyDecision> {
+    if (principal.kind !== "sara" || !principal.authenticated) {
+      throw new Error("Only the authenticated SARA principal may request autonomous execution.");
+    }
+    const existing = [...state.autonomyDecisions].reverse().find((decision) => decision.requestId === request.id);
+    if (existing) {
+      if (existing.outcome !== "automatic" && throwOnDenied) throw new Error(`${existing.code}: ${existing.reason}`);
+      return structuredClone(existing);
+    }
+    const date = request.requestedAt.slice(0, 10);
+    const completedToday = state.autonomyDecisions.filter((decision) =>
+      decision.outcome === "automatic" && decision.decidedAt.slice(0, 10) === date
+    ).length;
+    const decision = evaluateRoutineAction({
+      mandate: state.standingMandate,
+      request,
+      emergencyStopped: state.emergencyStopped,
+      completedToday,
+      activeActions: 0,
+    });
+    await this.#store.append("autonomy_decision", principal, decision);
+    if (decision.outcome !== "automatic") {
+      const exception: AutonomyException = {
+        id: `exception:${request.id}`,
+        request: structuredClone(request),
+        decision,
+        status: "open",
+      };
+      await this.#store.append("autonomy_exception_opened", principal, exception);
+      if (throwOnDenied) throw new Error(`${decision.code}: ${decision.reason}`);
+    }
+    return decision;
+  }
+
   private serializeMutation<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.mutationTail.then(() => this.#store.runExclusive(operation));
     this.mutationTail = result.then(
@@ -1031,6 +1070,67 @@ export class SaraKernel {
     });
   }
 
+  authorizeRevenuePilotFromConfirmedPaymentUnderMandate(
+    principal: Principal,
+    jobId: string,
+    paymentIntentId: string,
+    requestedAt = new Date().toISOString(),
+  ): Promise<{ job: RevenuePilotJob; paymentIntent: RevenuePaymentIntent; decision: AutonomyDecision }> {
+    return this.serializeMutation(async () => {
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new Error(`Revenue pilot ${jobId} does not exist.`);
+      const intent = state.revenuePaymentIntents.find((candidate) => candidate.id === paymentIntentId);
+      if (!intent || intent.jobId !== job.id) throw new Error("Exact job-bound payment intent is required.");
+      if (intent.status === "authorized" && intent.revenueEvidenceId && job.revenueEvidenceId === intent.revenueEvidenceId) {
+        const prior = [...state.autonomyDecisions].reverse().find((candidate) => candidate.requestId === `fixed-service-fulfillment:${intent.id}`);
+        if (!prior || prior.outcome !== "automatic") throw new Error("Authorized payment is missing its autonomous decision receipt.");
+        return { job: structuredClone(job), paymentIntent: structuredClone(intent), decision: structuredClone(prior) };
+      }
+      if (intent.status !== "confirmed" || !intent.payment) throw new Error("Confirmed on-chain payment is required.");
+      if (intent.amountUsd !== job.plan.priceUsd || intent.termsDigest.length !== 64) {
+        throw new Error("Payment intent does not match the job price and accepted terms.");
+      }
+      const decision = await this.authorizeAutonomousRoutine(principal, state, {
+        id: `fixed-service-fulfillment:${intent.id}`,
+        kind: "fixed_service_fulfillment",
+        targetId: `revenue-pilot:${job.id}:fulfillment`,
+        channel: "approved_api",
+        serviceId: job.plan.serviceId,
+        estimatedCostUsd: job.plan.maximumExecutionCostUsd,
+        external: true,
+        requestedAt,
+        platform: "owner_site",
+      });
+      const duplicate = state.ledger.find((entry) => entry.description.includes(intent.payment!.transactionReferenceDigest));
+      if (duplicate) throw new Error("The on-chain payment is already recorded.");
+      const revenue: LedgerEntry = {
+        id: randomUUID(),
+        kind: "revenue",
+        source: "customer",
+        amountUsd: intent.amountUsd,
+        realized: true,
+        recurringMonthly: false,
+        description: `Revenue pilot ${jobId}; cryptographically verified Base USDC evidence ${intent.payment.transactionReferenceDigest}; intent evidence ${paymentIntentEvidenceDigest(intent)}; mandate ${decision.mandateId}`,
+        occurredAt: intent.payment.verifiedAt,
+      };
+      const authorizedJob = authorizeRevenuePilot(job, {
+        collectedRevenueUsd: revenue.amountUsd,
+        revenueEvidenceId: revenue.id,
+        ownerApprovalTarget: `revenue-pilot:${job.id}:fulfillment`,
+      });
+      const authorizedIntent = authorizedRevenuePaymentIntent(intent, revenue.id);
+      await this.#store.append("ledger_recorded", principal, revenue);
+      await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
+      await this.#store.append("revenue_payment_intent_snapshot", principal, authorizedIntent);
+      return {
+        job: structuredClone(authorizedJob),
+        paymentIntent: structuredClone(authorizedIntent),
+        decision: structuredClone(decision),
+      };
+    });
+  }
+
   authorizeRevenuePilotDelivery(
     principal: Principal,
     input: {
@@ -1080,6 +1180,62 @@ export class SaraKernel {
       await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
       await this.#store.append("revenue_delivery_snapshot", principal, delivery);
       return { job: structuredClone(authorizedJob), delivery: structuredClone(delivery) };
+    });
+  }
+
+  authorizeRevenuePilotDeliveryUnderMandate(
+    principal: Principal,
+    input: {
+      deliveryId: string;
+      jobId: string;
+      reportDigest: string;
+      accessSecretDigest: string;
+      lifetimeHours?: number;
+      maximumDownloads?: number;
+    },
+    requestedAt = new Date().toISOString(),
+  ): Promise<{ job: RevenuePilotJob; delivery: RevenueDelivery; decision: AutonomyDecision }> {
+    return this.serializeMutation(async () => {
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === input.jobId);
+      if (!job) throw new Error(`Revenue pilot ${input.jobId} does not exist.`);
+      const existing = state.revenueDeliveries.find((candidate) => candidate.jobId === job.id && candidate.status !== "revoked");
+      if (existing) {
+        if (existing.reportDigest !== input.reportDigest || existing.accessSecretDigest !== input.accessSecretDigest) {
+          throw new Error("Existing delivery is bound to different report or access evidence.");
+        }
+        const prior = [...state.autonomyDecisions].reverse().find((candidate) => candidate.requestId === `verified-report-delivery:${job.id}:${input.reportDigest}`);
+        if (!prior || prior.outcome !== "automatic") throw new Error("Existing delivery is missing its autonomous decision receipt.");
+        return { job: structuredClone(job), delivery: structuredClone(existing), decision: structuredClone(prior) };
+      }
+      const decision = await this.authorizeAutonomousRoutine(principal, state, {
+        id: `verified-report-delivery:${job.id}:${input.reportDigest}`,
+        kind: "verified_report_delivery",
+        targetId: `revenue-pilot:${job.id}:delivery:${input.reportDigest}`,
+        channel: "approved_api",
+        serviceId: job.plan.serviceId,
+        estimatedCostUsd: 0,
+        external: true,
+        requestedAt,
+        platform: "owner_site",
+      });
+      const approvalId = `standing-mandate:${decision.mandateId}:${sha256(canonicalJson(decision))}`;
+      const delivery = compileRevenueDelivery({
+        id: input.deliveryId,
+        job,
+        reportDigest: input.reportDigest,
+        accessSecretDigest: input.accessSecretDigest,
+        approvalId,
+        ...(input.lifetimeHours === undefined ? {} : { lifetimeHours: input.lifetimeHours }),
+        ...(input.maximumDownloads === undefined ? {} : { maximumDownloads: input.maximumDownloads }),
+      });
+      const authorizedJob = authorizeRevenuePilotDelivery(job, {
+        approvalId,
+        ownerApprovalTarget: `revenue-pilot:${job.id}:delivery`,
+      });
+      await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
+      await this.#store.append("revenue_delivery_snapshot", principal, delivery);
+      return { job: structuredClone(authorizedJob), delivery: structuredClone(delivery), decision: structuredClone(decision) };
     });
   }
 
@@ -1802,6 +1958,19 @@ export class SaraKernel {
     });
   }
 
+  authorizeOwnerNicoOperation(
+    principal: Principal,
+    targetId: string,
+    mode: "external_read" | "external_write",
+  ): Promise<void> {
+    return this.serializeMutation(async () => {
+      if (!this.isVerifiedOwner(principal)) {
+        throw new Error("Authenticated owner authority is required for NICO operations.");
+      }
+      await this.authorize(principal, { action: mode, targetId, external: true });
+    });
+  }
+
   activateStandingMandate(
     principal: Principal,
     input: StandingMandateInput,
@@ -1854,30 +2023,8 @@ export class SaraKernel {
 
   evaluateAutonomousAction(principal: Principal, request: RoutineActionRequest): Promise<AutonomyDecision> {
     return this.serializeMutation(async () => {
-      if (principal.kind !== "sara" || !principal.authenticated) throw new Error("Only the authenticated SARA principal may request autonomous execution.");
       const state = await this.state();
-      const date = request.requestedAt.slice(0, 10);
-      const completedToday = state.autonomyDecisions.filter((decision) =>
-        decision.outcome === "automatic" && decision.decidedAt.slice(0, 10) === date
-      ).length;
-      const decision = evaluateRoutineAction({
-        mandate: state.standingMandate,
-        request,
-        emergencyStopped: state.emergencyStopped,
-        completedToday,
-        activeActions: 0,
-      });
-      await this.#store.append("autonomy_decision", principal, decision);
-      if (decision.outcome === "owner_approval" || decision.outcome === "deny") {
-        const exception: AutonomyException = {
-          id: `exception:${request.id}`,
-          request: structuredClone(request),
-          decision,
-          status: "open",
-        };
-        await this.#store.append("autonomy_exception_opened", principal, exception);
-      }
-      return decision;
+      return this.authorizeAutonomousRoutine(principal, state, request, false);
     });
   }
 

@@ -295,9 +295,11 @@ describe("SARA owner dashboard HTTP boundary", () => {
       body: "{}",
     });
     assert.equal(activated.status, 201);
-    const mandate = await activated.json() as { id: string; maximumDailyActions: number; maximumCostPerActionUsd: number };
+    const mandate = await activated.json() as { id: string; maximumDailyActions: number; maximumCostPerActionUsd: number; allowedActions: string[] };
     assert.equal(mandate.maximumDailyActions, 10);
-    assert.equal(mandate.maximumCostPerActionUsd, 0);
+    assert.equal(mandate.maximumCostPerActionUsd, 3);
+    assert.ok(mandate.allowedActions.includes("fixed_service_fulfillment"));
+    assert.ok(mandate.allowedActions.includes("verified_report_delivery"));
     const candidate = await fetch(`${baseUrl}/api/bridge/actions/business-candidates`, {
       method: "POST",
       headers: bridgeHeaders,

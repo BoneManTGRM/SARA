@@ -18,6 +18,9 @@ import {
   type RevenuePilotOperatorTick,
 } from "../src/revenue-pilot-operator.ts";
 import { PILOT_REQUIRED_CAPABILITIES, type RevenuePilotInput } from "../src/revenue-pilot.ts";
+import { compileCommercialTerms } from "../src/commercial-terms.ts";
+import { paymentClientSecretDigest } from "../src/revenue-payment.ts";
+import { BASE_USDC_CONTRACT, type VerifiedUsdcPayment } from "../src/usdc-payment.ts";
 
 const OWNER_TOKEN = "operator-test-owner-token";
 const OWNER_DIGEST = createHash("sha256").update(OWNER_TOKEN).digest("hex");
@@ -165,6 +168,97 @@ async function runUntilSettled(operator: RevenuePilotOperator): Promise<RevenueP
 }
 
 describe("bounded persistent Luna revenue operator", () => {
+  it("accepts a verified fixed-price job and authorizes exact-report delivery under a standing mandate", async () => {
+    const directory = await stateDirectory();
+    const kernel = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: OWNER_DIGEST });
+    const owner = kernel.authenticateOwnerToken(OWNER_TOKEN);
+    for (const capabilityId of PILOT_REQUIRED_CAPABILITIES) {
+      await kernel.registerCapability(SARA_PRINCIPAL, {
+        id: capabilityId,
+        name: capabilityId,
+        status: "available",
+        evidence: [`autonomous-operator-test:${capabilityId}`],
+        limitations: ["Public repository snapshot only."],
+      });
+    }
+    const job = await kernel.createRevenuePilotJob(SARA_PRINCIPAL, opportunity());
+    const clientSecret = "customer-delivery-secret-that-is-long-enough";
+    const terms = compileCommercialTerms({
+      businessName: "Owner Test Business",
+      contactEmail: "owner@example.com",
+      governingLaw: "Owner selected law",
+    });
+    const intent = await kernel.createRevenuePaymentIntent(SARA_PRINCIPAL, {
+      id: "pay_autonomous_operator_test",
+      jobId: job.id,
+      recipientAddress: `0x${"2".repeat(40)}`,
+      clientSecretDigest: paymentClientSecretDigest(clientSecret),
+      customerReferenceDigest: sha256("customer@example.com"),
+      terms,
+    });
+    const payment: VerifiedUsdcPayment = {
+      schemaVersion: 1,
+      provider: "base-usdc-direct",
+      chainId: 8453,
+      tokenContract: BASE_USDC_CONTRACT,
+      transactionHash: `0x${"a".repeat(64)}`,
+      transactionReferenceDigest: sha256(`0x${"a".repeat(64)}`),
+      senderAddress: `0x${"1".repeat(40)}`,
+      recipientAddress: `0x${"2".repeat(40)}`,
+      amountAtomic: "149000000",
+      amountUsd: 149,
+      blockNumber: 100,
+      latestBlockNumber: 111,
+      confirmations: 12,
+      verifiedAt: "2026-09-03T12:00:00.000Z",
+    };
+    await kernel.confirmRevenuePayment(SARA_PRINCIPAL, intent.id, clientSecret, payment);
+    await kernel.activateStandingMandate(owner, {
+      id: "autonomous-paid-readiness-v1",
+      allowedActions: ["fixed_service_fulfillment", "verified_report_delivery"],
+      allowedChannels: ["approved_api"],
+      allowedServiceIds: ["public-repository-readiness-snapshot"],
+      maximumCostPerActionUsd: 3,
+      maximumDailyActions: 10,
+      maximumConcurrentActions: 1,
+      startsAt: "2026-09-03T00:00:00.000Z",
+      expiresAt: "2026-10-03T00:00:00.000Z",
+      ownerId: owner.id,
+    }, {
+      approvalId: "owner-approves-autonomous-paid-readiness-v1",
+      action: "required_owner_approval_change",
+      targetId: "standing-mandate:autonomous-paid-readiness-v1",
+      approvedAt: "2026-09-03T11:59:00.000Z",
+      ownerId: owner.id,
+    });
+    const operator = new RevenuePilotOperator({
+      kernel,
+      modelClient: fakeLuna([
+        "DIRECTOR: bounded plan",
+        "SPECIALIST: evidence-bound draft",
+        "VERDICT: PASS\nExact evidence and limits verified.",
+        readinessDraft(),
+      ], []),
+      repositoryEvidenceCollector: fakeEvidence(),
+      stateDirectory: directory,
+      now: () => new Date("2026-09-03T12:01:00.000Z"),
+    });
+
+    assert.equal((await operator.tick()).outcome, "authorized_job");
+    for (let index = 0; index < 4; index += 1) assert.equal((await operator.tick()).outcome, "completed_role");
+    const deliveryTick = await operator.tick();
+    assert.equal(deliveryTick.outcome, "authorized_delivery");
+    const status = await kernel.getStatus();
+    const deliveredJob = status.revenuePilotJobs.find((candidate) => candidate.id === job.id);
+    const delivery = status.revenueDeliveries.find((candidate) => candidate.jobId === job.id);
+    assert.equal(deliveredJob?.status, "delivery_ready");
+    assert.equal(deliveredJob?.externalDeliveryAuthorized, true);
+    assert.equal(delivery?.reportDigest, deliveredJob?.receipts.find((receipt) => receipt.role === "delivery_operator")?.reportDigest);
+    assert.equal(delivery?.accessSecretDigest, paymentClientSecretDigest(clientSecret));
+    assert.match(delivery?.approvalId ?? "", /^standing-mandate:/u);
+    assert.equal(status.realizedProfit.collectedRevenueUsd, 149);
+  });
+
   it("does not call a model unless a paid job has owner authorization", async () => {
     const directory = await stateDirectory();
     const kernel = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: OWNER_DIGEST });

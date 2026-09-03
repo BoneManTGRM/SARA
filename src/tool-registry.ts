@@ -2,7 +2,7 @@ export type SaraToolDescriptor = {
   id: string;
   name: string;
   status: "available" | "configuration_required";
-  mode: "read_only" | "sandbox_write" | "internal_state";
+  mode: "read_only" | "sandbox_write" | "internal_state" | "external_write";
   purpose: string;
   invocationBoundary: string;
   requiredApproval: string;
@@ -23,8 +23,17 @@ function descriptor(input: Omit<SaraToolDescriptor, "prohibitedActions">): SaraT
   return { ...input, prohibitedActions: [...COMMON_PROHIBITIONS] };
 }
 
-export function listSaraTools(options: { lunaConfigured: boolean; ownerAssistantConfigured?: boolean }): SaraToolDescriptor[] {
+export function listSaraTools(options: { lunaConfigured: boolean; ownerAssistantConfigured?: boolean; nicoConfigured?: boolean }): SaraToolDescriptor[] {
   return [
+    descriptor({
+      id: "nico-comprehensive-operator",
+      name: "NICO Comprehensive Operator",
+      status: options.nicoConfigured ? "available" : "configuration_required",
+      mode: "external_write",
+      purpose: "Create and advance authorized public-repository assessments, retrieve exact drafts, and submit an owner's exact-report decision.",
+      invocationBoundary: "Owner API only; privileged password is supplied per request and never stored; review and delivery remain separate.",
+      requiredApproval: "explicit owner confirmation and ephemeral NICO password bound to the exact artifact identity",
+    }),
     descriptor({
       id: "luna-worker",
       name: "Bounded Luna Worker",

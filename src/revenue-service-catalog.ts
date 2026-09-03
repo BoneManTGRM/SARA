@@ -100,13 +100,13 @@ export function listRevenueServices(): Array<{
   supportedGoals: readonly PilotGoal[];
   requiredCapabilities: readonly string[];
   deliverables: readonly string[];
-  authority: "owner_review_only";
+  authority: "verified_payment_and_active_owner_mandate";
 }> {
   return REVENUE_SERVICE_CATALOG.map((service) => ({
     ...service,
     supportedGoals: [...service.supportedGoals],
     requiredCapabilities: [...service.requiredCapabilities],
     deliverables: [...service.deliverables],
-    authority: "owner_review_only",
+    authority: "verified_payment_and_active_owner_mandate",
   }));
 }

@@ -15,7 +15,9 @@ import { sha256 } from "./canonical.ts";
 import { listRevenueServices } from "./revenue-service-catalog.ts";
 import { readRepositoryReadinessReportArtifact } from "./repository-readiness-report-artifacts.ts";
 import { listSaraTools } from "./tool-registry.ts";
+import type { NicoArtifactFormat, NicoArtifactIdentity, NicoOperator } from "./nico-operator.ts";
 import type { CandidateProposal, MutationStage } from "./types.ts";
+import { compileAuthorizedAutomatedReadinessDelivery } from "./authorized-readiness-delivery.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -24,7 +26,7 @@ export type SaraRuntimeStatus = {
   startupProof: unknown;
 };
 
-type ServerOptions = {
+export type ServerOptions = {
   ownerTokenSha256: string;
   readOnlyBridgeTokenSha256?: string;
   telegramBridgeTokenSha256?: string;
@@ -39,6 +41,7 @@ type ServerOptions = {
     fetchImpl?: typeof fetch;
   };
   publicBaseUrl?: string;
+  nicoOperator?: NicoOperator;
 };
 
 const publicCommerceAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -81,6 +84,17 @@ function json(response: ServerResponse, status: number, body: unknown): void {
     "x-content-type-options": "nosniff",
   });
   response.end(JSON.stringify(body));
+}
+
+function binary(response: ServerResponse, contentType: string, body: Uint8Array, extraHeaders: Record<string, string> = {}): void {
+  response.writeHead(200, {
+    "content-type": contentType,
+    "content-length": String(body.byteLength),
+    "cache-control": "no-store",
+    "x-content-type-options": "nosniff",
+    ...extraHeaders,
+  });
+  response.end(body);
 }
 
 function unauthorized(response: ServerResponse): void {
@@ -246,8 +260,19 @@ async function handlePublicCommerce(
   }
   const statusMatch = url.pathname.match(/^\/api\/public\/revenue-pilot\/intents\/([^/]+)$/u);
   if (request.method === "GET" && statusMatch) {
-    const intent = await kernel.inspectRevenuePaymentIntent(decodeURIComponent(statusMatch[1]!), paymentClientSecret(request));
-    json(response, 200, publicPaymentIntent(intent));
+    const accessSecret = paymentClientSecret(request);
+    const intent = await kernel.inspectRevenuePaymentIntent(decodeURIComponent(statusMatch[1]!), accessSecret);
+    const delivery = (await kernel.getStatus()).revenueDeliveries.find((candidate) =>
+      candidate.jobId === intent.jobId && candidate.status !== "revoked"
+    );
+    let deliveryAccess: null | { status: string; expiresAt: string; downloadUrl: string } = null;
+    if (delivery) {
+      const base = options.publicBaseUrl ?? `https://${request.headers.host ?? "sara-operator-production.up.railway.app"}`;
+      const download = new URL(`/api/public/revenue-pilot/deliveries/${encodeURIComponent(delivery.id)}`, base);
+      download.searchParams.set("access", accessSecret);
+      deliveryAccess = { status: delivery.status, expiresAt: delivery.expiresAt, downloadUrl: download.toString() };
+    }
+    json(response, 200, { ...publicPaymentIntent(intent), delivery: deliveryAccess });
     return true;
   }
   const paymentMatch = url.pathname.match(/^\/api\/public\/revenue-pilot\/intents\/([^/]+)\/payment$/u);
@@ -296,12 +321,7 @@ async function handlePublicDelivery(
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
   });
-  response.end(JSON.stringify({
-    schemaVersion: 1,
-    deliveredAt: accessed.delivery.lastDownloadedAt,
-    reportDigest: artifact.reportDigest,
-    report: artifact.report,
-  }));
+  response.end(JSON.stringify(compileAuthorizedAutomatedReadinessDelivery(artifact, accessed.delivery)));
   return true;
 }
 
@@ -512,6 +532,7 @@ async function handleOwnerCatalogRead(
     json(response, 200, listSaraTools({
       lunaConfigured: Boolean(options.runtimeStatus),
       ownerAssistantConfigured: Boolean(options.ownerAssistant),
+      nicoConfigured: Boolean(options.nicoOperator),
     }));
     return true;
   }
@@ -600,10 +621,12 @@ async function handleOwnerRevenueWrite(
         "inbound_customer_reply",
         "calendar_scheduling",
         "bounded_outreach",
+        "fixed_service_fulfillment",
+        "verified_report_delivery",
       ],
       allowedChannels: ["public_web", "email", "calendar", "approved_api"],
       allowedServiceIds: ["public-repository-readiness-snapshot"],
-      maximumCostPerActionUsd: 0,
+      maximumCostPerActionUsd: 3,
       maximumDailyActions: 10,
       maximumConcurrentActions: 1,
       startsAt: now.toISOString(),
@@ -738,6 +761,115 @@ async function handleOwnerDevelopmentRequest(
   return false;
 }
 
+async function handleOwnerNicoOperation(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  kernel: SaraKernel,
+  owner: OwnerSession,
+  options: ServerOptions,
+): Promise<boolean> {
+  if (!url.pathname.startsWith("/api/nico/")) return false;
+  const operator = options.nicoOperator;
+  if (!operator) {
+    json(response, 503, { error: "NICO operator is not configured." });
+    return true;
+  }
+  if (request.method === "POST" && url.pathname === "/api/nico/runs") {
+    const body = await readJson(request);
+    const id = typeof body.runId === "string" && body.runId.trim()
+      ? body.runId.trim()
+      : `comprun_${randomBytes(16).toString("hex")}`;
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:create`, "external_write");
+    json(response, 202, await operator.createRun({
+      runId: id,
+      repository: boundedText(body.repository, 3, 240, "repository"),
+      commitSha: boundedText(body.commitSha, 40, 40, "commitSha"),
+      clientName: boundedText(body.clientName, 3, 160, "clientName"),
+      projectName: boundedText(body.projectName, 3, 160, "projectName"),
+      authorizedBy: boundedText(body.authorizedBy, 3, 160, "authorizedBy"),
+      authorizationScope: boundedText(body.authorizationScope, 8, 1_000, "authorizationScope"),
+      primaryTechnicalContact: boundedText(body.primaryTechnicalContact, 3, 160, "primaryTechnicalContact"),
+    }));
+    return true;
+  }
+  const statusMatch = url.pathname.match(/^\/api\/nico\/runs\/(comprun_[0-9a-f]{32})$/u);
+  if (request.method === "GET" && statusMatch) {
+    const id = statusMatch[1]!;
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:status`, "external_read");
+    json(response, 200, await operator.getRun(id));
+    return true;
+  }
+  const continueMatch = url.pathname.match(/^\/api\/nico\/runs\/(comprun_[0-9a-f]{32})\/continue$/u);
+  if (request.method === "POST" && continueMatch) {
+    const id = continueMatch[1]!;
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:continue`, "external_write");
+    json(response, 200, await operator.continueRun(id));
+    return true;
+  }
+  const reportMatch = url.pathname.match(/^\/api\/nico\/runs\/(comprun_[0-9a-f]{32})\/report\/(markdown|html|json|pdf)$/u);
+  if (request.method === "GET" && reportMatch) {
+    const id = reportMatch[1]!;
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:report:${reportMatch[2]}`, "external_read");
+    const artifact = await operator.getReport(id, reportMatch[2] as NicoArtifactFormat);
+    binary(response, artifact.contentType, artifact.body);
+    return true;
+  }
+  const queueMatch = url.pathname.match(/^\/api\/nico\/runs\/(comprun_[0-9a-f]{32})\/review-queue$/u);
+  if (request.method === "POST" && queueMatch) {
+    const id = queueMatch[1]!;
+    const body = await readJson(request);
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:review-queue`, "external_read");
+    const override = body.nicoPassword === undefined ? undefined : boundedText(body.nicoPassword, 8, 512, "nicoPassword");
+    json(response, 200, await operator.getReviewQueue(id, override));
+    return true;
+  }
+  const finalizeMatch = url.pathname.match(/^\/api\/nico\/runs\/(comprun_[0-9a-f]{32})\/finalize$/u);
+  if (request.method === "POST" && finalizeMatch) {
+    const id = finalizeMatch[1]!;
+    const body = await readJson(request);
+    if (body.confirmExactReport !== true) throw new Error("Explicit exact-report confirmation is required.");
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:finalize`, "external_write");
+    const override = body.nicoPassword === undefined ? undefined : boundedText(body.nicoPassword, 8, 512, "nicoPassword");
+    json(response, 200, await operator.finalizeExactDraft(id, override, {
+      reviewer: boundedText(body.reviewer, 3, 160, "reviewer"),
+      reviewerRole: boundedText(body.reviewerRole, 3, 160, "reviewerRole"),
+      decisionReason: boundedText(body.decisionReason, 8, 1_000, "decisionReason"),
+      expectedArtifactIdentity: body.expectedArtifactIdentity as NicoArtifactIdentity,
+      confirmExactReport: true,
+    }));
+    return true;
+  }
+  const deliveryMatch = url.pathname.match(/^\/api\/nico\/runs\/(comprun_[0-9a-f]{32})\/authorize-delivery$/u);
+  if (request.method === "POST" && deliveryMatch) {
+    const id = deliveryMatch[1]!;
+    const body = await readJson(request);
+    if (body.confirmDelivery !== true) throw new Error("Explicit client-delivery confirmation is required.");
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:authorize-delivery`, "external_write");
+    const override = body.nicoPassword === undefined ? undefined : boundedText(body.nicoPassword, 8, 512, "nicoPassword");
+    json(response, 200, await operator.authorizeDelivery(id, override, {
+      authorizer: boundedText(body.authorizer, 3, 160, "authorizer"),
+      authorizerRole: boundedText(body.authorizerRole, 3, 160, "authorizerRole"),
+      authorizationReason: boundedText(body.authorizationReason, 8, 1_000, "authorizationReason"),
+      expectedArtifactIdentity: body.expectedArtifactIdentity as NicoArtifactIdentity,
+      confirmDelivery: true,
+    }));
+    return true;
+  }
+  const packageMatch = url.pathname.match(/^\/api\/nico\/runs\/(comprun_[0-9a-f]{32})\/approved-package$/u);
+  if (request.method === "POST" && packageMatch) {
+    const id = packageMatch[1]!;
+    const body = await readJson(request);
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:approved-package`, "external_read");
+    const override = body.nicoPassword === undefined ? undefined : boundedText(body.nicoPassword, 8, 512, "nicoPassword");
+    const artifact = await operator.getApprovedDeliveryPackage(id, override);
+    binary(response, artifact.contentType, artifact.body, artifact.digest ? { "x-nico-certified-package-sha256": artifact.digest } : {});
+    return true;
+  }
+  json(response, 404, { error: "Not found." });
+  return true;
+}
+
 async function handleAuthenticatedRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -747,6 +879,7 @@ async function handleAuthenticatedRequest(
   options: ServerOptions,
 ): Promise<void> {
   if (await handleOwnerCatalogRead(request, response, url, kernel, options)) return;
+  if (await handleOwnerNicoOperation(request, response, url, kernel, owner, options)) return;
   if (await handleOwnerReportRead(request, response, url, kernel, options)) return;
   if (await handleOwnerRevenueWrite(request, response, url, kernel, owner, options)) return;
   if (await handleOwnerDevelopmentRequest(request, response, url, kernel, owner)) return;
@@ -887,6 +1020,7 @@ async function routeSaraRequest(
       tools: listSaraTools({
         lunaConfigured: Boolean(options.runtimeStatus),
         ownerAssistantConfigured: Boolean(options.ownerAssistant),
+        nicoConfigured: Boolean(options.nicoOperator),
       }),
       services: listRevenueServices(),
       operationalSkills: await kernel.inspectOperationalSkills(),
