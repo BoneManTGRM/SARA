@@ -1058,7 +1058,8 @@ export const DASHBOARD_HTML = `<!doctype html>
       document.querySelector('#constitution').textContent = 'Verified · v' + state.constitution.version;
       document.querySelector('#digest').textContent = state.constitution.digest;
       document.querySelector('#memories').textContent = String(state.memoryCount);
-      document.querySelector('#memory-note').textContent = 'Provenance-aware durable records';
+      const learning = state.learning || {};
+      document.querySelector('#memory-note').textContent = 'Reparodynamics v' + (learning.reparodynamicsVersion || '—') + ' · ' + (learning.verifiedOutcomeCount || 0) + ' verified outcomes · provenance-aware';
       document.querySelector('#events').textContent = String(state.audit.eventCount);
       document.querySelector('#audit-head').textContent = state.audit.headHash || 'Genesis state · no audit head';
       renderMutations(state.mutations);

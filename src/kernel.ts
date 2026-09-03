@@ -24,6 +24,12 @@ import {
 } from "./genome-lab.ts";
 import { compileExecutorHandoff } from "./handoff.ts";
 import { CORE_MEMORY_SEEDS, CORE_MEMORY_SOURCE, recallMemories, validateMemoryMetadata } from "./memory-fabric.ts";
+import {
+  REPARODYNAMICS_DOCTRINE_DIGEST,
+  REPARODYNAMICS_MEMORY_SEEDS,
+  REPARODYNAMICS_SOURCE,
+  REPARODYNAMICS_VERSION,
+} from "./reparodynamics.ts";
 import { loadConstitution, type SaraConstitution } from "./constitution.ts";
 import {
   assertMoney,
@@ -414,6 +420,12 @@ export type SaraStatus = {
   reservedSelfDevelopmentBudgetUsd: number;
   availableCompoundReserveUsd: number;
   memoryCount: number;
+  learning: {
+    reparodynamicsVersion: number;
+    doctrineDigest: string;
+    doctrineMemoryCount: number;
+    verifiedOutcomeCount: number;
+  };
   capabilities: Capability[];
   jobs: Job[];
   mutations: Mutation[];
@@ -508,6 +520,15 @@ export class SaraKernel {
           memories: CORE_MEMORY_SEEDS,
         });
       }
+      const reparodynamicsSeeded = existingEvents.some((event) => event.type === "reparodynamics_memory_seeded");
+      if (!reparodynamicsSeeded) {
+        await store.append("reparodynamics_memory_seeded", SARA_PRINCIPAL, {
+          version: REPARODYNAMICS_VERSION,
+          source: REPARODYNAMICS_SOURCE,
+          doctrineDigest: REPARODYNAMICS_DOCTRINE_DIGEST,
+          memories: REPARODYNAMICS_MEMORY_SEEDS,
+        });
+      }
       if (options.bootstrapRevenueCapabilities) {
         const currentCapabilities = new Map<string, Capability>();
         for (const event of await store.readAll()) {
@@ -569,6 +590,22 @@ export class SaraKernel {
       if (event.type === "core_memory_seeded") {
         const data = event.data as { memories?: unknown };
         if (!Array.isArray(data.memories)) throw new EventStoreIntegrityError("Core memory seed event is malformed.");
+        memories.push(...structuredClone(data.memories as MemoryRecord[]));
+      }
+      if (event.type === "reparodynamics_memory_seeded") {
+        const data = event.data as { version?: unknown; source?: unknown; doctrineDigest?: unknown; memories?: unknown };
+        const observedDigest = Array.isArray(data.memories)
+          ? sha256(canonicalJson({ version: data.version, source: data.source, memories: data.memories }))
+          : null;
+        if (
+          data.version !== REPARODYNAMICS_VERSION ||
+          data.source !== REPARODYNAMICS_SOURCE ||
+          data.doctrineDigest !== REPARODYNAMICS_DOCTRINE_DIGEST ||
+          observedDigest !== REPARODYNAMICS_DOCTRINE_DIGEST ||
+          !Array.isArray(data.memories)
+        ) {
+          throw new EventStoreIntegrityError("Reparodynamics memory seed event is malformed or conflicts with this runtime.");
+        }
         memories.push(...structuredClone(data.memories as MemoryRecord[]));
       }
       if (event.type === "ledger_recorded") ledger.push(event.data as LedgerEntry);
@@ -682,6 +719,25 @@ export class SaraKernel {
       }
       validateMemoryMetadata(input);
       const memory: MemoryRecord = { ...input, id: randomUUID() };
+      await this.#store.append("memory_recorded", principal, memory);
+      return memory;
+    });
+  }
+
+  recordMemoryOnce(principal: Principal, input: Omit<MemoryRecord, "id">, external = false): Promise<MemoryRecord> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, { action: "record_memory", targetId: input.scope, external });
+      if (!input.statement.trim() || !input.source.trim() || !input.scope.trim()) {
+        throw new Error("Memory statement, source, and scope are required.");
+      }
+      if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
+        throw new RangeError("Memory confidence must be between 0 and 1.");
+      }
+      validateMemoryMetadata(input);
+      const id = `memory-${sha256(canonicalJson(input))}`;
+      const existing = (await this.state()).memories.find((memory) => memory.id === id);
+      if (existing) return structuredClone(existing);
+      const memory: MemoryRecord = { ...input, id };
       await this.#store.append("memory_recorded", principal, memory);
       return memory;
     });
@@ -1888,6 +1944,12 @@ export class SaraKernel {
         ) / 100,
       ),
       memoryCount: state.memories.length,
+      learning: {
+        reparodynamicsVersion: REPARODYNAMICS_VERSION,
+        doctrineDigest: REPARODYNAMICS_DOCTRINE_DIGEST,
+        doctrineMemoryCount: state.memories.filter((memory) => memory.source === REPARODYNAMICS_SOURCE).length,
+        verifiedOutcomeCount: state.memories.filter((memory) => memory.tags?.includes("verified-outcome")).length,
+      },
       capabilities: state.capabilities,
       jobs: state.jobs,
       mutations: state.mutations,

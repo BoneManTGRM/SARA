@@ -22,10 +22,11 @@ afterEach(async () => {
 describe("SARA durable memory fabric", () => {
   // Production defect caught: a restarted SARA loses her mission anchors or cannot retrieve
   // the economic rules needed to evaluate work.
-  it("seeds 36 durable anchors once and recalls mission-relevant context after restart", async () => {
+  it("seeds 42 durable anchors and Reparodynamics doctrine once, then recalls them after restart", async () => {
     const directory = await stateDirectory();
     const first = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: OWNER_TOKEN_DIGEST });
-    assert.equal((await first.getStatus()).memoryCount, 36);
+    assert.equal((await first.getStatus()).memoryCount, 42);
+    assert.equal((await first.getStatus()).learning.doctrineMemoryCount, 6);
 
     const firstRecall = await first.recallMemory({
       query: "customer revenue realized profit reinvestment owner distribution",
@@ -38,7 +39,7 @@ describe("SARA durable memory fabric", () => {
     assert.match(firstRecall.contextDigest, /^[a-f0-9]{64}$/);
 
     const restarted = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: OWNER_TOKEN_DIGEST });
-    assert.equal((await restarted.getStatus()).memoryCount, 36);
+    assert.equal((await restarted.getStatus()).memoryCount, 42);
     const restartedRecall = await restarted.recallMemory({
       query: "customer revenue realized profit reinvestment owner distribution",
       scope: "global",
@@ -54,6 +55,50 @@ describe("SARA durable memory fabric", () => {
       (await restarted.inspectAudit()).filter((event) => event.type === "core_memory_seeded").length,
       1,
     );
+    assert.equal(
+      (await restarted.inspectAudit()).filter((event) => event.type === "reparodynamics_memory_seeded").length,
+      1,
+    );
+  });
+
+  it("writes an identical verified lesson once across replay and restart", async () => {
+    const directory = await stateDirectory();
+    const kernel = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: OWNER_TOKEN_DIGEST });
+    const lesson = {
+      category: "repair" as const,
+      statement: "A measured repair passed its independent deterministic gate.",
+      source: "sara://learning/example/cycle",
+      observedAt: "2026-09-03T00:00:00.000Z",
+      confidence: 1,
+      verification: "measured" as const,
+      scope: "service.example",
+      dependencies: ["a".repeat(64)],
+      lastValidatedAt: "2026-09-03T00:00:00.000Z",
+      importance: 3 as const,
+      tags: ["verified-outcome"],
+      status: "active" as const,
+      supersedes: [],
+    };
+    const first = await kernel.recordMemoryOnce(SARA_PRINCIPAL, lesson);
+    const replay = await kernel.recordMemoryOnce(SARA_PRINCIPAL, lesson);
+    assert.equal(replay.id, first.id);
+    assert.equal((await kernel.getStatus()).learning.verifiedOutcomeCount, 1);
+
+    const restarted = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: OWNER_TOKEN_DIGEST });
+    const afterRestart = await restarted.recordMemoryOnce(SARA_PRINCIPAL, lesson);
+    assert.equal(afterRestart.id, first.id);
+    assert.equal((await restarted.getStatus()).learning.verifiedOutcomeCount, 1);
+  });
+
+  it("applies the Reparodynamics migration once across simultaneous pristine boots", async () => {
+    const directory = await stateDirectory();
+    const kernels = await Promise.all(Array.from({ length: 3 }, () =>
+      SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: OWNER_TOKEN_DIGEST })
+    ));
+    assert.ok(kernels.every((kernel) => kernel.constitutionDigest === kernels[0].constitutionDigest));
+    const events = await kernels[0].inspectAudit();
+    assert.equal(events.filter((event) => event.type === "reparodynamics_memory_seeded").length, 1);
+    assert.equal((await kernels[0].getStatus()).learning.doctrineMemoryCount, 6);
   });
 
   // Production defects caught: one customer's memory leaks into another customer's context;

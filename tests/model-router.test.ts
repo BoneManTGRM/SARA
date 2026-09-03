@@ -33,7 +33,7 @@ describe("SARA worker model routing policy", () => {
           provider: "openai",
           model: "gpt-5.6-luna",
           billingMode: "paid",
-          reasoningLevel: "low",
+          reasoningLevel: "medium",
         },
         {
           provider: "google",
