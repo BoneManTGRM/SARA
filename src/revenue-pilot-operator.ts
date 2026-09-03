@@ -16,7 +16,10 @@ import {
 } from "./revenue-pilot-artifacts.ts";
 import type { RevenuePilotJob, RevenuePilotLease } from "./revenue-pilot.ts";
 import { getRevenueService } from "./revenue-service-catalog.ts";
-import { persistRepositoryReadinessReportArtifact } from "./repository-readiness-report-artifacts.ts";
+import {
+  persistRepositoryReadinessReportArtifact,
+  REPOSITORY_READINESS_DRAFT_JSON_SCHEMA,
+} from "./repository-readiness-report-artifacts.ts";
 import type { MemoryRecall } from "./types.ts";
 
 export type RevenuePilotOperatorTick =
@@ -368,6 +371,12 @@ export class RevenuePilotOperator {
       maximumTaskCostUsd: actualProfile.maximumTaskCostUsd,
       allowGeminiFreeTier: false,
       clients: [this.#modelClient],
+      structuredOutput: role === "delivery_operator" && claim.job.plan.serviceId === "public-repository-readiness-snapshot"
+        ? {
+          name: "repository_readiness_draft",
+          schema: REPOSITORY_READINESS_DRAFT_JSON_SCHEMA,
+        }
+        : undefined,
       verificationPassed: role === "independent_verifier"
         ? (outputText) => outputText.trimStart().startsWith("VERDICT: PASS")
         : null,

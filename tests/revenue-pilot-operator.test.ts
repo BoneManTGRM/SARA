@@ -85,7 +85,11 @@ async function authorizedKernel(directory: string): Promise<{ kernel: SaraKernel
   return { kernel, jobId: job.id };
 }
 
-function fakeLuna(outputs: string[], calls: string[]): WorkerModelClient {
+function fakeLuna(
+  outputs: string[],
+  calls: string[],
+  structuredOutputs: Array<Parameters<WorkerModelClient["execute"]>[0]["structuredOutput"]> = [],
+): WorkerModelClient {
   return {
     routeKey: "openai:gpt-5.6-luna:paid",
     maximumWallTimeMs: 1_000,
@@ -94,6 +98,7 @@ function fakeLuna(outputs: string[], calls: string[]): WorkerModelClient {
     },
     async execute(input) {
       calls.push(input.prompt);
+      structuredOutputs.push(input.structuredOutput);
       const outputText = outputs.shift();
       if (!outputText) throw new Error("No fake Luna output remains.");
       return { outputText, inputTokens: 100, billableOutputTokens: 50 };
@@ -227,6 +232,7 @@ describe("bounded persistent Luna revenue operator", () => {
     const directory = await stateDirectory();
     const { kernel, jobId } = await authorizedKernel(directory);
     const calls: string[] = [];
+    const structuredOutputs: Array<Parameters<WorkerModelClient["execute"]>[0]["structuredOutput"]> = [];
     const operator = new RevenuePilotOperator({
       kernel,
       modelClient: fakeLuna([
@@ -234,7 +240,7 @@ describe("bounded persistent Luna revenue operator", () => {
         "SPECIALIST: owner-review assessment draft",
         "VERDICT: PASS\nEvidence and limitations are explicit.",
         readinessDraft(),
-      ], calls),
+      ], calls, structuredOutputs),
       repositoryEvidenceCollector: fakeEvidence(),
       stateDirectory: directory,
       now: () => new Date("2026-09-02T00:02:00.000Z"),
@@ -268,6 +274,12 @@ describe("bounded persistent Luna revenue operator", () => {
     assert.ok(calls[2].includes("SPECIALIST: owner-review assessment draft"));
     assert.ok(calls[3].includes("VERDICT: PASS"));
     assert.ok(calls[3].includes("OUTPUT CONTRACT: Return only one JSON object"));
+    assert.deepEqual(structuredOutputs.slice(0, 3), [undefined, undefined, undefined]);
+    assert.equal(structuredOutputs[3]?.name, "repository_readiness_draft");
+    const schema = structuredOutputs[3]?.schema as {
+      properties?: { categoryEvidence?: { items?: { properties?: { note?: unknown } } } };
+    };
+    assert.deepEqual(schema.properties?.categoryEvidence?.items?.properties?.note, { type: "string" });
     assert.ok(calls.every((prompt) => prompt.includes(`"immutableCommitSha":"${"a".repeat(40)}"`)));
     assert.ok(calls.every((prompt) => prompt.includes("WORK_PACKET_JSON")));
     assert.ok(calls.every((prompt) => prompt.includes("Reparodynamics")));
