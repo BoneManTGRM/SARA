@@ -3,7 +3,7 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import type { Capability } from "./types.ts";
 
 export const REVENUE_CAPABILITY_MIGRATION_ID = "revenue-pilot-capabilities" as const;
-export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 1 as const;
+export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 2 as const;
 
 type Definition = {
   id: string;
