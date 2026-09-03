@@ -202,13 +202,20 @@ describe("durable sequential revenue worker", () => {
         independent_verifier: "c".repeat(64),
         delivery_operator: "d".repeat(64),
       }[role];
-      active = completeRevenuePilotRole(claimed.job, {
+      const completion = {
         leaseId: claimed.lease.id,
         role,
         outputDigest,
         costUsd: role === "specialist_worker" ? 1.25 : 0.25,
         verificationPassed: role === "independent_verifier" ? true : null,
         completedAt: `2026-09-02T00:0${minute}:20.000Z`,
+      };
+      if (role === "delivery_operator") {
+        assert.throws(() => completeRevenuePilotRole(claimed.job, completion), /compiled report digest/i);
+      }
+      active = completeRevenuePilotRole(claimed.job, {
+        ...completion,
+        ...(role === "delivery_operator" ? { reportDigest: "e".repeat(64) } : {}),
       });
     }
 
@@ -217,6 +224,7 @@ describe("durable sequential revenue worker", () => {
     assert.equal(active.actualExecutionCostUsd, 1.75);
     assert.deepEqual(active.completedRoles, PILOT_ROLES);
     assert.equal(active.externalDeliveryAuthorized, false);
+    assert.equal(active.receipts.at(-1)?.reportDigest, "e".repeat(64));
   });
 
   it("fails closed when verification fails or the $3 job cap would be exceeded", () => {

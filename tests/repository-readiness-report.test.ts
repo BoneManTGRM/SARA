@@ -132,6 +132,21 @@ describe("$149 repository readiness report gate", () => {
     assert.throws(() => compileRepositoryReadinessReport(input), /unsupported assurance claim/);
   });
 
+  it("rejects inherited object keys as priorities", () => {
+    const input = validInput();
+    input.findings = [{
+      ...input.findings[0],
+      priority: "constructor" as RepositoryReadinessReportInput["findings"][number]["priority"],
+    }];
+    assert.throws(() => compileRepositoryReadinessReport(input), /priority is invalid/i);
+  });
+
+  it("requires owner attention for any finding priority", () => {
+    const input = validInput();
+    input.findings = [{ ...input.findings[0], priority: "low" }];
+    assert.equal(compileRepositoryReadinessReport(input).readiness, "attention_required");
+  });
+
   it("permits a no-finding baseline without representing it as proof of safety", () => {
     const input = validInput();
     input.findings = [];

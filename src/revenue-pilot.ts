@@ -89,6 +89,7 @@ export type RevenuePilotReceipt = {
   modelExecution?: WorkerModelExecutionEvidence;
   modelFailure?: WorkerModelFailureEvidence;
   failureStage?: "model_execution" | "artifact_persistence";
+  reportDigest?: string;
 };
 
 export type RevenuePilotJob = {
@@ -362,6 +363,7 @@ export function completeRevenuePilotRole(
     modelFailure?: WorkerModelFailureEvidence;
     executionFailed?: boolean;
     failureStage?: "model_execution" | "artifact_persistence";
+    reportDigest?: string;
   },
 ): RevenuePilotJob {
   assertMoney(result.costUsd, "costUsd");
@@ -436,6 +438,16 @@ export function completeRevenuePilotRole(
   if (result.modelExecution && result.modelFailure) {
     throw new Error("A routed role cannot contain both success and failure evidence.");
   }
+  const requiresReadinessReport =
+    job.plan.serviceId === "public-repository-readiness-snapshot" &&
+    result.role === "delivery_operator" &&
+    !result.executionFailed;
+  if (requiresReadinessReport && (!result.reportDigest || !SHA256_HEX.test(result.reportDigest) || /^0{64}$/i.test(result.reportDigest))) {
+    throw new Error("The repository-readiness delivery role requires a non-zero compiled report digest.");
+  }
+  if (result.reportDigest && !requiresReadinessReport) {
+    throw new Error("A report digest is allowed only for a successful repository-readiness delivery role.");
+  }
   if (result.modelFailure) {
     const evidence = result.modelFailure;
     if (
@@ -468,6 +480,7 @@ export function completeRevenuePilotRole(
     ...(result.modelExecution ? { modelExecution: structuredClone(result.modelExecution) } : {}),
     ...(result.modelFailure ? { modelFailure: structuredClone(result.modelFailure) } : {}),
     ...(result.failureStage ? { failureStage: result.failureStage } : {}),
+    ...(result.reportDigest ? { reportDigest: result.reportDigest.toLowerCase() } : {}),
   });
   if (!result.executionFailed) completed.completedRoles.push(result.role);
   completed.actualExecutionCostUsd = nextCost;

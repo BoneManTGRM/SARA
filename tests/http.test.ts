@@ -51,6 +51,7 @@ describe("SARA owner dashboard HTTP boundary", () => {
     }
     server = createSaraServer(kernel, {
       ownerTokenSha256: tokenHash,
+      stateDirectory: directory,
       readOnlyBridgeTokenSha256: bridgeTokenHash,
       telegramBridgeTokenSha256: telegramBridgeTokenHash,
       ownerAssistant: new OwnerAssistant({
@@ -135,6 +136,21 @@ describe("SARA owner dashboard HTTP boundary", () => {
       "dependency-hygiene-brief",
     ]);
     assert.deepEqual(services.map((service) => service.priceUsd), [149, 79, 99, 79]);
+  });
+
+  it("keeps readiness reports owner-only and unavailable before the report gate passes", async () => {
+    const reportUrl = `${baseUrl}/api/revenue-pilot/jobs/not-a-job/report`;
+    assert.equal((await fetch(reportUrl)).status, 401);
+    assert.equal((await fetch(reportUrl, {
+      headers: { Authorization: `Bearer ${bridgeToken}` },
+    })).status, 401);
+    assert.equal((await fetch(reportUrl, {
+      headers: { Authorization: `Bearer ${telegramBridgeToken}` },
+    })).status, 401);
+    const ownerResponse = await fetch(reportUrl, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(ownerResponse.status, 404);
   });
 
   it("gives the bridge a read-only catalog without owner authority", async () => {

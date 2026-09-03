@@ -1,6 +1,6 @@
 # $149 founding pilot report gate
 
-Status: SHADOW candidate · owner review required · no customer contacted · no delivery or payment action
+Status: runtime integration candidate · owner review required · no customer contacted · no delivery or payment action
 
 ## Opportunity
 
@@ -17,7 +17,7 @@ These sources establish that the categories are legitimate. They do not prove de
 
 ## Deliverable
 
-`compileRepositoryReadinessReport` converts structured evidence and findings into one deterministic owner-review report. It:
+`compileRepositoryReadinessReport` converts structured evidence and findings into one deterministic owner-review report. The revenue operator now invokes it at the `$149 Public Repository Readiness Snapshot` delivery boundary before a job may enter owner review. It:
 
 1. requires exactly one evidence record for code, dependencies, secret exposure, and release controls;
 2. accepts citations only from the named public repository at the exact 40-character commit;
@@ -26,6 +26,8 @@ These sources establish that the categories are legitimate. They do not prove de
 5. sorts the report deterministically and does not mutate the input;
 6. represents unavailable categories as evidence gaps and stops before owner review; and
 7. always returns `externalDeliveryAuthorized: false`.
+
+The integrated boundary also requires every evidence URL to exist in the immutable sampled packet, validates finding line ranges against the sampled source text, stores the compiled report with an integrity digest, and exposes it only through the authenticated owner API. Invalid or incomplete output fails the job before owner review.
 
 A reviewed sample with no findings is labeled only `baseline_observed`. The fixed limitations explicitly say that absence of a finding is not evidence that vulnerabilities, exposed secrets, or release risks do not exist.
 
