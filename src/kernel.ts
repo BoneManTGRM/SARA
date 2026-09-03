@@ -1280,6 +1280,10 @@ export class SaraKernel {
       maximumTaskCostUsd: number;
       allowGeminiFreeTier: boolean;
       clients: readonly WorkerModelClient[];
+      structuredOutput?: {
+        name: string;
+        schema: Record<string, unknown>;
+      };
       verificationPassed: boolean | null | ((outputText: string) => boolean | null);
       persistOutput?: (output: {
         outputText: string;
@@ -1337,7 +1341,7 @@ export class SaraKernel {
 
     let execution;
     try {
-      execution = await executeWorkerModelTask(modelPlan, input.prompt, input.clients);
+      execution = await executeWorkerModelTask(modelPlan, input.prompt, input.clients, input.structuredOutput);
     } catch (error) {
       if (!(error instanceof WorkerModelExecutionError)) throw error;
       const conservativeWholeCentCost = Math.ceil(

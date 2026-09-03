@@ -46,6 +46,11 @@ export type WorkerModelRawResult = {
   billableOutputTokens: number;
 };
 
+export type WorkerStructuredOutput = {
+  name: string;
+  schema: Record<string, unknown>;
+};
+
 export type WorkerModelClient = {
   routeKey: string;
   maximumWallTimeMs: number;
@@ -54,6 +59,7 @@ export type WorkerModelClient = {
     prompt: string;
     reasoningLevel: WorkerModelRoute["reasoningLevel"];
     maximumOutputTokens: number;
+    structuredOutput?: WorkerStructuredOutput;
   }): Promise<WorkerModelRawResult>;
 };
 
@@ -282,6 +288,7 @@ export async function executeWorkerModelTask(
   plan: WorkerModelPlan,
   prompt: string,
   clients: readonly WorkerModelClient[],
+  structuredOutput?: WorkerStructuredOutput,
 ): Promise<WorkerModelExecution> {
   if (!prompt.trim()) throw new Error("A non-empty worker prompt is required.");
   if (plan.routes.length === 0 || plan.routes.length > plan.maximumAttempts || plan.maximumAttempts > 2) {
@@ -345,6 +352,7 @@ export async function executeWorkerModelTask(
         prompt,
         reasoningLevel: route.reasoningLevel,
         maximumOutputTokens: route.maximumOutputTokens,
+        ...(structuredOutput ? { structuredOutput } : {}),
       });
     } catch {
       addCost(route.worstCaseCostUsd);

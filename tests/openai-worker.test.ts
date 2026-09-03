@@ -66,4 +66,42 @@ describe("GPT-5.6 Luna Responses transport", () => {
       return true;
     });
   });
+
+  it("enforces a caller-supplied JSON schema through strict Responses structured output", async () => {
+    const requests: RequestInit[] = [];
+    const client = new OpenAIResponsesClient({
+      apiKey: "test-openai-key",
+      fetchImpl: async (_url, init) => {
+        requests.push(init ?? {});
+        return new Response(JSON.stringify({
+          status: "completed",
+          output: [{ type: "message", content: [{ type: "output_text", text: '{"note":"ready"}' }] }],
+          usage: { input_tokens: 10, output_tokens: 5 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+    const schema = {
+      type: "object",
+      additionalProperties: false,
+      required: ["note"],
+      properties: { note: { type: "string" } },
+    };
+
+    await client.execute({
+      prompt: "return the report",
+      reasoningLevel: "medium",
+      maximumOutputTokens: 500,
+      structuredOutput: { name: "repository_readiness_draft", schema },
+    });
+
+    const body = JSON.parse(String(requests[0].body)) as Record<string, unknown>;
+    assert.deepEqual(body.text, {
+      format: {
+        type: "json_schema",
+        name: "repository_readiness_draft",
+        strict: true,
+        schema,
+      },
+    });
+  });
 });

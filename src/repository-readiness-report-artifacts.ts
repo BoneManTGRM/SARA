@@ -14,6 +14,50 @@ const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const DRAFT_KEYS = ["categoryEvidence", "evidenceLimitations", "findings"] as const;
 
+export const REPOSITORY_READINESS_DRAFT_JSON_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: [...DRAFT_KEYS],
+  properties: {
+    categoryEvidence: {
+      type: "array",
+      minItems: 4,
+      maxItems: 4,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["category", "status", "evidenceUrls", "note"],
+        properties: {
+          category: { type: "string", enum: ["code", "dependencies", "secret_exposure", "release_controls"] },
+          status: { type: "string", enum: ["reviewed", "unavailable"] },
+          evidenceUrls: { type: "array", items: { type: "string" } },
+          note: { type: "string" },
+        },
+      },
+    },
+    findings: {
+      type: "array",
+      maxItems: 20,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "category", "priority", "confidence", "title", "observation", "recommendation", "evidenceUrl"],
+        properties: {
+          id: { type: "string" },
+          category: { type: "string", enum: ["code", "dependencies", "secret_exposure", "release_controls"] },
+          priority: { type: "string", enum: ["urgent", "high", "medium", "low"] },
+          confidence: { type: "string", enum: ["confirmed", "supported", "tentative"] },
+          title: { type: "string" },
+          observation: { type: "string" },
+          recommendation: { type: "string" },
+          evidenceUrl: { type: "string" },
+        },
+      },
+    },
+    evidenceLimitations: { type: "array", items: { type: "string" } },
+  },
+};
+
 export type RepositoryReadinessReportArtifact = {
   schemaVersion: 1;
   jobId: string;

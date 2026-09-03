@@ -31,10 +31,17 @@ export class OpenAIResponsesClient implements WorkerModelClient {
     prompt: string;
     reasoningLevel: "low" | "medium" | "high";
     maximumOutputTokens: number;
+    structuredOutput?: {
+      name: string;
+      schema: Record<string, unknown>;
+    };
   }): Promise<{ outputText: string; inputTokens: number; billableOutputTokens: number }> {
     if (!input.prompt.trim()) throw new Error("A non-empty OpenAI prompt is required.");
     if (!Number.isInteger(input.maximumOutputTokens) || input.maximumOutputTokens < 1) {
       throw new RangeError("OpenAI maximumOutputTokens must be a positive integer.");
+    }
+    if (input.structuredOutput && !/^[A-Za-z0-9_-]{1,64}$/u.test(input.structuredOutput.name)) {
+      throw new Error("OpenAI structured-output name is invalid.");
     }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
@@ -52,6 +59,18 @@ export class OpenAIResponsesClient implements WorkerModelClient {
           store: false,
           max_output_tokens: input.maximumOutputTokens,
           reasoning: { effort: input.reasoningLevel },
+          ...(input.structuredOutput
+            ? {
+              text: {
+                format: {
+                  type: "json_schema",
+                  name: input.structuredOutput.name,
+                  strict: true,
+                  schema: input.structuredOutput.schema,
+                },
+              },
+            }
+            : {}),
         }),
         signal: controller.signal,
       });
