@@ -2,9 +2,12 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sha256 } from "../src/canonical.ts";
-import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
+import { SaraKernel } from "../src/kernel.ts";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
-import { GitHubPublicRepositoryEvidenceCollector } from "../src/public-repository-evidence.ts";
+import {
+  GitHubPublicRepositoryEvidenceCollector,
+  type PublicRepositoryEvidenceSnapshot,
+} from "../src/public-repository-evidence.ts";
 import { RevenuePilotOperator } from "../src/revenue-pilot-operator.ts";
 import { readRepositoryReadinessReportArtifact } from "../src/repository-readiness-report-artifacts.ts";
 import type { OwnerApproval } from "../src/types.ts";
@@ -26,6 +29,21 @@ try {
     bootstrapRevenueCapabilities: true,
   });
   const owner = kernel.authenticateOwnerToken(ownerToken);
+
+  const collector = new GitHubPublicRepositoryEvidenceCollector({ timeoutMs: 60_000 });
+  let snapshot: PublicRepositoryEvidenceSnapshot;
+  try {
+    snapshot = await collector.collect(targetRepository);
+    console.log(`SARA_INTERNAL_FREE_PROOF_EVIDENCE=${JSON.stringify({
+      repository: snapshot.repository,
+      immutableCommitSha: snapshot.immutableCommitSha,
+      inventoryEntries: snapshot.inventory.length,
+      inventoryTruncated: snapshot.inventoryTruncated,
+      sampledFiles: snapshot.sampledFiles.map((file) => file.path),
+    })}`);
+  } catch (error) {
+    throw new Error(`Repository evidence collection failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   const job = await kernel.createRevenuePilotJob(owner, {
     opportunityId: `internal-free-proof-${startedAt.getTime()}`,
@@ -74,13 +92,18 @@ try {
   const operator = new RevenuePilotOperator({
     kernel,
     modelClient: new OpenAIResponsesClient({ apiKey, timeoutMs: 120_000 }),
-    repositoryEvidenceCollector: new GitHubPublicRepositoryEvidenceCollector({ timeoutMs: 60_000 }),
+    repositoryEvidenceCollector: {
+      async collect(repository) {
+        if (repository !== snapshot.repository) throw new Error("Internal proof repository changed after evidence collection.");
+        return structuredClone(snapshot);
+      },
+    },
     stateDirectory,
     monthlyBudgetUsd: 1,
   });
 
   const ticks: unknown[] = [];
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < 4; index += 1) {
     const tick = await operator.tick();
     ticks.push(tick);
     const current = (await kernel.getStatus()).revenuePilotJobs.find((candidate) => candidate.id === job.id);
