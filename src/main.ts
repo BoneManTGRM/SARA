@@ -3,6 +3,7 @@ import { SaraKernel } from "./kernel.ts";
 import { runLunaStartupProof, type LunaStartupProof } from "./luna-startup-proof.ts";
 import { OpenAIResponsesClient } from "./openai-worker.ts";
 import { GitHubPublicRepositoryEvidenceCollector } from "./public-repository-evidence.ts";
+import { OwnerAssistant } from "./owner-assistant.ts";
 import { RevenuePilotOperator } from "./revenue-pilot-operator.ts";
 import { createSaraServer } from "./server.ts";
 
@@ -11,14 +12,22 @@ const host = process.env.SARA_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 3000);
 const ownerTokenSha256 = process.env.SARA_OWNER_TOKEN_SHA256;
 const readOnlyBridgeTokenSha256 = process.env.SARA_READ_ONLY_BRIDGE_TOKEN_SHA256?.trim();
+const telegramBridgeTokenSha256 = process.env.SARA_TELEGRAM_BRIDGE_TOKEN_SHA256?.trim();
 const apiKey = process.env.OPENAI_API_KEY?.trim();
 const monthlyBudgetUsd = Number(process.env.SARA_MONTHLY_MODEL_BUDGET_USD ?? 10);
+const telegramMonthlyBudgetUsd = Number(process.env.SARA_TELEGRAM_LUNA_BUDGET_USD ?? 0);
 const liveProofEnabled = process.env.SARA_LIVE_PROOF_ON_START === "true";
 if (!ownerTokenSha256 || !/^[a-f0-9]{64}$/i.test(ownerTokenSha256)) {
   throw new Error("Set SARA_OWNER_TOKEN_SHA256 to a SHA-256 digest before starting the owner dashboard.");
 }
 if (readOnlyBridgeTokenSha256 && !/^[a-f0-9]{64}$/i.test(readOnlyBridgeTokenSha256)) {
   throw new Error("SARA_READ_ONLY_BRIDGE_TOKEN_SHA256 must be a SHA-256 digest when configured.");
+}
+if (telegramBridgeTokenSha256 && !/^[a-f0-9]{64}$/i.test(telegramBridgeTokenSha256)) {
+  throw new Error("SARA_TELEGRAM_BRIDGE_TOKEN_SHA256 must be a SHA-256 digest when configured.");
+}
+if (telegramBridgeTokenSha256 && telegramBridgeTokenSha256 === readOnlyBridgeTokenSha256) {
+  throw new Error("Telegram action and read-only bridge credentials must be distinct.");
 }
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("PORT must be a valid TCP port.");
 if (
@@ -29,9 +38,22 @@ if (
 ) {
   throw new Error("SARA_MONTHLY_MODEL_BUDGET_USD must be a whole-cent amount from 0 through 50.");
 }
+if (
+  !Number.isFinite(telegramMonthlyBudgetUsd) ||
+  telegramMonthlyBudgetUsd < 0 ||
+  telegramMonthlyBudgetUsd > 10 ||
+  telegramMonthlyBudgetUsd > monthlyBudgetUsd ||
+  Math.abs(telegramMonthlyBudgetUsd * 100 - Math.round(telegramMonthlyBudgetUsd * 100)) > 1e-9
+) {
+  throw new Error("SARA_TELEGRAM_LUNA_BUDGET_USD must be a whole-cent amount within the total monthly model budget.");
+}
 
 const kernel = await SaraKernel.boot({ stateDirectory, ownerTokenSha256 });
 const client = apiKey ? new OpenAIResponsesClient({ apiKey }) : null;
+const ownerAssistant = client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
+  ? new OwnerAssistant({ modelClient: client, stateDirectory, monthlyBudgetUsd: telegramMonthlyBudgetUsd })
+  : null;
+const activeTelegramMonthlyBudgetUsd = ownerAssistant ? telegramMonthlyBudgetUsd : 0;
 let operator: RevenuePilotOperator | null = null;
 let startupProof: LunaStartupProof = {
   schemaVersion: 1,
@@ -47,6 +69,8 @@ let startupProof: LunaStartupProof = {
 const server = createSaraServer(kernel, {
   ownerTokenSha256,
   ...(readOnlyBridgeTokenSha256 ? { readOnlyBridgeTokenSha256 } : {}),
+  ...(telegramBridgeTokenSha256 ? { telegramBridgeTokenSha256 } : {}),
+  ...(ownerAssistant ? { ownerAssistant } : {}),
   ...(client ? {
     runtimeStatus: async () => ({
       worker: operator ? await operator.status() : {
@@ -82,7 +106,7 @@ server.listen(port, host, () => {
         modelClient: client,
         repositoryEvidenceCollector: new GitHubPublicRepositoryEvidenceCollector(),
         stateDirectory,
-        monthlyBudgetUsd,
+        monthlyBudgetUsd: monthlyBudgetUsd - activeTelegramMonthlyBudgetUsd,
         monthlyCostOffsetUsd: proofIsCurrentMonth ? startupProof.accountedCostUsd : 0,
       });
       if (!liveProofEnabled || startupProof.status === "succeeded") {
