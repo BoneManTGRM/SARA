@@ -6,6 +6,7 @@ import { GitHubPublicRepositoryEvidenceCollector } from "./public-repository-evi
 import { OwnerAssistant } from "./owner-assistant.ts";
 import { RevenuePilotOperator } from "./revenue-pilot-operator.ts";
 import { createSaraServer } from "./server.ts";
+import { compileCommercialTerms } from "./commercial-terms.ts";
 
 const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? ".sara-state");
 const host = process.env.SARA_HOST ?? "127.0.0.1";
@@ -17,6 +18,14 @@ const apiKey = process.env.OPENAI_API_KEY?.trim();
 const monthlyBudgetUsd = Number(process.env.SARA_MONTHLY_MODEL_BUDGET_USD ?? 10);
 const telegramMonthlyBudgetUsd = Number(process.env.SARA_TELEGRAM_LUNA_BUDGET_USD ?? 0);
 const liveProofEnabled = process.env.SARA_LIVE_PROOF_ON_START === "true";
+const paymentWalletAddress = process.env.SARA_PAYMENT_WALLET_ADDRESS?.trim();
+const termsBusinessName = process.env.SARA_TERMS_BUSINESS_NAME?.trim();
+const termsContactEmail = process.env.SARA_TERMS_CONTACT_EMAIL?.trim();
+const termsGoverningLaw = process.env.SARA_TERMS_GOVERNING_LAW?.trim();
+const approvedTermsDigest = process.env.SARA_COMMERCIAL_TERMS_APPROVED_SHA256?.trim().toLowerCase();
+const baseRpcUrl = process.env.SARA_BASE_RPC_URL?.trim() ?? "https://mainnet.base.org";
+const publicBaseUrl = process.env.SARA_PUBLIC_BASE_URL?.trim()
+  ?? (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : undefined);
 if (!ownerTokenSha256 || !/^[a-f0-9]{64}$/i.test(ownerTokenSha256)) {
   throw new Error("Set SARA_OWNER_TOKEN_SHA256 to a SHA-256 digest before starting the owner dashboard.");
 }
@@ -38,6 +47,25 @@ if (
 ) {
   throw new Error("SARA_MONTHLY_MODEL_BUDGET_USD must be a whole-cent amount from 0 through 50.");
 }
+
+const compiledTerms = termsBusinessName && termsContactEmail && termsGoverningLaw
+  ? compileCommercialTerms({
+    businessName: termsBusinessName,
+    contactEmail: termsContactEmail,
+    governingLaw: termsGoverningLaw,
+  })
+  : null;
+if (approvedTermsDigest && (!compiledTerms || approvedTermsDigest !== compiledTerms.digest)) {
+  throw new Error("SARA_COMMERCIAL_TERMS_APPROVED_SHA256 does not match the exact compiled commercial terms.");
+}
+const commerce = paymentWalletAddress && compiledTerms && approvedTermsDigest === compiledTerms.digest
+  ? {
+    recipientAddress: paymentWalletAddress,
+    rpcUrl: baseRpcUrl,
+    terms: compiledTerms,
+    publicOrigin: "https://saraseed.app",
+  }
+  : null;
 if (
   !Number.isFinite(telegramMonthlyBudgetUsd) ||
   telegramMonthlyBudgetUsd < 0 ||
@@ -48,7 +76,11 @@ if (
   throw new Error("SARA_TELEGRAM_LUNA_BUDGET_USD must be a whole-cent amount within the total monthly model budget.");
 }
 
-const kernel = await SaraKernel.boot({ stateDirectory, ownerTokenSha256 });
+const kernel = await SaraKernel.boot({
+  stateDirectory,
+  ownerTokenSha256,
+  bootstrapRevenueCapabilities: true,
+});
 const client = apiKey ? new OpenAIResponsesClient({ apiKey }) : null;
 const ownerAssistant = client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
   ? new OwnerAssistant({ modelClient: client, stateDirectory, monthlyBudgetUsd: telegramMonthlyBudgetUsd })
@@ -69,9 +101,11 @@ let startupProof: LunaStartupProof = {
 const server = createSaraServer(kernel, {
   ownerTokenSha256,
   stateDirectory,
+  ...(publicBaseUrl ? { publicBaseUrl } : {}),
   ...(readOnlyBridgeTokenSha256 ? { readOnlyBridgeTokenSha256 } : {}),
   ...(telegramBridgeTokenSha256 ? { telegramBridgeTokenSha256 } : {}),
   ...(ownerAssistant ? { ownerAssistant } : {}),
+  ...(commerce ? { commerce } : {}),
   ...(client ? {
     runtimeStatus: async () => ({
       worker: operator ? await operator.status() : {

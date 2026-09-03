@@ -153,6 +153,12 @@ export const DASHBOARD_HTML = `<!doctype html>
     .button.danger { border-color: rgba(255, 137, 126, .44); color: #ffd2ce; background: rgba(79, 25, 23, .5); }
     .button.danger:hover { border-color: var(--coral); background: rgba(103, 31, 27, .66); }
     .button:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+    .commerce-list { display: grid; gap: 12px; margin-top: 22px; }
+    .commerce-row { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: rgba(3, 8, 6, .34); }
+    .commerce-row strong { overflow-wrap: anywhere; }
+    .commerce-row small { color: var(--muted); font-family: var(--mono); overflow-wrap: anywhere; }
+    .commerce-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .commerce-link { color: var(--mint-soft); overflow-wrap: anywhere; }
 
     .hero {
       display: grid;
@@ -748,6 +754,18 @@ export const DASHBOARD_HTML = `<!doctype html>
             <span class="card-number">01.08</span>
             <div class="card-pad directive-layout">
               <div>
+                <div class="card-label">Paid service lane</div>
+                <div class="card-value small">USDC on Base · exact owner gates</div>
+                <p class="card-copy">Payment verification never starts work by itself. Fulfillment and external delivery require separate owner actions.</p>
+              </div>
+              <div class="commerce-list" id="commerce-list"><div class="mutation-empty">Owner state locked</div></div>
+            </div>
+          </article>
+
+          <article class="card span-12 directive-card">
+            <span class="card-number">01.09</span>
+            <div class="card-pad directive-layout">
+              <div>
                 <div class="card-label">Owner directive channel</div>
                 <div class="card-value small">Tell SARA what outcome you need.</div>
                 <p class="card-copy">After owner authentication, a directive becomes a bounded job with explicit evidence and a hard budget. SARA may work autonomously inside that scope; protected actions still require you.</p>
@@ -776,7 +794,7 @@ export const DASHBOARD_HTML = `<!doctype html>
           </article>
 
           <article class="card span-12 emergency">
-            <span class="card-number">01.09</span>
+            <span class="card-number">01.10</span>
             <div class="card-pad">
               <div class="card-label">Constitutional emergency stop</div>
               <div class="card-value small">Owner remains above the machine.</div>
@@ -865,6 +883,108 @@ export const DASHBOARD_HTML = `<!doctype html>
       });
     }
 
+    function commerceButton(label, action) {
+      const button = document.createElement('button');
+      button.className = 'button primary';
+      button.type = 'button';
+      button.textContent = label;
+      button.addEventListener('click', action);
+      return button;
+    }
+
+    async function ownerPost(path, body) {
+      const response = await fetch(path, {
+        method: 'POST',
+        headers: Object.assign({}, auth(), { 'content-type': 'application/json' }),
+        body: JSON.stringify(body || {})
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Owner action was rejected.');
+      return result;
+    }
+
+    function renderCommerce(state) {
+      const container = document.querySelector('#commerce-list');
+      container.replaceChildren();
+      const exactCapabilities = ['public-repository-inventory', 'readiness-analysis', 'independent-report-verification', 'delivery-package-generation'];
+      const ready = exactCapabilities.every((id) => state.capabilities.some((capability) => capability.id === id && capability.status === 'available'));
+      const readiness = document.createElement('div');
+      readiness.className = 'commerce-row';
+      const readinessTitle = document.createElement('strong');
+      readinessTitle.textContent = ready ? 'Four exact service capabilities available' : 'Service capabilities incomplete';
+      const readinessDetail = document.createElement('small');
+      readinessDetail.textContent = exactCapabilities.map((id) => id + ': ' + (state.capabilities.find((capability) => capability.id === id)?.status || 'missing')).join(' · ');
+      readiness.append(readinessTitle, readinessDetail);
+      container.append(readiness);
+      if (!state.commerce?.configured) {
+        const row = document.createElement('div');
+        row.className = 'commerce-row';
+        row.textContent = 'Owner wallet and approved versioned terms are not configured. Checkout remains closed.';
+        container.append(row);
+        return;
+      }
+      const intents = state.revenuePaymentIntents || [];
+      const jobs = state.revenuePilotJobs || [];
+      intents.forEach((intent) => {
+        const job = jobs.find((candidate) => candidate.id === intent.jobId);
+        const row = document.createElement('div');
+        row.className = 'commerce-row';
+        const title = document.createElement('strong');
+        title.textContent = 'Job ' + intent.jobId + ' · payment ' + intent.status;
+        const detail = document.createElement('small');
+        detail.textContent = '149 USDC · Base · terms ' + intent.termsVersion + ' · job ' + (job?.status || 'missing');
+        const actions = document.createElement('div');
+        actions.className = 'commerce-actions';
+        if (intent.status === 'confirmed' && job?.status === 'offer_ready') {
+          actions.append(commerceButton('Approve fulfillment — $149 collected — maximum execution cost $3 — public repository only', async () => {
+            if (!window.confirm('Authorize fulfillment for this exact paid public-repository job?')) return;
+            try {
+              await ownerPost('/api/revenue-pilot/jobs/' + encodeURIComponent(job.id) + '/approve-fulfillment', { paymentIntentId: intent.id });
+              await loadPrivateState();
+            } catch (error) { setMessage(error.message, true); }
+          }));
+        }
+        if (job?.status === 'owner_review') {
+          const report = document.createElement('a');
+          report.className = 'button commerce-link';
+          report.href = '/api/revenue-pilot/jobs/' + encodeURIComponent(job.id) + '/report';
+          report.target = '_blank';
+          report.rel = 'noopener';
+          report.textContent = 'Inspect report JSON';
+          report.addEventListener('click', (event) => {
+            event.preventDefault();
+            fetch(report.href, { headers: auth() }).then(async (response) => {
+              if (!response.ok) throw new Error('Report could not be loaded.');
+              const blob = await response.blob();
+              window.open(URL.createObjectURL(blob), '_blank', 'noopener');
+            }).catch((error) => setMessage(error.message, true));
+          });
+          actions.append(report);
+          actions.append(commerceButton('Approve and deliver', async () => {
+            if (!window.confirm('You inspected the actual report. Create customer delivery access now?')) return;
+            try {
+              const result = await ownerPost('/api/revenue-pilot/jobs/' + encodeURIComponent(job.id) + '/approve-delivery', { confirmDelivery: true });
+              const link = document.createElement('a');
+              link.className = 'commerce-link';
+              link.href = result.delivery.downloadUrl;
+              link.textContent = 'Secure delivery link (copy for the customer)';
+              link.rel = 'noreferrer';
+              row.append(link);
+              await loadPrivateState();
+            } catch (error) { setMessage(error.message, true); }
+          }));
+        }
+        row.append(title, detail, actions);
+        container.append(row);
+      });
+      if (!intents.length) {
+        const empty = document.createElement('div');
+        empty.className = 'mutation-empty';
+        empty.textContent = 'No customer payment intents.';
+        container.append(empty);
+      }
+    }
+
     async function loadPrivateState() {
       const response = await fetch('/api/status', { headers: auth() });
       if (!response.ok) {
@@ -889,6 +1009,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       document.querySelector('#events').textContent = String(state.audit.eventCount);
       document.querySelector('#audit-head').textContent = state.audit.headHash || 'Genesis state · no audit head';
       renderMutations(state.mutations);
+      renderCommerce(state);
       const stop = document.querySelector('#stop');
       stop.disabled = false;
       stop.textContent = state.emergencyStopped ? 'Release stop' : 'Engage stop';

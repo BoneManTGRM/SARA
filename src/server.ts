@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DASHBOARD_HTML } from "./dashboard.ts";
 import { compileExecutorHandoff } from "./handoff.ts";
@@ -6,6 +6,12 @@ import { SaraKernel, SARA_PRINCIPAL } from "./kernel.ts";
 import type { OwnerAssistant } from "./owner-assistant.ts";
 import { PolicyDeniedError } from "./policy.ts";
 import type { RevenuePilotInput } from "./revenue-pilot.ts";
+import { normalizePublicGitHubRepository } from "./founding-pilot.ts";
+import type { CommercialTerms } from "./commercial-terms.ts";
+import { paymentClientSecretDigest, publicPaymentIntent } from "./revenue-payment.ts";
+import { deliverySecretDigest } from "./revenue-delivery.ts";
+import { verifyBaseUsdcPayment } from "./usdc-payment.ts";
+import { sha256 } from "./canonical.ts";
 import { listRevenueServices } from "./revenue-service-catalog.ts";
 import { readRepositoryReadinessReportArtifact } from "./repository-readiness-report-artifacts.ts";
 import { listSaraTools } from "./tool-registry.ts";
@@ -25,7 +31,19 @@ type ServerOptions = {
   ownerAssistant?: OwnerAssistant;
   runtimeStatus?: () => Promise<SaraRuntimeStatus>;
   stateDirectory?: string;
+  commerce?: {
+    recipientAddress: string;
+    rpcUrl: string;
+    terms: CommercialTerms;
+    publicOrigin: string;
+    fetchImpl?: typeof fetch;
+  };
+  publicBaseUrl?: string;
 };
+
+const publicCommerceAttempts = new Map<string, { count: number; resetAt: number }>();
+const PUBLIC_COMMERCE_WINDOW_MS = 60 * 60 * 1_000;
+const PUBLIC_COMMERCE_MAX_ATTEMPTS = 5;
 
 function tokenDigest(token: string): Buffer {
   return createHash("sha256").update(token, "utf8").digest();
@@ -73,6 +91,218 @@ function unauthorized(response: ServerResponse): void {
 function bridgeUnauthorized(response: ServerResponse, label = "Read-only bridge"): void {
   response.setHeader("www-authenticate", "Bearer");
   json(response, 401, { error: `${label} authentication required.` });
+}
+
+function commerceCors(request: IncomingMessage, response: ServerResponse, options: ServerOptions): boolean {
+  const allowed = options.commerce?.publicOrigin;
+  const origin = request.headers.origin;
+  if (allowed && origin === allowed) {
+    response.setHeader("access-control-allow-origin", allowed);
+    response.setHeader("access-control-allow-methods", "GET, POST, OPTIONS");
+    response.setHeader("access-control-allow-headers", "authorization, content-type");
+    response.setHeader("access-control-max-age", "600");
+    response.setHeader("vary", "Origin");
+  }
+  return !origin || origin === allowed;
+}
+
+function paymentClientSecret(request: IncomingMessage): string {
+  const header = request.headers.authorization;
+  if (!header?.startsWith("Bearer ")) {
+    throw new PolicyDeniedError(
+      { allowed: false, code: "PAYMENT_INTENT_AUTHENTICATION_FAILED", reason: "Payment intent authentication failed." },
+      "payment_intent_authentication",
+    );
+  }
+  return header.slice("Bearer ".length);
+}
+
+function publicClientKey(request: IncomingMessage): string {
+  const forwarded = request.headers["x-forwarded-for"];
+  const value = Array.isArray(forwarded) ? forwarded[0] : forwarded?.split(",")[0];
+  return String(request.headers["cf-connecting-ip"] ?? value ?? request.socket.remoteAddress ?? "unknown").trim().slice(0, 128);
+}
+
+function consumePublicCommerceAttempt(request: IncomingMessage, now = Date.now()): void {
+  const key = publicClientKey(request);
+  const current = publicCommerceAttempts.get(key);
+  if (!current || current.resetAt <= now) {
+    publicCommerceAttempts.set(key, { count: 1, resetAt: now + PUBLIC_COMMERCE_WINDOW_MS });
+    return;
+  }
+  if (current.count >= PUBLIC_COMMERCE_MAX_ATTEMPTS) throw new Error("Too many payment-intent attempts; try again later.");
+  current.count += 1;
+}
+
+async function verifiedPublicRepository(
+  repositoryInput: string,
+  fetchImpl: typeof fetch,
+): Promise<{ repository: string; recentCommitDays: number }> {
+  const repository = normalizePublicGitHubRepository(repositoryInput);
+  if (!repository) throw new Error("Provide one canonical public GitHub repository URL.");
+  const [, owner, name] = new URL(repository).pathname.split("/");
+  const response = await fetchImpl(`https://api.github.com/repos/${encodeURIComponent(owner!)}/${encodeURIComponent(name!)}`, {
+    headers: { accept: "application/vnd.github+json", "user-agent": "SARA-Revenue-Pilot/1" },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok || response.redirected) throw new Error("The repository is unavailable, redirected, or not public.");
+  const body = await response.json() as { private?: unknown; archived?: unknown; full_name?: unknown; pushed_at?: unknown };
+  if (body.private !== false || body.archived === true || typeof body.full_name !== "string") {
+    throw new Error("The repository must be public, active, and directly addressable.");
+  }
+  if (body.full_name.toLowerCase() !== `${owner}/${name}`.toLowerCase()) {
+    throw new Error("The repository identity changed or was transferred.");
+  }
+  const pushedAt = typeof body.pushed_at === "string" ? Date.parse(body.pushed_at) : Number.NaN;
+  if (!Number.isFinite(pushedAt)) throw new Error("Repository activity recency is unavailable.");
+  return { repository, recentCommitDays: Math.max(0, Math.floor((Date.now() - pushedAt) / 86_400_000)) };
+}
+
+async function handlePublicCommerce(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  kernel: SaraKernel,
+  options: ServerOptions,
+): Promise<boolean> {
+  if (!url.pathname.startsWith("/api/public/revenue-pilot")) return false;
+  if (!commerceCors(request, response, options)) {
+    json(response, 403, { error: "Origin is not allowed." });
+    return true;
+  }
+  if (request.method === "OPTIONS") {
+    response.writeHead(204);
+    response.end();
+    return true;
+  }
+  if (request.method === "GET" && url.pathname === "/api/public/revenue-pilot/offer") {
+    if (!options.commerce) {
+      json(response, 503, { configured: false, error: "Owner payment and approved terms configuration is required." });
+      return true;
+    }
+    json(response, 200, {
+      configured: true,
+      service: "Public Repository Readiness Snapshot",
+      amount: 149,
+      currency: "USDC",
+      network: "Base",
+      chainId: 8453,
+      tokenContract: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      terms: options.commerce.terms,
+    });
+    return true;
+  }
+  if (!options.commerce) {
+    json(response, 503, { error: "Owner payment and approved terms configuration is required." });
+    return true;
+  }
+  const fetchImpl = options.commerce.fetchImpl ?? fetch;
+  if (request.method === "POST" && url.pathname === "/api/public/revenue-pilot/intents") {
+    consumePublicCommerceAttempt(request);
+    const body = await readJson(request);
+    if (body.termsAccepted !== true || body.termsDigest !== options.commerce.terms.digest) {
+      throw new Error("Accept the exact current commercial terms before creating payment.");
+    }
+    if (body.repositoryOwnerPermissionConfirmed !== true) throw new Error("Repository authority confirmation is required.");
+    if (body.requiresPrivateAccess === true || body.containsRegulatedOrPrivateData === true || body.requestsProductionChanges === true || body.requestsExploitValidation === true) {
+      throw new Error("The requested scope is outside SARA's public readiness service.");
+    }
+    const customerReference = boundedText(body.customerReference, 3, 254, "customerReference").toLowerCase();
+    const primaryGoal = String(body.primaryGoal ?? "release_readiness") as RevenuePilotInput["primaryGoal"];
+    if (!new Set(["security_baseline", "release_readiness", "dependency_health"]).has(primaryGoal)) {
+      throw new Error("Select one supported readiness goal.");
+    }
+    const repository = await verifiedPublicRepository(String(body.repoUrl ?? ""), fetchImpl);
+    const opportunityId = `inbound-${randomUUID()}`;
+    const job = await kernel.createRevenuePilotJob(SARA_PRINCIPAL, {
+      opportunityId,
+      sourceUrl: repository.repository,
+      sourceAllowsAutomatedDiscovery: true,
+      discoveredFromPublicSource: true,
+      repoUrl: repository.repository,
+      repositoryIsPublic: true,
+      repositoryOwnerPermissionConfirmed: true,
+      requiresPrivateAccess: false,
+      containsRegulatedOrPrivateData: false,
+      requestsProductionChanges: false,
+      requestsExploitValidation: false,
+      primaryGoal,
+      customerBudgetUsd: 149,
+      desiredTurnaroundDays: 3,
+      recentCommitDays: repository.recentCommitDays,
+      requestedServiceId: "public-repository-readiness-snapshot",
+    });
+    const clientSecret = randomBytes(32).toString("base64url");
+    const intent = await kernel.createRevenuePaymentIntent(SARA_PRINCIPAL, {
+      id: `pay_${randomUUID()}`,
+      jobId: job.id,
+      recipientAddress: options.commerce.recipientAddress,
+      clientSecretDigest: paymentClientSecretDigest(clientSecret),
+      customerReferenceDigest: sha256(customerReference),
+      terms: options.commerce.terms,
+    });
+    json(response, 201, { ...publicPaymentIntent(intent), clientSecret });
+    return true;
+  }
+  const statusMatch = url.pathname.match(/^\/api\/public\/revenue-pilot\/intents\/([^/]+)$/u);
+  if (request.method === "GET" && statusMatch) {
+    const intent = await kernel.inspectRevenuePaymentIntent(decodeURIComponent(statusMatch[1]!), paymentClientSecret(request));
+    json(response, 200, publicPaymentIntent(intent));
+    return true;
+  }
+  const paymentMatch = url.pathname.match(/^\/api\/public\/revenue-pilot\/intents\/([^/]+)\/payment$/u);
+  if (request.method === "POST" && paymentMatch) {
+    const intentId = decodeURIComponent(paymentMatch[1]!);
+    const secret = paymentClientSecret(request);
+    const intent = await kernel.inspectRevenuePaymentIntent(intentId, secret);
+    const body = await readJson(request);
+    const payment = await verifyBaseUsdcPayment({
+      transactionHash: String(body.transactionHash ?? ""),
+      recipientAddress: intent.recipientAddress,
+      rpcUrl: options.commerce.rpcUrl,
+      fetchImpl,
+    });
+    json(response, 200, publicPaymentIntent(await kernel.confirmRevenuePayment(SARA_PRINCIPAL, intentId, secret, payment)));
+    return true;
+  }
+  json(response, 404, { error: "Not found." });
+  return true;
+}
+
+async function handlePublicDelivery(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  kernel: SaraKernel,
+  options: ServerOptions,
+): Promise<boolean> {
+  const match = url.pathname.match(/^\/api\/public\/revenue-pilot\/deliveries\/([^/]+)$/u);
+  if (request.method !== "GET" || !match) return false;
+  if (!options.stateDirectory) {
+    json(response, 503, { error: "Private report storage is not configured." });
+    return true;
+  }
+  const secret = url.searchParams.get("access") ?? "";
+  const accessed = await kernel.accessRevenueDelivery(decodeURIComponent(match[1]!), secret);
+  const artifact = await readRepositoryReadinessReportArtifact({
+    stateDirectory: options.stateDirectory,
+    jobId: accessed.job.id,
+  });
+  if (artifact.reportDigest !== accessed.delivery.reportDigest) throw new Error("Delivery report integrity check failed.");
+  response.writeHead(200, {
+    "content-type": "application/json; charset=utf-8",
+    "content-disposition": `attachment; filename="sara-readiness-${accessed.job.id}.json"`,
+    "cache-control": "private, no-store, max-age=0",
+    "referrer-policy": "no-referrer",
+    "x-content-type-options": "nosniff",
+  });
+  response.end(JSON.stringify({
+    schemaVersion: 1,
+    deliveredAt: accessed.delivery.lastDownloadedAt,
+    reportDigest: artifact.reportDigest,
+    report: artifact.report,
+  }));
+  return true;
 }
 
 function boundedText(value: unknown, minimum: number, maximum: number, label: string): string {
@@ -254,6 +484,16 @@ async function handleOwnerCatalogRead(
     json(response, 200, {
       ...status,
       runtime: options.runtimeStatus ? await options.runtimeStatus() : null,
+      commerce: options.commerce ? {
+        configured: true,
+        provider: "base-usdc-direct",
+        network: "Base",
+        currency: "USDC",
+        amount: 149,
+        recipientAddress: options.commerce.recipientAddress,
+        termsVersion: options.commerce.terms.version,
+        termsDigest: options.commerce.terms.digest,
+      } : { configured: false },
     });
     return true;
   }
@@ -300,7 +540,7 @@ async function handleOwnerReportRead(
     json(response, 404, { error: "Revenue pilot job not found." });
     return true;
   }
-  if (job.status !== "owner_review" || job.externalDeliveryAuthorized !== false) {
+  if (!["owner_review", "delivery_ready", "delivered"].includes(job.status)) {
     json(response, 409, { error: "The report has not passed its owner-review gate." });
     return true;
   }
@@ -327,6 +567,7 @@ async function handleOwnerRevenueWrite(
   url: URL,
   kernel: SaraKernel,
   owner: OwnerSession,
+  options: ServerOptions,
 ): Promise<boolean> {
   if (request.method === "POST" && url.pathname === "/api/objectives") {
     await handleObjectives(request, response, kernel, owner);
@@ -349,6 +590,69 @@ async function handleOwnerRevenueWrite(
       owner,
       decodeURIComponent(revenueAuthorizationMatch[1]),
     );
+    return true;
+  }
+  const confirmedPaymentApprovalMatch = url.pathname.match(/^\/api\/revenue-pilot\/jobs\/([^/]+)\/approve-fulfillment$/u);
+  if (request.method === "POST" && confirmedPaymentApprovalMatch) {
+    const jobId = decodeURIComponent(confirmedPaymentApprovalMatch[1]!);
+    const body = await readJson(request);
+    const targetId = `revenue-pilot:${jobId}:fulfillment`;
+    json(response, 200, await kernel.authorizeRevenuePilotFromConfirmedPayment(
+      owner,
+      jobId,
+      boundedText(body.paymentIntentId, 8, 128, "paymentIntentId"),
+      {
+        approvalId: randomUUID(),
+        action: "contract_commitment",
+        targetId,
+        approvedAt: new Date().toISOString(),
+        ownerId: owner.id,
+      },
+    ));
+    return true;
+  }
+  const deliveryApprovalMatch = url.pathname.match(/^\/api\/revenue-pilot\/jobs\/([^/]+)\/approve-delivery$/u);
+  if (request.method === "POST" && deliveryApprovalMatch) {
+    if (!options.stateDirectory) throw new Error("Private report storage is not configured.");
+    const jobId = decodeURIComponent(deliveryApprovalMatch[1]!);
+    const body = await readJson(request);
+    if (body.confirmDelivery !== true) throw new Error("Explicit delivery confirmation is required.");
+    const artifact = await readRepositoryReadinessReportArtifact({ stateDirectory: options.stateDirectory, jobId });
+    const accessSecret = randomBytes(32).toString("base64url");
+    const deliveryId = `delivery_${randomUUID()}`;
+    const targetId = `revenue-pilot:${jobId}:delivery`;
+    const result = await kernel.authorizeRevenuePilotDelivery(owner, {
+      deliveryId,
+      jobId,
+      reportDigest: artifact.reportDigest,
+      accessSecretDigest: deliverySecretDigest(accessSecret),
+      lifetimeHours: 72,
+      maximumDownloads: 3,
+    }, {
+      approvalId: randomUUID(),
+      action: "contract_commitment",
+      targetId,
+      approvedAt: new Date().toISOString(),
+      ownerId: owner.id,
+    });
+    const base = options.publicBaseUrl ?? `https://${request.headers.host ?? "sara-operator-production.up.railway.app"}`;
+    const download = new URL(`/api/public/revenue-pilot/deliveries/${encodeURIComponent(deliveryId)}`, base);
+    download.searchParams.set("access", accessSecret);
+    json(response, 200, {
+      job: result.job,
+      delivery: {
+        id: result.delivery.id,
+        status: result.delivery.status,
+        expiresAt: result.delivery.expiresAt,
+        maximumDownloads: result.delivery.maximumDownloads,
+        downloadUrl: download.toString(),
+      },
+    });
+    return true;
+  }
+  const deliveryRevocationMatch = url.pathname.match(/^\/api\/revenue-pilot\/deliveries\/([^/]+)\/revoke$/u);
+  if (request.method === "POST" && deliveryRevocationMatch) {
+    json(response, 200, await kernel.revokeRevenueDelivery(owner, decodeURIComponent(deliveryRevocationMatch[1]!)));
     return true;
   }
   return false;
@@ -394,7 +698,7 @@ async function handleAuthenticatedRequest(
 ): Promise<void> {
   if (await handleOwnerCatalogRead(request, response, url, kernel, options)) return;
   if (await handleOwnerReportRead(request, response, url, kernel, options)) return;
-  if (await handleOwnerRevenueWrite(request, response, url, kernel, owner)) return;
+  if (await handleOwnerRevenueWrite(request, response, url, kernel, owner, options)) return;
   if (await handleOwnerDevelopmentRequest(request, response, url, kernel, owner)) return;
   json(response, 404, { error: "Not found." });
 }
@@ -502,6 +806,8 @@ async function routeSaraRequest(
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (await handlePublicRequest(request, response, url, kernel, options)) return;
+  if (await handlePublicDelivery(request, response, url, kernel, options)) return;
+  if (await handlePublicCommerce(request, response, url, kernel, options)) return;
 
   if (request.method === "GET" && url.pathname === "/api/bridge/catalog") {
     if (!options.readOnlyBridgeTokenSha256 || !authenticatedToken(request, options.readOnlyBridgeTokenSha256)) {
