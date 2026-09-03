@@ -18,6 +18,43 @@ function includeLine(body: string) {
   return `\n- Take a ${t}.`;
 }
 
+function collapseNewlineRuns(text: string): string {
+  const chunks: string[] = [];
+  let newlineRun = 0;
+
+  for (const character of text) {
+    if (character === "\n") {
+      newlineRun += 1;
+      if (newlineRun <= 2) chunks.push(character);
+      continue;
+    }
+
+    newlineRun = 0;
+    chunks.push(character);
+  }
+
+  return chunks.join("");
+}
+
+function stripHorizontalWhitespaceBeforeNewlines(text: string): string {
+  const chunks: string[] = [];
+  let pendingWhitespace = "";
+
+  for (const character of text) {
+    if (character === " " || character === "\t") {
+      pendingWhitespace += character;
+      continue;
+    }
+
+    if (character !== "\n") chunks.push(pendingWhitespace);
+    pendingWhitespace = "";
+    chunks.push(character);
+  }
+
+  chunks.push(pendingWhitespace);
+  return chunks.join("");
+}
+
 /** Smallest useful local patch. Never regenerates the whole text. */
 export function repairLocal(text: string, faults: Fault[], constraints: Constraint[]): string {
   if (faults.length === 0) return text;
@@ -50,7 +87,7 @@ export function repairLocal(text: string, faults: Fault[], constraints: Constrai
     const body = (c?.body ?? f.ruleBody).trim();
     if (!body) continue;
     if (hasTerm(next, body) || (c && termsFor(c).some((t) => hasTerm(next, t)))) continue;
-    next = `${next.replace(/\s+$/, "")}${includeLine(body)}`;
+    next = `${next.trimEnd()}${includeLine(body)}`;
   }
 
   const missingKeep = faults.filter((f) => f.type === "keep_fact");
@@ -58,10 +95,10 @@ export function repairLocal(text: string, faults: Fault[], constraints: Constrai
     const body = f.ruleBody.trim();
     if (!body) continue;
     if (next.toLowerCase().includes(body.toLowerCase())) continue;
-    next = `- ${body}\n${next.replace(/^\s+/, "")}`;
+    next = `- ${body}\n${next.trimStart()}`;
   }
 
-  next = next.replace(/\n{3,}/g, "\n\n").replace(/[ \t]+\n/g, "\n");
+  next = stripHorizontalWhitespaceBeforeNewlines(collapseNewlineRuns(next));
   if (text.endsWith("\n") && !next.endsWith("\n")) next += "\n";
   return next;
 }

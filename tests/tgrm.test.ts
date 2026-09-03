@@ -7,6 +7,7 @@ import {
   constraintScore,
   detectFaults,
   hasTerm,
+  repairLocal,
   runTgrm,
 } from "../tgrm/index.ts";
 
@@ -83,5 +84,47 @@ describe("SARA TGRM — sample weekend plan", () => {
     });
     assert.equal(log.faults.length, 0);
     assert.equal(log.constraintTotal, 0);
+  });
+
+  it("repairs large uncontrolled whitespace in linear cleanup paths", () => {
+    const constraint = {
+      id: "include-walk",
+      kind: "must_include" as const,
+      body: "walk",
+      aliases: [],
+      active: true,
+    };
+    const fault = {
+      type: "must_include" as const,
+      ruleId: constraint.id,
+      ruleBody: constraint.body,
+      span: "",
+      note: "Required walk is missing.",
+    };
+    const uncontrolled = `Plan${" \t".repeat(25_000)}x   \n\t\n\n\n`;
+
+    const repaired = repairLocal(uncontrolled, [fault], [constraint]);
+
+    assert.equal(repaired, "Plan" + " \t".repeat(25_000) + "x\n- Take a walk.\n");
+
+    const prohibited = {
+      id: "exclude-forbidden",
+      kind: "must_not" as const,
+      body: "forbidden",
+      aliases: [],
+      active: true,
+    };
+    const prohibitedFault = {
+      type: "must_not" as const,
+      ruleId: prohibited.id,
+      ruleBody: prohibited.body,
+      span: "",
+      note: "Forbidden term is present.",
+    };
+
+    assert.equal(
+      repairLocal("Header   \n\n\n\nBody\t \n", [prohibitedFault], [prohibited]),
+      "Header\n\nBody\n",
+    );
   });
 });
