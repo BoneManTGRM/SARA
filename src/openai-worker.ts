@@ -24,7 +24,44 @@ export class OpenAIResponsesClient implements WorkerModelClient {
   }
 
   async countInputTokens(prompt: string): Promise<number> {
-    return Buffer.byteLength(prompt, "utf8");
+    if (!prompt.trim()) throw new Error("A non-empty OpenAI prompt is required for token counting.");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
+    let response: Response;
+    try {
+      response = await this.#fetch("https://api.openai.com/v1/responses/input_tokens", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.#apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-5.6-luna",
+          input: prompt,
+        }),
+        signal: controller.signal,
+      });
+    } catch {
+      throw new Error("OpenAI token count request failed before a response was received.");
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) throw new Error(`OpenAI token count request failed with status ${response.status}.`);
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error("OpenAI returned an invalid token count response.");
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("OpenAI returned a malformed token count response.");
+    }
+    const inputTokens = (payload as Record<string, unknown>).input_tokens;
+    if (!Number.isInteger(inputTokens) || (inputTokens as number) < 0) {
+      throw new Error("OpenAI returned malformed input token accounting.");
+    }
+    return inputTokens as number;
   }
 
   async execute(input: {
