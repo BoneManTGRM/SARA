@@ -350,22 +350,24 @@ export function claimRevenuePilotRole(
   return { job: claimed, lease };
 }
 
-export function completeRevenuePilotRole(
+export type RevenuePilotRoleCompletion = {
+  leaseId: string;
+  role: RevenuePilotLease["role"];
+  outputDigest: string;
+  costUsd: number;
+  verificationPassed: boolean | null;
+  completedAt: string;
+  modelExecution?: WorkerModelExecutionEvidence;
+  modelFailure?: WorkerModelFailureEvidence;
+  executionFailed?: boolean;
+  failureStage?: "model_execution" | "artifact_persistence";
+  reportDigest?: string;
+};
+
+function validateActiveLease(
   job: RevenuePilotJob,
-  result: {
-    leaseId: string;
-    role: RevenuePilotLease["role"];
-    outputDigest: string;
-    costUsd: number;
-    verificationPassed: boolean | null;
-    completedAt: string;
-    modelExecution?: WorkerModelExecutionEvidence;
-    modelFailure?: WorkerModelFailureEvidence;
-    executionFailed?: boolean;
-    failureStage?: "model_execution" | "artifact_persistence";
-    reportDigest?: string;
-  },
-): RevenuePilotJob {
+  result: RevenuePilotRoleCompletion,
+): { completedAt: number; lease: RevenuePilotLease } {
   assertMoney(result.costUsd, "costUsd");
   if (job.status !== "running" || !job.activeLease) throw new Error("The revenue pilot has no active lease.");
   if (job.activeLease.id !== result.leaseId || job.activeLease.role !== result.role) {
@@ -379,10 +381,18 @@ export function completeRevenuePilotRole(
   if (completedAt < Date.parse(job.activeLease.claimedAt) || completedAt > Date.parse(job.activeLease.expiresAt)) {
     throw new Error("The role lease expired before completion was recorded.");
   }
+  return { completedAt, lease: job.activeLease };
+}
+
+function validatedNextCost(job: RevenuePilotJob, result: RevenuePilotRoleCompletion): number {
   const nextCost = Math.round((job.actualExecutionCostUsd + result.costUsd) * 100) / 100;
   if (nextCost > job.plan.maximumExecutionCostUsd) {
     throw new RangeError(`The role would exceed the $${job.plan.maximumExecutionCostUsd.toFixed(2)} execution cap.`);
   }
+  return nextCost;
+}
+
+function validateIndependentVerification(job: RevenuePilotJob, result: RevenuePilotRoleCompletion): void {
   if (
     result.role === "independent_verifier" &&
     !result.executionFailed &&
@@ -401,25 +411,33 @@ export function completeRevenuePilotRole(
   if (result.role !== "independent_verifier" && result.verificationPassed !== null) {
     throw new Error("Only the independent verifier may provide a verification result.");
   }
-  if (result.modelExecution) {
-    const evidence = result.modelExecution;
-    if (
-      evidence.schemaVersion !== 1 ||
-      evidence.outputDigest !== result.outputDigest.toLowerCase() ||
-      !Number.isInteger(evidence.attemptCount) ||
-      evidence.attemptCount < 1 ||
-      evidence.attemptCount > 2 ||
-      evidence.attempts.length !== evidence.attemptCount ||
-      !Number.isFinite(evidence.accountedCostUsd) ||
-      evidence.accountedCostUsd < 0
-    ) {
-      throw new Error("Model execution evidence does not match the completed role.");
-    }
-    const conservativeWholeCentCost = Math.ceil((evidence.accountedCostUsd - Number.EPSILON) * 100) / 100;
-    if (result.costUsd !== conservativeWholeCentCost) {
-      throw new Error("The role cost must conservatively account for the routed model execution.");
-    }
+}
+
+function conservativeWholeCentCost(accountedCostUsd: number): number {
+  return Math.ceil((accountedCostUsd - Number.EPSILON) * 100) / 100;
+}
+
+function validateModelExecution(result: RevenuePilotRoleCompletion): void {
+  if (!result.modelExecution) return;
+  const evidence = result.modelExecution;
+  if (
+    evidence.schemaVersion !== 1 ||
+    evidence.outputDigest !== result.outputDigest.toLowerCase() ||
+    !Number.isInteger(evidence.attemptCount) ||
+    evidence.attemptCount < 1 ||
+    evidence.attemptCount > 2 ||
+    evidence.attempts.length !== evidence.attemptCount ||
+    !Number.isFinite(evidence.accountedCostUsd) ||
+    evidence.accountedCostUsd < 0
+  ) {
+    throw new Error("Model execution evidence does not match the completed role.");
   }
+  if (result.costUsd !== conservativeWholeCentCost(evidence.accountedCostUsd)) {
+    throw new Error("The role cost must conservatively account for the routed model execution.");
+  }
+}
+
+function validateExecutionFailure(result: RevenuePilotRoleCompletion): void {
   if (result.executionFailed && !result.failureStage) {
     throw new Error("A failed routed role requires a failure stage.");
   }
@@ -438,6 +456,9 @@ export function completeRevenuePilotRole(
   if (result.modelExecution && result.modelFailure) {
     throw new Error("A routed role cannot contain both success and failure evidence.");
   }
+}
+
+function validateReportDigest(job: RevenuePilotJob, result: RevenuePilotRoleCompletion): void {
   const requiresReadinessReport =
     job.plan.serviceId === "public-repository-readiness-snapshot" &&
     result.role === "delivery_operator" &&
@@ -448,31 +469,41 @@ export function completeRevenuePilotRole(
   if (result.reportDigest && !requiresReadinessReport) {
     throw new Error("A report digest is allowed only for a successful repository-readiness delivery role.");
   }
-  if (result.modelFailure) {
-    const evidence = result.modelFailure;
-    if (
-      evidence.schemaVersion !== 1 ||
-      evidence.failureDigest !== result.outputDigest.toLowerCase() ||
-      !Number.isInteger(evidence.attemptCount) ||
-      evidence.attemptCount < 1 ||
-      evidence.attemptCount > 2 ||
-      evidence.attempts.length !== evidence.attemptCount ||
-      evidence.attempts.some((attempt) => attempt.outcome === "succeeded") ||
-      !Number.isFinite(evidence.accountedCostUsd) ||
-      evidence.accountedCostUsd < 0
-    ) {
-      throw new Error("Model failure evidence does not match the failed role.");
-    }
-    const conservativeWholeCentCost = Math.ceil((evidence.accountedCostUsd - Number.EPSILON) * 100) / 100;
-    if (result.costUsd !== conservativeWholeCentCost) {
-      throw new Error("The role cost must conservatively account for failed routed model attempts.");
-    }
+}
+
+function validateModelFailure(result: RevenuePilotRoleCompletion): void {
+  if (!result.modelFailure) return;
+  const evidence = result.modelFailure;
+  if (
+    evidence.schemaVersion !== 1 ||
+    evidence.failureDigest !== result.outputDigest.toLowerCase() ||
+    !Number.isInteger(evidence.attemptCount) ||
+    evidence.attemptCount < 1 ||
+    evidence.attemptCount > 2 ||
+    evidence.attempts.length !== evidence.attemptCount ||
+    evidence.attempts.some((attempt) => attempt.outcome === "succeeded") ||
+    !Number.isFinite(evidence.accountedCostUsd) ||
+    evidence.accountedCostUsd < 0
+  ) {
+    throw new Error("Model failure evidence does not match the failed role.");
   }
+  if (result.costUsd !== conservativeWholeCentCost(evidence.accountedCostUsd)) {
+    throw new Error("The role cost must conservatively account for failed routed model attempts.");
+  }
+}
+
+function applyRoleCompletion(
+  job: RevenuePilotJob,
+  result: RevenuePilotRoleCompletion,
+  lease: RevenuePilotLease,
+  completedAt: number,
+  nextCost: number,
+): RevenuePilotJob {
 
   const completed = copyJob(job);
   completed.receipts.push({
     role: result.role,
-    workerId: job.activeLease.workerId,
+    workerId: lease.workerId,
     outputDigest: result.outputDigest.toLowerCase(),
     costUsd: result.costUsd,
     verificationPassed: result.verificationPassed,
@@ -486,14 +517,9 @@ export function completeRevenuePilotRole(
   completed.actualExecutionCostUsd = nextCost;
   completed.activeLease = null;
   completed.updatedAt = new Date(completedAt).toISOString();
-
-  if (result.executionFailed) {
-    completed.status = "failed";
-    completed.nextRole = null;
-    return completed;
-  }
-
-  if (result.role === "independent_verifier" && result.verificationPassed === false) {
+  const failed = result.executionFailed ||
+    (result.role === "independent_verifier" && result.verificationPassed === false);
+  if (failed) {
     completed.status = "failed";
     completed.nextRole = null;
     return completed;
@@ -503,4 +529,18 @@ export function completeRevenuePilotRole(
   completed.nextRole = nextRole;
   completed.status = nextRole ? "queued" : "owner_review";
   return completed;
+}
+
+export function completeRevenuePilotRole(
+  job: RevenuePilotJob,
+  result: RevenuePilotRoleCompletion,
+): RevenuePilotJob {
+  const { completedAt, lease } = validateActiveLease(job, result);
+  const nextCost = validatedNextCost(job, result);
+  validateIndependentVerification(job, result);
+  validateModelExecution(result);
+  validateExecutionFailure(result);
+  validateReportDigest(job, result);
+  validateModelFailure(result);
+  return applyRoleCompletion(job, result, lease, completedAt, nextCost);
 }
