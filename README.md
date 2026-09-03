@@ -80,6 +80,24 @@ Open the local dashboard, choose **Unlock owner controls**, and paste the value 
 
 The authenticated owner API exposes `GET /api/tools` for a truthful runtime-aware capability inventory and `GET /api/revenue-pilot/services` for the fixed commercial catalog. `POST /api/revenue-pilot/opportunities` accepts an optional `requestedServiceId`; it still creates only a reviewed plan, and fulfillment remains blocked until exact collected revenue and separate job-bound owner approval are recorded. These endpoints do not connect an external chat bot by themselves. A Telegram or site relay must call them server-to-server without placing owner credentials in a browser or chat transcript.
 
+### Owner-controlled Base USDC checkout
+
+The fixed service can accept exactly `149 USDC` on Base into an owner-controlled wallet without giving SARA a spending key. Checkout stays unavailable unless all of the following production variables are present and the terms digest exactly matches the compiled text:
+
+```text
+SARA_PAYMENT_WALLET_ADDRESS=0x...
+SARA_TERMS_BUSINESS_NAME=...
+SARA_TERMS_CONTACT_EMAIL=...
+SARA_TERMS_GOVERNING_LAW=...
+SARA_COMMERCIAL_TERMS_APPROVED_SHA256=...
+SARA_BASE_RPC_URL=https://mainnet.base.org
+SARA_PUBLIC_BASE_URL=https://sara-operator-production.up.railway.app
+```
+
+`SARA_PAYMENT_WALLET_ADDRESS` is a receiving address only. Never configure a seed phrase, private key, exchange credential, or spending key. The RPC URL must be credential-free HTTPS because it is treated as public read-only infrastructure.
+
+The public API creates a unique job-bound invoice and verifies the canonical Base receipt, official USDC contract, exact atomic amount, exact recipient, successful transaction state, and at least 12 confirmations. It stores only digests for customer and transaction references. Confirmed payment does not queue work or record realized revenue until the authenticated owner approves that exact job. Fulfillment stops at private owner review, where a second distinct approval creates a revocable, 72-hour, three-download access link. Direct on-chain settlement has no card-style signed webhook, chargeback, or automatic refund; any refund is an owner-controlled new transfer outside SARA's authority.
+
 The local kernel server binds to `127.0.0.1` by default. Do not expose it directly to the public internet. The separate `saraseed.app` owner channel is served over HTTPS and keeps its session, rate limits, directives, and executor bridge at the Cloudflare boundary; it does not expose this local server.
 
 The command-center design is deliberately aspirational while its claims remain literal: visitors see the visual direction and the $0 bootstrap promise, but durable memory, finances, jobs, capabilities, audit hashes, and mutation history stay locked until owner authentication. The interface uses only local HTML, CSS, and JavaScript, includes reduced-motion and mobile layouts, and does not add a recurring service.

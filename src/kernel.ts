@@ -40,13 +40,35 @@ import {
 } from "./model-router.ts";
 import {
   authorizeRevenuePilot,
+  authorizeRevenuePilotDelivery,
   claimRevenuePilotRole as claimPilotRole,
   completeRevenuePilotRole as completePilotRole,
   createRevenuePilotJob as createPilotJob,
+  markRevenuePilotDelivered,
   type RevenuePilotInput,
   type RevenuePilotJob,
   type RevenuePilotLease,
 } from "./revenue-pilot.ts";
+import {
+  revenueCapabilityMigrationDecision,
+  verifiedRevenueCapabilities,
+} from "./revenue-capability-bootstrap.ts";
+import {
+  authorizedRevenuePaymentIntent,
+  confirmRevenuePaymentIntent,
+  createRevenuePaymentIntent as compileRevenuePaymentIntent,
+  paymentClientSecretMatches,
+  paymentIntentEvidenceDigest,
+  type RevenuePaymentIntent,
+} from "./revenue-payment.ts";
+import type { CommercialTerms } from "./commercial-terms.ts";
+import type { VerifiedUsdcPayment } from "./usdc-payment.ts";
+import {
+  createRevenueDelivery as compileRevenueDelivery,
+  recordRevenueDeliveryDownload,
+  revokeRevenueDelivery as compileRevokedRevenueDelivery,
+  type RevenueDelivery,
+} from "./revenue-delivery.ts";
 import { EventStoreIntegrityError, type StoredEvent } from "./store.ts";
 import {
   provisionalFamilyScenarioTarget,
@@ -363,6 +385,8 @@ type KernelState = {
   jobs: Job[];
   mutations: Mutation[];
   revenuePilotJobs: RevenuePilotJob[];
+  revenuePaymentIntents: RevenuePaymentIntent[];
+  revenueDeliveries: RevenueDelivery[];
   events: StoredEvent[];
 };
 
@@ -378,6 +402,8 @@ export type SaraStatus = {
   jobs: Job[];
   mutations: Mutation[];
   revenuePilotJobs: RevenuePilotJob[];
+  revenuePaymentIntents: RevenuePaymentIntent[];
+  revenueDeliveries: RevenueDelivery[];
   audit: { eventCount: number; headHash: string | null };
 };
 
@@ -418,6 +444,7 @@ export class SaraKernel {
     stateDirectory: string;
     ownerTokenSha256?: string;
     constitutionPath?: string;
+    bootstrapRevenueCapabilities?: boolean;
     now?: () => Date;
   }): Promise<SaraKernel> {
     const requestedOwnerTokenSha256 = options.ownerTokenSha256 ?? process.env.SARA_OWNER_TOKEN_SHA256;
@@ -461,6 +488,21 @@ export class SaraKernel {
           memories: CORE_MEMORY_SEEDS,
         });
       }
+      if (options.bootstrapRevenueCapabilities) {
+        const currentCapabilities = new Map<string, Capability>();
+        for (const event of await store.readAll()) {
+          if (event.type === "capability_registered") {
+            const capability = event.data as Capability;
+            currentCapabilities.set(capability.id, capability);
+          }
+        }
+        for (const capability of await verifiedRevenueCapabilities()) {
+          if (revenueCapabilityMigrationDecision(currentCapabilities.get(capability.id), capability) === "register") {
+            await store.append("capability_registered", SARA_PRINCIPAL, capability);
+            currentCapabilities.set(capability.id, capability);
+          }
+        }
+      }
       return kernel;
     });
   }
@@ -494,6 +536,8 @@ export class SaraKernel {
     const jobMap = new Map<string, Job>();
     const mutationMap = new Map<string, Mutation>();
     const revenuePilotMap = new Map<string, RevenuePilotJob>();
+    const revenuePaymentIntentMap = new Map<string, RevenuePaymentIntent>();
+    const revenueDeliveryMap = new Map<string, RevenueDelivery>();
     let emergencyStopped = false;
 
     for (const event of events) {
@@ -538,6 +582,14 @@ export class SaraKernel {
         const job = event.data as RevenuePilotJob;
         revenuePilotMap.set(job.id, structuredClone(job));
       }
+      if (event.type === "revenue_payment_intent_snapshot") {
+        const intent = event.data as RevenuePaymentIntent;
+        revenuePaymentIntentMap.set(intent.id, structuredClone(intent));
+      }
+      if (event.type === "revenue_delivery_snapshot") {
+        const delivery = event.data as RevenueDelivery;
+        revenueDeliveryMap.set(delivery.id, structuredClone(delivery));
+      }
       if (event.type === "emergency_stop_changed") {
         emergencyStopped = (event.data as { active: boolean }).active;
       }
@@ -551,6 +603,8 @@ export class SaraKernel {
       jobs: [...jobMap.values()],
       mutations: [...mutationMap.values()],
       revenuePilotJobs: [...revenuePilotMap.values()],
+      revenuePaymentIntents: [...revenuePaymentIntentMap.values()],
+      revenueDeliveries: [...revenueDeliveryMap.values()],
       events,
     };
   }
@@ -740,6 +794,243 @@ export class SaraKernel {
       }
       await this.#store.append("revenue_pilot_snapshot", principal, job);
       return structuredClone(job);
+    });
+  }
+
+  createRevenuePaymentIntent(
+    principal: Principal,
+    input: {
+      id: string;
+      jobId: string;
+      recipientAddress: string;
+      clientSecretDigest: string;
+      customerReferenceDigest: string;
+      terms: CommercialTerms;
+      lifetimeMinutes?: number;
+    },
+  ): Promise<RevenuePaymentIntent> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, {
+        action: "external_write",
+        targetId: `revenue-payment-intent:${input.id}`,
+        external: true,
+      });
+      const state = await this.state();
+      const existing = state.revenuePaymentIntents.find((candidate) => candidate.id === input.id);
+      if (existing) return structuredClone(existing);
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === input.jobId);
+      if (!job) throw new Error(`Revenue pilot ${input.jobId} does not exist.`);
+      const now = new Date();
+      const activePaidJob = state.revenuePilotJobs.find((candidate) =>
+        candidate.id !== job.id &&
+        candidate.revenueEvidenceId !== null &&
+        ["queued", "running", "owner_review", "delivery_ready"].includes(candidate.status)
+      );
+      if (activePaidJob) throw new Error("The one-job commercial lane is still fulfilling another paid job.");
+      const active = state.revenuePaymentIntents.find((candidate) =>
+        candidate.jobId !== job.id &&
+        (candidate.status === "confirmed" ||
+          (candidate.status === "awaiting_payment" && Date.parse(candidate.expiresAt) >= now.getTime()))
+      );
+      if (active) throw new Error("The one-job commercial lane already has an active payment intent.");
+      const intent = compileRevenuePaymentIntent({
+        ...input,
+        job,
+        now,
+      });
+      await this.#store.append("revenue_payment_intent_snapshot", principal, intent);
+      return structuredClone(intent);
+    });
+  }
+
+  async inspectRevenuePaymentIntent(id: string, clientSecret: string): Promise<RevenuePaymentIntent> {
+    const intent = (await this.state()).revenuePaymentIntents.find((candidate) => candidate.id === id);
+    if (!intent || !paymentClientSecretMatches(intent, clientSecret)) {
+      throw new PolicyDeniedError(
+        { allowed: false, code: "PAYMENT_INTENT_AUTHENTICATION_FAILED", reason: "Payment intent authentication failed." },
+        "payment_intent_authentication",
+      );
+    }
+    return structuredClone(intent);
+  }
+
+  confirmRevenuePayment(
+    principal: Principal,
+    intentId: string,
+    clientSecret: string,
+    payment: VerifiedUsdcPayment,
+  ): Promise<RevenuePaymentIntent> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, {
+        action: "external_read",
+        targetId: `verify-onchain-payment:${intentId}`,
+        external: true,
+      });
+      const state = await this.state();
+      const intent = state.revenuePaymentIntents.find((candidate) => candidate.id === intentId);
+      if (!intent || !paymentClientSecretMatches(intent, clientSecret)) throw new Error("Payment intent authentication failed.");
+      const duplicate = state.revenuePaymentIntents.find((candidate) =>
+        candidate.id !== intent.id &&
+        candidate.payment?.transactionReferenceDigest === payment.transactionReferenceDigest
+      );
+      if (duplicate) throw new Error("The transaction is already bound to another payment intent.");
+      const confirmed = confirmRevenuePaymentIntent(intent, payment);
+      if (confirmed.status !== intent.status) {
+        await this.#store.append("revenue_payment_intent_snapshot", principal, confirmed);
+      }
+      return structuredClone(confirmed);
+    });
+  }
+
+  authorizeRevenuePilotFromConfirmedPayment(
+    principal: Principal,
+    jobId: string,
+    paymentIntentId: string,
+    approval: OwnerApproval,
+  ): Promise<{ job: RevenuePilotJob; paymentIntent: RevenuePaymentIntent }> {
+    return this.serializeMutation(async () => {
+      const targetId = `revenue-pilot:${jobId}:fulfillment`;
+      await this.authorize(principal, {
+        action: "contract_commitment",
+        targetId,
+        external: true,
+        approval,
+      });
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new Error(`Revenue pilot ${jobId} does not exist.`);
+      const intent = state.revenuePaymentIntents.find((candidate) => candidate.id === paymentIntentId);
+      if (!intent || intent.jobId !== job.id) throw new Error("Exact job-bound payment intent is required.");
+      if (intent.status === "authorized" && intent.revenueEvidenceId && job.revenueEvidenceId === intent.revenueEvidenceId) {
+        return { job: structuredClone(job), paymentIntent: structuredClone(intent) };
+      }
+      if (intent.status !== "confirmed" || !intent.payment) throw new Error("Confirmed on-chain payment is required.");
+      if (intent.amountUsd !== job.plan.priceUsd || intent.termsDigest.length !== 64) {
+        throw new Error("Payment intent does not match the job price and accepted terms.");
+      }
+      const ledgerTarget = `ledger:revenue:revenue-pilot:${jobId}:${intent.payment.transactionReferenceDigest}`;
+      await this.authorize(principal, {
+        action: "record_realized_financial_event",
+        targetId: ledgerTarget,
+        external: false,
+      });
+      if (state.ledger.some((entry) => entry.description.includes(intent.payment!.transactionReferenceDigest))) {
+        throw new Error("The on-chain payment is already recorded.");
+      }
+      const revenue: LedgerEntry = {
+        id: randomUUID(),
+        kind: "revenue",
+        source: "customer",
+        amountUsd: intent.amountUsd,
+        realized: true,
+        recurringMonthly: false,
+        description: `Revenue pilot ${jobId}; verified Base USDC evidence ${intent.payment.transactionReferenceDigest}; intent evidence ${paymentIntentEvidenceDigest(intent)}`,
+        occurredAt: intent.payment.verifiedAt,
+      };
+      const authorizedJob = authorizeRevenuePilot(job, {
+        collectedRevenueUsd: revenue.amountUsd,
+        revenueEvidenceId: revenue.id,
+        ownerApprovalTarget: approval.targetId,
+      });
+      const authorizedIntent = authorizedRevenuePaymentIntent(intent, revenue.id);
+      await this.#store.append("ledger_recorded", principal, revenue);
+      await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
+      await this.#store.append("revenue_payment_intent_snapshot", principal, authorizedIntent);
+      return { job: structuredClone(authorizedJob), paymentIntent: structuredClone(authorizedIntent) };
+    });
+  }
+
+  authorizeRevenuePilotDelivery(
+    principal: Principal,
+    input: {
+      deliveryId: string;
+      jobId: string;
+      reportDigest: string;
+      accessSecretDigest: string;
+      lifetimeHours?: number;
+      maximumDownloads?: number;
+    },
+    approval: OwnerApproval,
+  ): Promise<{ job: RevenuePilotJob; delivery: RevenueDelivery }> {
+    return this.serializeMutation(async () => {
+      const targetId = `revenue-pilot:${input.jobId}:delivery`;
+      await this.authorize(principal, {
+        action: "contract_commitment",
+        targetId,
+        external: true,
+        approval,
+      });
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === input.jobId);
+      if (!job) throw new Error(`Revenue pilot ${input.jobId} does not exist.`);
+      const existing = state.revenueDeliveries.find((candidate) => candidate.id === input.deliveryId);
+      if (existing) {
+        if (existing.jobId !== job.id || existing.accessSecretDigest !== input.accessSecretDigest) {
+          throw new Error("Delivery id is already bound to different access evidence.");
+        }
+        return { job: structuredClone(job), delivery: structuredClone(existing) };
+      }
+      if (state.revenueDeliveries.some((candidate) => candidate.jobId === job.id && candidate.status !== "revoked")) {
+        throw new Error("This job already has active delivery access.");
+      }
+      const delivery = compileRevenueDelivery({
+        id: input.deliveryId,
+        job,
+        reportDigest: input.reportDigest,
+        accessSecretDigest: input.accessSecretDigest,
+        approvalId: approval.approvalId,
+        ...(input.lifetimeHours === undefined ? {} : { lifetimeHours: input.lifetimeHours }),
+        ...(input.maximumDownloads === undefined ? {} : { maximumDownloads: input.maximumDownloads }),
+      });
+      const authorizedJob = authorizeRevenuePilotDelivery(job, {
+        approvalId: approval.approvalId,
+        ownerApprovalTarget: approval.targetId,
+      });
+      await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
+      await this.#store.append("revenue_delivery_snapshot", principal, delivery);
+      return { job: structuredClone(authorizedJob), delivery: structuredClone(delivery) };
+    });
+  }
+
+  accessRevenueDelivery(id: string, secret: string): Promise<{ job: RevenuePilotJob; delivery: RevenueDelivery }> {
+    return this.serializeMutation(async () => {
+      await this.authorize(SARA_PRINCIPAL, {
+        action: "external_write",
+        targetId: `revenue-delivery:${id}:download`,
+        external: true,
+      });
+      const state = await this.state();
+      const delivery = state.revenueDeliveries.find((candidate) => candidate.id === id);
+      if (!delivery) throw new Error("Delivery access authentication failed.");
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === delivery.jobId);
+      if (!job) throw new Error("Delivery job is unavailable.");
+      const downloaded = recordRevenueDeliveryDownload(delivery, secret);
+      const deliveredJob = markRevenuePilotDelivered(job);
+      await this.#store.append("revenue_delivery_snapshot", SARA_PRINCIPAL, downloaded);
+      if (job.status !== "delivered") await this.#store.append("revenue_pilot_snapshot", SARA_PRINCIPAL, deliveredJob);
+      return { job: structuredClone(deliveredJob), delivery: structuredClone(downloaded) };
+    });
+  }
+
+  revokeRevenueDelivery(principal: Principal, deliveryId: string): Promise<RevenueDelivery> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, {
+        action: "protected_security_control_change",
+        targetId: `revenue-delivery:${deliveryId}:revoke`,
+        external: false,
+        approval: {
+          approvalId: `authenticated-owner-revocation:${deliveryId}`,
+          action: "protected_security_control_change",
+          targetId: `revenue-delivery:${deliveryId}:revoke`,
+          approvedAt: new Date().toISOString(),
+          ownerId: principal.id,
+        },
+      });
+      const delivery = (await this.state()).revenueDeliveries.find((candidate) => candidate.id === deliveryId);
+      if (!delivery) throw new Error("Delivery does not exist.");
+      const revoked = compileRevokedRevenueDelivery(delivery);
+      if (revoked.status !== delivery.status) await this.#store.append("revenue_delivery_snapshot", principal, revoked);
+      return structuredClone(revoked);
     });
   }
 
@@ -1445,6 +1736,8 @@ export class SaraKernel {
       jobs: state.jobs,
       mutations: state.mutations,
       revenuePilotJobs: state.revenuePilotJobs,
+      revenuePaymentIntents: state.revenuePaymentIntents,
+      revenueDeliveries: state.revenueDeliveries,
       audit: { eventCount: state.events.length, headHash: state.events.at(-1)?.hash ?? null },
     };
   }

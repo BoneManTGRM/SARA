@@ -96,14 +96,16 @@ export type RevenuePilotJob = {
   id: string;
   input: RevenuePilotInput;
   plan: RevenuePilotPlan;
-  status: "offer_ready" | "owner_review" | "rejected" | "queued" | "running" | "failed";
+  status: "offer_ready" | "owner_review" | "delivery_ready" | "delivered" | "rejected" | "queued" | "running" | "failed";
   nextRole: RevenuePilotLease["role"] | null;
   completedRoles: RevenuePilotRole[];
   receipts: RevenuePilotReceipt[];
   activeLease: RevenuePilotLease | null;
   actualExecutionCostUsd: number;
   revenueEvidenceId: string | null;
-  externalDeliveryAuthorized: false;
+  externalDeliveryAuthorized: boolean;
+  deliveryApprovalId: string | null;
+  deliveredAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -285,9 +287,47 @@ export function createRevenuePilotJob(
     actualExecutionCostUsd: 0,
     revenueEvidenceId: null,
     externalDeliveryAuthorized: false,
+    deliveryApprovalId: null,
+    deliveredAt: null,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
   };
+}
+
+export function authorizeRevenuePilotDelivery(
+  job: RevenuePilotJob,
+  approval: { approvalId: string; ownerApprovalTarget: string },
+  now = new Date(),
+): RevenuePilotJob {
+  if (job.status !== "owner_review" || job.externalDeliveryAuthorized) {
+    throw new Error("Only a completed owner-review job may be approved for external delivery.");
+  }
+  if (approval.ownerApprovalTarget !== `revenue-pilot:${job.id}:delivery` || !approval.approvalId.trim()) {
+    throw new Error("A distinct target-bound owner approval is required for delivery.");
+  }
+  const verifier = job.receipts.find((receipt) => receipt.role === "independent_verifier");
+  const report = job.receipts.find((receipt) => receipt.role === "delivery_operator");
+  if (verifier?.verificationPassed !== true || !report?.reportDigest) {
+    throw new Error("Passing independent verification and a compiled report are required for delivery.");
+  }
+  const authorized = copyJob(job);
+  authorized.externalDeliveryAuthorized = true;
+  authorized.deliveryApprovalId = approval.approvalId.trim();
+  authorized.status = "delivery_ready";
+  authorized.updatedAt = now.toISOString();
+  return authorized;
+}
+
+export function markRevenuePilotDelivered(job: RevenuePilotJob, now = new Date()): RevenuePilotJob {
+  if (!job.externalDeliveryAuthorized || !job.deliveryApprovalId || (job.status !== "delivery_ready" && job.status !== "delivered")) {
+    throw new Error("The revenue pilot is not authorized for customer delivery.");
+  }
+  if (job.status === "delivered") return copyJob(job);
+  const delivered = copyJob(job);
+  delivered.status = "delivered";
+  delivered.deliveredAt = now.toISOString();
+  delivered.updatedAt = now.toISOString();
+  return delivered;
 }
 
 export function authorizeRevenuePilot(

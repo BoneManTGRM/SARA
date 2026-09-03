@@ -126,6 +126,15 @@ export type Capability = {
   status: CapabilityStatus;
   evidence: string[];
   limitations: string[];
+  registration?: {
+    schemaVersion: 1;
+    migrationId: string;
+    evidenceVersion: number;
+    implementationDigest: string;
+    evidenceDigest: string;
+    provenance: string;
+    verifiedAt: string;
+  };
 };
 
 export type WorkCard = {
