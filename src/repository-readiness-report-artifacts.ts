@@ -36,6 +36,39 @@ function reportPath(stateDirectory: string, jobId: string): string {
   return join(reportDirectory(stateDirectory), `${jobId}.json`);
 }
 
+function repairCategoryEvidenceNotes(value: unknown): {
+  categoryEvidence: RepositoryReadinessReportInput["categoryEvidence"];
+  repairedCount: number;
+} {
+  if (!Array.isArray(value)) {
+    return {
+      categoryEvidence: value as RepositoryReadinessReportInput["categoryEvidence"],
+      repairedCount: 0,
+    };
+  }
+  let repairedCount = 0;
+  const categoryEvidence = value.map((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+    const candidate = record as Record<string, unknown>;
+    if (typeof candidate.note === "string" && candidate.note.trim()) return record;
+    repairedCount += 1;
+    return {
+      ...candidate,
+      note: candidate.status === "unavailable"
+        ? "No eligible immutable sampled evidence was available for this category; the model's malformed note was replaced locally."
+        : "Reviewed only from the listed immutable sampled evidence; the model's malformed note was replaced locally.",
+    };
+  });
+  return {
+    categoryEvidence: categoryEvidence as RepositoryReadinessReportInput["categoryEvidence"],
+    repairedCount,
+  };
+}
+
+function categoryNoteRepairLimitation(repairedCount: number): string {
+  return `SARA deterministically replaced ${repairedCount} missing or malformed category evidence ${repairedCount === 1 ? "note" : "notes"}; no evidence URL, finding, priority, confidence, or recommendation was invented.`;
+}
+
 function workerDraft(outputText: string): Pick<
   RepositoryReadinessReportInput,
   "categoryEvidence" | "findings" | "evidenceLimitations"
@@ -57,10 +90,17 @@ function workerDraft(outputText: string): Pick<
     throw new Error(`Repository-readiness worker output must contain exactly: ${DRAFT_KEYS.join(", ")}.`);
   }
   const draft = parsed as Partial<RepositoryReadinessReportInput>;
+  const repaired = repairCategoryEvidenceNotes(draft.categoryEvidence);
+  const evidenceLimitations = Array.isArray(draft.evidenceLimitations as unknown)
+    ? [
+      ...(draft.evidenceLimitations as readonly string[]),
+      ...(repaired.repairedCount > 0 ? [categoryNoteRepairLimitation(repaired.repairedCount)] : []),
+    ]
+    : draft.evidenceLimitations as RepositoryReadinessReportInput["evidenceLimitations"];
   return {
-    categoryEvidence: draft.categoryEvidence as RepositoryReadinessReportInput["categoryEvidence"],
+    categoryEvidence: repaired.categoryEvidence,
     findings: draft.findings as RepositoryReadinessReportInput["findings"],
-    evidenceLimitations: draft.evidenceLimitations as RepositoryReadinessReportInput["evidenceLimitations"],
+    evidenceLimitations,
   };
 }
 
