@@ -23,15 +23,33 @@ const snapshot: PublicRepositoryEvidenceSnapshot = {
     openIssues: 1,
     licenseSpdx: "NOASSERTION",
   },
-  inventory: [{ path: "package.json", type: "blob", size: 120 }],
+  inventory: [
+    { path: "package.json", type: "blob", size: 120 },
+    { path: "src/index.ts", type: "blob", size: 40 },
+    { path: ".github/workflows/ci.yml", type: "blob", size: 32 },
+  ],
   inventoryTruncated: true,
-  sampledFiles: [{
-    path: "package.json",
-    permalink,
-    sourceText: "{\n  \"name\": \"sara\",\n  \"private\": true\n}\n",
-    sourceTruncated: true,
-  }],
-  limitations: ["Only one bounded public file was sampled."],
+  sampledFiles: [
+    {
+      path: "package.json",
+      permalink,
+      sourceText: "{\n  \"name\": \"sara\",\n  \"private\": true\n}\n",
+      sourceTruncated: true,
+    },
+    {
+      path: "src/index.ts",
+      permalink: `${repository}/blob/${commit}/src/index.ts`,
+      sourceText: "export const ready = true;\n",
+      sourceTruncated: false,
+    },
+    {
+      path: ".github/workflows/ci.yml",
+      permalink: `${repository}/blob/${commit}/.github/workflows/ci.yml`,
+      sourceText: "name: CI\non: [push]\njobs: {}\n",
+      sourceTruncated: false,
+    },
+  ],
+  limitations: ["Only three bounded public files were sampled."],
 };
 
 describe("repository-readiness worker local repair", () => {
@@ -85,13 +103,13 @@ describe("repository-readiness worker local repair", () => {
         {
           category: "code",
           status: "reviewed",
-          evidenceFileIndexes: [0],
-          note: "The sampled package manifest declares the package private.",
+          evidenceFileIndexes: [1],
+          note: "Code evidence is limited to the sampled source file.",
         },
         {
           category: "dependencies",
           status: "reviewed",
-          evidenceFileIndexes: [0],
+          evidenceFileIndexes: [0, 1, 2],
           note: "Dependency evidence is limited to the sampled package manifest.",
         },
         {
@@ -103,13 +121,13 @@ describe("repository-readiness worker local repair", () => {
         {
           category: "release_controls",
           status: "reviewed",
-          evidenceFileIndexes: [0],
-          note: "Release-control review is limited to the sampled public text.",
+          evidenceFileIndexes: [2],
+          note: "Release-control review is limited to the sampled workflow.",
         },
       ],
       findings: [{
         id: "package-is-private",
-        category: "code",
+        category: "dependencies",
         priority: "low",
         confidence: "confirmed",
         title: "Package publication is disabled",
