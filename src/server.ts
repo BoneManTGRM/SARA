@@ -494,6 +494,17 @@ async function handleOwnerCatalogRead(
         termsVersion: options.commerce.terms.version,
         termsDigest: options.commerce.terms.digest,
       } : { configured: false },
+      automation: {
+        mandateEvaluator: "available",
+        businessIncubator: "available",
+        publicOpportunityScout: "scheduled_zero_cost",
+        connectors: {
+          email: "not_connected",
+          calendar: "not_connected",
+          whatsapp: "not_connected",
+        },
+        marketplaceApplications: "disabled",
+      },
     });
     return true;
   }
@@ -575,6 +586,45 @@ async function handleOwnerRevenueWrite(
   }
   if (request.method === "POST" && url.pathname === "/api/emergency-stop") {
     await handleEmergencyStop(request, response, kernel, owner);
+    return true;
+  }
+  if (request.method === "POST" && url.pathname === "/api/autonomy/standing-mandate") {
+    const now = new Date();
+    const id = `exception-only-${now.toISOString().slice(0, 10)}`;
+    const targetId = `standing-mandate:${id}`;
+    json(response, 201, await kernel.activateStandingMandate(owner, {
+      id,
+      allowedActions: [
+        "opportunity_research",
+        "business_candidate_development",
+        "inbound_customer_reply",
+        "calendar_scheduling",
+        "bounded_outreach",
+      ],
+      allowedChannels: ["public_web", "email", "calendar", "approved_api"],
+      allowedServiceIds: ["public-repository-readiness-snapshot"],
+      maximumCostPerActionUsd: 0,
+      maximumDailyActions: 10,
+      maximumConcurrentActions: 1,
+      startsAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + 30 * 86_400_000).toISOString(),
+      ownerId: owner.id,
+    }, {
+      approvalId: randomUUID(),
+      action: "required_owner_approval_change",
+      targetId,
+      approvedAt: now.toISOString(),
+      ownerId: owner.id,
+    }));
+    return true;
+  }
+  if (request.method === "POST" && url.pathname === "/api/autonomy/standing-mandate/revoke") {
+    const body = await readJson(request);
+    json(response, 200, await kernel.revokeStandingMandate(
+      owner,
+      boundedText(body.mandateId, 3, 128, "mandateId"),
+      boundedText(body.reason ?? "Owner revoked the standing mandate.", 3, 300, "reason"),
+    ));
     return true;
   }
   if (request.method === "POST" && url.pathname === "/api/revenue-pilot/opportunities") {
@@ -719,9 +769,10 @@ async function handleTelegramBridgeRequest(
       jobs: status.jobs.length,
       mutations: status.mutations.length,
       ownerAssistant: options.ownerAssistant ? await options.ownerAssistant.status() : null,
+      standingMandate: status.standingMandate,
       prohibitedActions: [
-        "outreach",
-        "applications",
+        "unmandated or platform-prohibited outreach",
+        "unapproved applications",
         "contracts",
         "payments",
         "customer delivery",
@@ -765,6 +816,22 @@ async function handleTelegramBridgeRequest(
       external: true,
     });
     json(response, 201, { schemaVersion: 1, outcome: "work_card_created", job });
+    return;
+  }
+  if (request.method === "POST" && url.pathname === "/api/bridge/actions/business-candidates") {
+    const body = await readJson(request);
+    const publicEvidenceUrls = Array.isArray(body.publicEvidenceUrls)
+      ? body.publicEvidenceUrls.map((value) => boundedText(value, 12, 2_048, "publicEvidenceUrl"))
+      : [];
+    json(response, 201, await kernel.createBusinessCandidate(SARA_PRINCIPAL, {
+      id: boundedText(body.id, 3, 128, "id"),
+      name: boundedText(body.name, 3, 120, "name"),
+      customerProblem: boundedText(body.customerProblem, 12, 1_000, "customerProblem"),
+      serviceId: boundedText(body.serviceId, 3, 128, "serviceId"),
+      publicEvidenceUrls,
+      expectedPriceUsd: Number(body.expectedPriceUsd),
+      estimatedDeliveryCostUsd: Number(body.estimatedDeliveryCostUsd),
+    }));
     return;
   }
   if (request.method === "POST" && url.pathname === "/api/bridge/actions/scaffolds") {

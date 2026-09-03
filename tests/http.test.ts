@@ -268,6 +268,49 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.match(scaffoldResult.candidateDigest, /^[a-f0-9]{64}$/u);
   });
 
+  it("requires one owner activation before the bridge may incubate a business candidate", async () => {
+    const bridgeHeaders = { Authorization: `Bearer ${telegramBridgeToken}`, "content-type": "application/json" };
+    const payload = {
+      id: "http-readiness-desk",
+      name: "Repository Readiness Desk",
+      customerProblem: "Small maintainers need a bounded readiness review.",
+      serviceId: "public-repository-readiness-snapshot",
+      publicEvidenceUrls: ["https://github.com/example/repository"],
+      expectedPriceUsd: 149,
+      estimatedDeliveryCostUsd: 3,
+    };
+    assert.equal((await fetch(`${baseUrl}/api/bridge/actions/business-candidates`, {
+      method: "POST",
+      headers: bridgeHeaders,
+      body: JSON.stringify(payload),
+    })).status, 403);
+    assert.equal((await fetch(`${baseUrl}/api/autonomy/standing-mandate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    })).status, 401);
+    const activated = await fetch(`${baseUrl}/api/autonomy/standing-mandate`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(activated.status, 201);
+    const mandate = await activated.json() as { id: string; maximumDailyActions: number; maximumCostPerActionUsd: number };
+    assert.equal(mandate.maximumDailyActions, 10);
+    assert.equal(mandate.maximumCostPerActionUsd, 0);
+    const candidate = await fetch(`${baseUrl}/api/bridge/actions/business-candidates`, {
+      method: "POST",
+      headers: bridgeHeaders,
+      body: JSON.stringify(payload),
+    });
+    assert.equal(candidate.status, 201);
+    assert.equal((await candidate.json() as { stage: string }).stage, "SHADOW");
+    const status = await fetch(`${baseUrl}/api/status`, { headers: { Authorization: `Bearer ${token}` } });
+    const ownerState = await status.json() as { businessCandidates: Array<{ id: string }>; standingMandate: { id: string } };
+    assert.equal(ownerState.standingMandate.id, mandate.id);
+    assert.ok(ownerState.businessCandidates.some(({ id }) => id === payload.id));
+  });
+
   it("rejects unauthenticated promotion and accepts target-bound owner approval", async () => {
     const unauthenticated = await fetch(`${baseUrl}/api/mutations/${mutationId}/promote`, {
       method: "POST",

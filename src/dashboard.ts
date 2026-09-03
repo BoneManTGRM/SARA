@@ -766,6 +766,18 @@ export const DASHBOARD_HTML = `<!doctype html>
             <span class="card-number">01.09</span>
             <div class="card-pad directive-layout">
               <div>
+                <div class="card-label">Exception-only autonomy</div>
+                <div class="card-value small">Routine work without routine approvals.</div>
+                <p class="card-copy">A 30-day standing mandate can cover public research, business candidates, inbound replies, scheduling, and bounded outreach for the fixed service. Connectors must still be configured, and protected actions remain owner-only.</p>
+              </div>
+              <div class="commerce-list" id="autonomy-list"><div class="mutation-empty">Owner state locked</div></div>
+            </div>
+          </article>
+
+          <article class="card span-12 directive-card">
+            <span class="card-number">01.10</span>
+            <div class="card-pad directive-layout">
+              <div>
                 <div class="card-label">Owner directive channel</div>
                 <div class="card-value small">Tell SARA what outcome you need.</div>
                 <p class="card-copy">After owner authentication, a directive becomes a bounded job with explicit evidence and a hard budget. SARA may work autonomously inside that scope; protected actions still require you.</p>
@@ -794,7 +806,7 @@ export const DASHBOARD_HTML = `<!doctype html>
           </article>
 
           <article class="card span-12 emergency">
-            <span class="card-number">01.10</span>
+            <span class="card-number">01.11</span>
             <div class="card-pad">
               <div class="card-label">Constitutional emergency stop</div>
               <div class="card-value small">Owner remains above the machine.</div>
@@ -985,6 +997,47 @@ export const DASHBOARD_HTML = `<!doctype html>
       }
     }
 
+    function renderAutonomy(state) {
+      const container = document.querySelector('#autonomy-list');
+      container.replaceChildren();
+      const mandate = state.standingMandate;
+      const active = mandate && !mandate.revokedAt && Date.parse(mandate.expiresAt) > Date.now();
+      const row = document.createElement('div');
+      row.className = 'commerce-row';
+      const title = document.createElement('strong');
+      title.textContent = active ? 'Standing mandate active' : 'Standing mandate inactive';
+      const detail = document.createElement('small');
+      detail.textContent = active
+        ? 'Expires ' + mandate.expiresAt + ' · max 10 actions/day · concurrency 1 · $0/action · exceptions ' + (state.autonomyExceptions || []).length
+        : 'No routine external action may proceed automatically. Protected actions always remain owner-only.';
+      const actions = document.createElement('div');
+      actions.className = 'commerce-actions';
+      if (active) {
+        actions.append(commerceButton('Revoke standing mandate', async () => {
+          if (!window.confirm('Revoke routine autonomy immediately?')) return;
+          try {
+            await ownerPost('/api/autonomy/standing-mandate/revoke', { mandateId: mandate.id, reason: 'Owner revoked the standing mandate.' });
+            await loadPrivateState();
+          } catch (error) { setMessage(error.message, true); }
+        }));
+      } else {
+        actions.append(commerceButton('Activate 30-day routine mandate', async () => {
+          if (!window.confirm('Allow only the listed routine actions for 30 days, at $0 per action, maximum 10 daily and one at a time?')) return;
+          try {
+            await ownerPost('/api/autonomy/standing-mandate', {});
+            await loadPrivateState();
+          } catch (error) { setMessage(error.message, true); }
+        }));
+      }
+      row.append(title, detail, actions);
+      container.append(row);
+      const boundary = document.createElement('div');
+      boundary.className = 'commerce-row';
+      const connectors = state.automation?.connectors || {};
+      boundary.textContent = 'Connectors — email: ' + (connectors.email || 'unknown') + ' · calendar: ' + (connectors.calendar || 'unknown') + ' · WhatsApp: ' + (connectors.whatsapp || 'unknown') + '. Always blocked: money movement, account creation, credentials, impersonation, prohibited platform automation. Custom contracts require exact owner approval.';
+      container.append(boundary);
+    }
+
     async function loadPrivateState() {
       const response = await fetch('/api/status', { headers: auth() });
       if (!response.ok) {
@@ -1010,6 +1063,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       document.querySelector('#audit-head').textContent = state.audit.headHash || 'Genesis state · no audit head';
       renderMutations(state.mutations);
       renderCommerce(state);
+      renderAutonomy(state);
       const stop = document.querySelector('#stop');
       stop.disabled = false;
       stop.textContent = state.emergencyStopped ? 'Release stop' : 'Engage stop';
