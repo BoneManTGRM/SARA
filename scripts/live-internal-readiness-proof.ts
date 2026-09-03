@@ -91,8 +91,19 @@ async function buildConnectorVerifiedPinnedSnapshot(): Promise<PublicRepositoryE
       sourceTruncated: source.sourceTruncated,
     });
   }
-  if (sampledFiles.length !== PROOF_SAMPLE_PATHS.length || sampledBytes !== MAX_TOTAL_SOURCE_BYTES) {
+  if (
+    sampledFiles.length !== PROOF_SAMPLE_PATHS.length ||
+    sampledBytes < 1 ||
+    sampledBytes > MAX_TOTAL_SOURCE_BYTES ||
+    sampledFiles.some((file) => !file.sourceText)
+  ) {
     throw new Error("The pinned proof evidence packet did not reach its expected bounded source coverage.");
+  }
+  const incompleteWorkflow = sampledFiles.find((file) =>
+    file.path.startsWith(".github/workflows/") && file.sourceTruncated
+  );
+  if (incompleteWorkflow) {
+    throw new Error(`Pinned proof workflow evidence was truncated: ${incompleteWorkflow.path}.`);
   }
   return {
     schemaVersion: 1,
