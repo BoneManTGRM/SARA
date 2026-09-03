@@ -153,6 +153,24 @@ export type SkillTestVector = {
   expected: unknown;
 };
 
+export type OperationalSkillSource = {
+  kind: "repository" | "paper" | "experiment";
+  uri: string;
+  immutableRevision: string;
+  contentSha256: string;
+  licenseSpdx: string;
+  licenseEvidenceUri: string;
+  attribution: string;
+};
+
+export type OperationalSkillMetadata = {
+  schemaVersion: 1;
+  skillId: string;
+  activationTerms: string[];
+  knownFailureModes: string[];
+  sources: OperationalSkillSource[];
+};
+
 export type SkillCandidateProposal = {
   schemaVersion: 1;
   candidateKind?: "pure_skill";
@@ -161,6 +179,7 @@ export type SkillCandidateProposal = {
   source: string;
   tests: SkillTestVector[];
   limitations: string[];
+  operational?: OperationalSkillMetadata;
 };
 
 export type ProgramCandidateFile = {

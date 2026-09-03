@@ -265,6 +265,16 @@ async function handleAuthenticatedRequest(
     }));
     return;
   }
+  if (request.method === "GET" && url.pathname === "/api/operational-skills") {
+    const rawQuery = url.searchParams.get("query")?.trim();
+    const query = rawQuery ? boundedText(rawQuery, 2, 1_000, "query") : null;
+    const catalog = await kernel.inspectOperationalSkills();
+    json(response, 200, {
+      ...catalog,
+      routes: query ? await kernel.routeOperationalSkillContext(query) : [],
+    });
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/api/revenue-pilot/services") {
     json(response, 200, listRevenueServices());
     return;
@@ -467,6 +477,7 @@ async function routeSaraRequest(
         ownerAssistantConfigured: Boolean(options.ownerAssistant),
       }),
       services: listRevenueServices(),
+      operationalSkills: await kernel.inspectOperationalSkills(),
     });
     return;
   }

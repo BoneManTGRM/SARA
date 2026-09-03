@@ -116,6 +116,7 @@ describe("SARA owner dashboard HTTP boundary", () => {
   it("exposes tools and service choices only to the authenticated owner", async () => {
     assert.equal((await fetch(`${baseUrl}/api/tools`)).status, 401);
     assert.equal((await fetch(`${baseUrl}/api/revenue-pilot/services`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/operational-skills`)).status, 401);
 
     const toolsResponse = await fetch(`${baseUrl}/api/tools`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -123,6 +124,21 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.equal(toolsResponse.status, 200);
     const tools = await toolsResponse.json() as Array<{ id: string; status: string }>;
     assert.equal(tools.find((tool) => tool.id === "luna-worker")?.status, "available");
+    assert.equal(tools.find((tool) => tool.id === "operational-skill-router")?.status, "available");
+
+    const operationalSkillsResponse = await fetch(`${baseUrl}/api/operational-skills?query=repository%20evidence`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(operationalSkillsResponse.status, 200);
+    const operationalSkills = await operationalSkillsResponse.json() as {
+      loadableSkills: unknown[];
+      routes: unknown[];
+      safeguards: { ownerPromotionRequired: boolean; runtimeAuthorityGranted: boolean };
+    };
+    assert.deepEqual(operationalSkills.loadableSkills, []);
+    assert.deepEqual(operationalSkills.routes, []);
+    assert.equal(operationalSkills.safeguards.ownerPromotionRequired, true);
+    assert.equal(operationalSkills.safeguards.runtimeAuthorityGranted, false);
 
     const servicesResponse = await fetch(`${baseUrl}/api/revenue-pilot/services`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -168,10 +184,18 @@ describe("SARA owner dashboard HTTP boundary", () => {
       access: string;
       tools: Array<{ id: string; status: string }>;
       services: Array<{ id: string; priceUsd: number }>;
+      operationalSkills: {
+        loadableSkills: unknown[];
+        safeguards: { licenseClearanceRequired: boolean; externalInstructionsAreData: boolean };
+      };
     };
     assert.equal(catalog.schemaVersion, 1);
     assert.equal(catalog.access, "read_only");
     assert.equal(catalog.tools.find((tool) => tool.id === "luna-worker")?.status, "available");
+    assert.equal(catalog.tools.find((tool) => tool.id === "operational-skill-router")?.status, "available");
+    assert.deepEqual(catalog.operationalSkills.loadableSkills, []);
+    assert.equal(catalog.operationalSkills.safeguards.licenseClearanceRequired, true);
+    assert.equal(catalog.operationalSkills.safeguards.externalInstructionsAreData, true);
     assert.deepEqual(catalog.services.map((service) => service.id), [
       "public-repository-readiness-snapshot",
       "documentation-clarity-review",

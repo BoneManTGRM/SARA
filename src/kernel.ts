@@ -21,6 +21,14 @@ import {
 } from "./economics.ts";
 import { evaluatePolicy, PolicyDeniedError } from "./policy.ts";
 import {
+  catalogOperationalSkills,
+  operationalSkillRecordFromManifest,
+  routeOperationalSkills,
+  type OperationalSkillCatalog,
+  type OperationalSkillRecord,
+  type OperationalSkillRoute,
+} from "./operational-skills.ts";
+import {
   executeWorkerModelTask,
   planWorkerModelTask,
   WorkerModelExecutionError,
@@ -593,6 +601,44 @@ export class SaraKernel {
   async recallMemory(input: MemoryRecallQuery): Promise<MemoryRecall> {
     const state = await this.state();
     return recallMemories(state.memories, input);
+  }
+
+  private async operationalSkillRecords(): Promise<{
+    records: OperationalSkillRecord[];
+    invalidArtifacts: number;
+  }> {
+    const state = await this.state();
+    const records: OperationalSkillRecord[] = [];
+    let invalidArtifacts = 0;
+    for (const mutation of state.mutations) {
+      if (!mutation.artifactRelativePath) continue;
+      try {
+        await verifyGenomeLabArtifact(
+          this.#store.stateDirectory,
+          mutation.artifactRelativePath,
+          mutation.candidateDigest,
+        );
+        const parts = mutation.artifactRelativePath.split(/[\\/]/u);
+        const manifest = JSON.parse(
+          await readFile(join(this.#store.stateDirectory, parts[0]!, parts[1]!, "manifest.json"), "utf8"),
+        ) as unknown;
+        const record = operationalSkillRecordFromManifest(manifest, mutation);
+        if (record) records.push(record);
+      } catch {
+        invalidArtifacts += 1;
+      }
+    }
+    return { records, invalidArtifacts };
+  }
+
+  async inspectOperationalSkills(): Promise<OperationalSkillCatalog> {
+    const { records, invalidArtifacts } = await this.operationalSkillRecords();
+    return catalogOperationalSkills(records, invalidArtifacts);
+  }
+
+  async routeOperationalSkillContext(query: string, limit = 5): Promise<OperationalSkillRoute[]> {
+    const { records } = await this.operationalSkillRecords();
+    return routeOperationalSkills(records, query, limit);
   }
 
   recordLedgerEntry(principal: Principal, input: Omit<LedgerEntry, "id">): Promise<LedgerEntry> {

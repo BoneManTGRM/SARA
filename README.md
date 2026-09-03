@@ -10,6 +10,8 @@ The complete revenue-gated design is preserved in [the definitive master plan](d
 
 The first bounded commercial implementation is documented in [the $50 revenue pilot](docs/REVENUE_PILOT_50.md). It adds a durable, deduplicated opportunity queue; a fixed catalog of four `$79–$149` public-repository services; zero-cost skill-gap work cards; collected-revenue and owner-approval gates; expiring worker leases; anonymous read-only GitHub evidence pinned to an immutable commit; typed role packets; independent verification; and an owner-review delivery stop. Its bounded multi-model seam uses GPT-5.6 Luna as the cheapest paid default and Gemini 3.8 Flash only as a policy-constrained fallback/challenger. It does not activate paid infrastructure or external commercial authority.
 
+The [operational-skill layer](docs/OPERATIONAL_SKILL_LAYER.md) adds a proprietary SARA implementation of progressive skill routing. Repository-derived, paper-derived, and experiment-derived candidates must retain immutable source and license evidence, pass existing isolated Genome Lab checks, and stop at SHADOW. Only an exact owner-approved promotion makes a candidate loadable, and routing grants no execution, credential, spending, deployment, contact, or delivery authority. No third-party skill collection is bundled or bulk-imported.
+
 ## Bootstrap economics
 
 - New monthly recurring-cost target: **$0**

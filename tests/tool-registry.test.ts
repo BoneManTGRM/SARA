@@ -10,6 +10,7 @@ describe("SARA governed tool registry", () => {
     assert.ok(ids.includes("luna-worker"));
     assert.ok(ids.includes("public-github-evidence"));
     assert.ok(ids.includes("genome-lab-program-builder"));
+    assert.ok(ids.includes("operational-skill-router"));
     assert.equal(tools.find((tool) => tool.id === "luna-worker")?.status, "available");
     assert.equal(tools.find((tool) => tool.id === "bounded-owner-analyst")?.status, "available");
     assert.ok(tools.every((tool) => tool.prohibitedActions.includes("customer delivery")));
