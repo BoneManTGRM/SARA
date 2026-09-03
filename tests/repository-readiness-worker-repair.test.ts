@@ -146,4 +146,36 @@ describe("repository-readiness worker local repair", () => {
     assert.equal(report.findings.length, 1);
     assert.equal(report.findings[0].evidenceUrl, `${permalink}#L3`);
   });
+
+  it("omits a finding whose line range is outside the visible sampled source", () => {
+    const outputText = JSON.stringify({
+      categoryEvidence: [
+        { category: "code", note: "Bounded source reviewed." },
+        { category: "dependencies", note: "Bounded manifest reviewed." },
+        { category: "secret_exposure", note: "Bounded visible text reviewed." },
+        { category: "release_controls", note: "Bounded workflow reviewed." },
+      ],
+      findings: [{
+        id: "unsupported-range",
+        category: "dependencies",
+        priority: "low",
+        confidence: "tentative",
+        title: "Unsupported range",
+        observation: "The requested line is not visible.",
+        recommendation: "Collect more evidence before making this claim.",
+        evidenceFileIndex: 0,
+        evidenceLineStart: 99,
+        evidenceLineEnd: 99,
+      }],
+      evidenceLimitations: [],
+    });
+
+    const report = compileRepositoryReadinessWorkerOutput({ outputText, snapshot });
+
+    assert.equal(report.status, "ready_for_owner_review");
+    assert.deepEqual(report.findings, []);
+    assert.ok(report.limitations.includes(
+      "SARA deterministically omitted 1 unsupported finding because the model did not bind it to a category-eligible sampled file and visible line range; no finding evidence was invented.",
+    ));
+  });
 });

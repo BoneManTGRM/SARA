@@ -90,31 +90,42 @@ function resolveIndexedCategoryEvidence(
 function resolveIndexedFindings(
   value: unknown,
   snapshot: PublicRepositoryEvidenceSnapshot,
-): unknown {
-  if (!Array.isArray(value)) return value;
-  return value.map((record) => {
-    if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+): { findings: unknown; omittedCount: number } {
+  if (!Array.isArray(value)) return { findings: value, omittedCount: 0 };
+  let omittedCount = 0;
+  const findings = value.flatMap((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return [record];
     const candidate = record as Record<string, unknown>;
-    if (!("evidenceFileIndex" in candidate)) return record;
-    const file = sampledFileAt(snapshot, candidate.evidenceFileIndex, "Finding evidenceFileIndex");
+    if (!("evidenceFileIndex" in candidate)) return [record];
+    const fileIndex = candidate.evidenceFileIndex;
     const firstLine = candidate.evidenceLineStart;
     const lastLine = candidate.evidenceLineEnd;
     if (
+      !Number.isInteger(fileIndex) ||
+      (fileIndex as number) < 0 ||
+      (fileIndex as number) >= snapshot.sampledFiles.length ||
       !Number.isInteger(firstLine) ||
       !Number.isInteger(lastLine) ||
       (firstLine as number) < 1 ||
       (lastLine as number) < (firstLine as number)
     ) {
-      throw new Error("Finding evidence lines must be positive integers in ascending order.");
+      omittedCount += 1;
+      return [];
     }
+    if (!eligibleCategoryIndexes(snapshot, candidate.category).includes(fileIndex as number)) {
+      omittedCount += 1;
+      return [];
+    }
+    const file = sampledFileAt(snapshot, fileIndex, "Finding evidenceFileIndex");
     const visibleLineCount = file.sourceText.split(/\r?\n/u).length;
     if ((lastLine as number) > visibleLineCount) {
-      throw new Error("Finding evidence line range must exist in the sampled source text.");
+      omittedCount += 1;
+      return [];
     }
     const anchor = firstLine === lastLine
       ? `#L${firstLine as number}`
       : `#L${firstLine as number}-L${lastLine as number}`;
-    return {
+    return [{
       id: candidate.id,
       category: candidate.category,
       priority: candidate.priority,
@@ -123,8 +134,9 @@ function resolveIndexedFindings(
       observation: candidate.observation,
       recommendation: candidate.recommendation,
       evidenceUrl: `${file.permalink}${anchor}`,
-    };
+    }];
   });
+  return { findings, omittedCount };
 }
 
 function repairCategoryEvidenceNotes(value: unknown): {
@@ -160,6 +172,10 @@ function categoryNoteRepairLimitation(repairedCount: number): string {
   return `SARA deterministically replaced ${repairedCount} missing or malformed category evidence ${repairedCount === 1 ? "note" : "notes"}; no evidence URL, finding, priority, confidence, or recommendation was invented.`;
 }
 
+function findingOmissionLimitation(omittedCount: number): string {
+  return `SARA deterministically omitted ${omittedCount} unsupported ${omittedCount === 1 ? "finding" : "findings"} because the model did not bind ${omittedCount === 1 ? "it" : "them"} to a category-eligible sampled file and visible line range; no finding evidence was invented.`;
+}
+
 function workerDraft(
   outputText: string,
   snapshot: PublicRepositoryEvidenceSnapshot,
@@ -188,12 +204,13 @@ function workerDraft(
     ? [
       ...(draft.evidenceLimitations as readonly string[]),
       ...(resolvedCategory.derived ? [CATEGORY_BINDING_LIMITATION] : []),
+      ...(resolvedFindings.omittedCount > 0 ? [findingOmissionLimitation(resolvedFindings.omittedCount)] : []),
       ...(repaired.repairedCount > 0 ? [categoryNoteRepairLimitation(repaired.repairedCount)] : []),
     ]
     : draft.evidenceLimitations as RepositoryReadinessReportInput["evidenceLimitations"];
   return {
     categoryEvidence: repaired.categoryEvidence,
-    findings: resolvedFindings as RepositoryReadinessReportInput["findings"],
+    findings: resolvedFindings.findings as RepositoryReadinessReportInput["findings"],
     evidenceLimitations,
   };
 }
