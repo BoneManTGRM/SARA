@@ -78,4 +78,54 @@ describe("repository-readiness worker local repair", () => {
       "SARA deterministically replaced 1 missing or malformed category evidence note; no evidence URL, finding, priority, confidence, or recommendation was invented.",
     ));
   });
+
+  it("constructs exact immutable evidence URLs from bounded sampled-file indexes and visible line numbers", () => {
+    const outputText = JSON.stringify({
+      categoryEvidence: [
+        {
+          category: "code",
+          status: "reviewed",
+          evidenceFileIndexes: [0],
+          note: "The sampled package manifest declares the package private.",
+        },
+        {
+          category: "dependencies",
+          status: "reviewed",
+          evidenceFileIndexes: [0],
+          note: "Dependency evidence is limited to the sampled package manifest.",
+        },
+        {
+          category: "secret_exposure",
+          status: "reviewed",
+          evidenceFileIndexes: [0],
+          note: "Secret-exposure review is limited to the sampled public text.",
+        },
+        {
+          category: "release_controls",
+          status: "reviewed",
+          evidenceFileIndexes: [0],
+          note: "Release-control review is limited to the sampled public text.",
+        },
+      ],
+      findings: [{
+        id: "package-is-private",
+        category: "code",
+        priority: "low",
+        confidence: "confirmed",
+        title: "Package publication is disabled",
+        observation: "The package manifest marks this package private.",
+        recommendation: "Keep the private flag unless public package publication is intended.",
+        evidenceFileIndex: 0,
+        evidenceLineStart: 3,
+        evidenceLineEnd: 3,
+      }],
+      evidenceLimitations: ["Only one bounded public file was sampled."],
+    });
+
+    const report = compileRepositoryReadinessWorkerOutput({ outputText, snapshot });
+
+    assert.equal(report.status, "ready_for_owner_review");
+    assert.equal(report.findings.length, 1);
+    assert.equal(report.findings[0].evidenceUrl, `${permalink}#L3`);
+  });
 });
