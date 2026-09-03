@@ -145,13 +145,15 @@ export function compileRepositoryReadinessReport(
   const repository = canonicalRepository(input.repository);
   const immutableCommitSha = input.immutableCommitSha.toLowerCase();
   if (!COMMIT_SHA.test(immutableCommitSha)) throw new Error("immutableCommitSha must be a 40-character SHA.");
-  if (!Array.isArray(input.categoryEvidence) || input.categoryEvidence.length !== CATEGORIES.length) {
+  if (!Array.isArray(input.categoryEvidence as unknown) || input.categoryEvidence.length !== CATEGORIES.length) {
     throw new Error("Exactly one evidence record is required for each readiness category.");
   }
-  if (!Array.isArray(input.findings) || input.findings.length > 20) {
+  if (!Array.isArray(input.findings as unknown) || input.findings.length > 20) {
     throw new Error("findings must contain at most 20 items.");
   }
-  if (!Array.isArray(input.evidenceLimitations)) throw new TypeError("evidenceLimitations must be an array.");
+  if (!Array.isArray(input.evidenceLimitations as unknown)) {
+    throw new TypeError("evidenceLimitations must be an array.");
+  }
 
   const seenCategories = new Set<ReadinessCategory>();
   const categoryEvidence = input.categoryEvidence.map((record) => {
@@ -161,7 +163,7 @@ export function compileRepositoryReadinessReport(
     if (record.status !== "reviewed" && record.status !== "unavailable") {
       throw new Error(`Evidence status for ${record.category} is invalid.`);
     }
-    if (!Array.isArray(record.evidenceUrls)) throw new TypeError("evidenceUrls must be an array.");
+    if (!Array.isArray(record.evidenceUrls as unknown)) throw new TypeError("evidenceUrls must be an array.");
     const evidenceUrls = [...new Set(record.evidenceUrls.map((url) =>
       validateEvidenceUrl(url, repository, immutableCommitSha, false)
     ))].sort(compareText);
