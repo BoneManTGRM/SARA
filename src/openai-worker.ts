@@ -1,5 +1,124 @@
 import type { WorkerModelClient } from "./model-router.ts";
 
+const SAFE_RESPONSE_STATUSES = new Set([
+  "cancelled",
+  "completed",
+  "failed",
+  "in_progress",
+  "incomplete",
+  "queued",
+]);
+const SAFE_INCOMPLETE_REASONS = new Set(["content_filter", "max_output_tokens"]);
+const READINESS_DELIVERY_CONTRACT = "OUTPUT CONTRACT: Return only one JSON object without Markdown fences.";
+
+const REPOSITORY_READINESS_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["categoryEvidence", "findings", "evidenceLimitations"],
+  properties: {
+    categoryEvidence: {
+      type: "array",
+      minItems: 4,
+      maxItems: 4,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["category", "status", "evidenceFileIndexes", "note"],
+        properties: {
+          category: {
+            type: "string",
+            enum: ["code", "dependencies", "secret_exposure", "release_controls"],
+          },
+          status: { type: "string", enum: ["reviewed", "unavailable"] },
+          evidenceFileIndexes: {
+            type: "array",
+            maxItems: 8,
+            items: { type: "integer", minimum: 0, maximum: 63 },
+          },
+          note: { type: "string", minLength: 1, maxLength: 500 },
+        },
+      },
+    },
+    findings: {
+      type: "array",
+      maxItems: 20,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "category",
+          "priority",
+          "confidence",
+          "title",
+          "observation",
+          "recommendation",
+          "evidenceFileIndex",
+          "evidenceLineStart",
+          "evidenceLineEnd",
+        ],
+        properties: {
+          id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
+          category: {
+            type: "string",
+            enum: ["code", "dependencies", "secret_exposure", "release_controls"],
+          },
+          priority: { type: "string", enum: ["urgent", "high", "medium", "low"] },
+          confidence: { type: "string", enum: ["confirmed", "supported", "tentative"] },
+          title: { type: "string", minLength: 1, maxLength: 500 },
+          observation: { type: "string", minLength: 1, maxLength: 500 },
+          recommendation: { type: "string", minLength: 1, maxLength: 500 },
+          evidenceFileIndex: { type: "integer", minimum: 0, maximum: 63 },
+          evidenceLineStart: { type: "integer", minimum: 1, maximum: 100000 },
+          evidenceLineEnd: { type: "integer", minimum: 1, maximum: 100000 },
+        },
+      },
+    },
+    evidenceLimitations: {
+      type: "array",
+      items: { type: "string", minLength: 1, maxLength: 500 },
+    },
+  },
+} as const;
+
+type OpenAITextFormat = {
+  format: {
+    type: "json_schema";
+    name: "sara_repository_readiness_report_v2";
+    strict: true;
+    schema: typeof REPOSITORY_READINESS_JSON_SCHEMA;
+  };
+};
+
+function responseTextFormat(prompt: string): OpenAITextFormat | undefined {
+  if (!prompt.includes(READINESS_DELIVERY_CONTRACT)) return undefined;
+  return {
+    format: {
+      type: "json_schema",
+      name: "sara_repository_readiness_report_v2",
+      strict: true,
+      schema: REPOSITORY_READINESS_JSON_SCHEMA,
+    },
+  };
+}
+
+function safeResponseCompletionError(body: Record<string, unknown>): Error {
+  const status = typeof body.status === "string" && SAFE_RESPONSE_STATUSES.has(body.status)
+    ? body.status
+    : "unknown";
+  let reason: string | null = null;
+  if (
+    status === "incomplete" &&
+    body.incomplete_details &&
+    typeof body.incomplete_details === "object" &&
+    !Array.isArray(body.incomplete_details)
+  ) {
+    const candidate = (body.incomplete_details as Record<string, unknown>).reason;
+    if (typeof candidate === "string" && SAFE_INCOMPLETE_REASONS.has(candidate)) reason = candidate;
+  }
+  return new Error(`OpenAI response ended with status ${status}${reason ? `: ${reason}` : ""}.`);
+}
+
 export class OpenAIResponsesClient implements WorkerModelClient {
   readonly routeKey = "openai:gpt-5.6-luna:paid";
   readonly maximumWallTimeMs: number;
@@ -24,29 +143,62 @@ export class OpenAIResponsesClient implements WorkerModelClient {
   }
 
   async countInputTokens(prompt: string): Promise<number> {
-    return Buffer.byteLength(prompt, "utf8");
+    if (!prompt.trim()) throw new Error("A non-empty OpenAI prompt is required for token counting.");
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
+    let response: Response;
+    try {
+      const text = responseTextFormat(prompt);
+      response = await this.#fetch("https://api.openai.com/v1/responses/input_tokens", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${this.#apiKey}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "gpt-5.6-luna",
+          input: prompt,
+          ...(text ? { text } : {}),
+        }),
+        signal: controller.signal,
+      });
+    } catch {
+      throw new Error("OpenAI token count request failed before a response was received.");
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!response.ok) throw new Error(`OpenAI token count request failed with status ${response.status}.`);
+
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new Error("OpenAI returned an invalid token count response.");
+    }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("OpenAI returned a malformed token count response.");
+    }
+    const inputTokens = (payload as Record<string, unknown>).input_tokens;
+    if (!Number.isInteger(inputTokens) || (inputTokens as number) < 0) {
+      throw new Error("OpenAI returned malformed input token accounting.");
+    }
+    return inputTokens as number;
   }
 
   async execute(input: {
     prompt: string;
     reasoningLevel: "low" | "medium" | "high";
     maximumOutputTokens: number;
-    structuredOutput?: {
-      name: string;
-      schema: Record<string, unknown>;
-    };
   }): Promise<{ outputText: string; inputTokens: number; billableOutputTokens: number }> {
     if (!input.prompt.trim()) throw new Error("A non-empty OpenAI prompt is required.");
     if (!Number.isInteger(input.maximumOutputTokens) || input.maximumOutputTokens < 1) {
       throw new RangeError("OpenAI maximumOutputTokens must be a positive integer.");
     }
-    if (input.structuredOutput && !/^[A-Za-z0-9_-]{1,64}$/u.test(input.structuredOutput.name)) {
-      throw new Error("OpenAI structured-output name is invalid.");
-    }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
     let response: Response;
     try {
+      const text = responseTextFormat(input.prompt);
       response = await this.#fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: {
@@ -59,18 +211,7 @@ export class OpenAIResponsesClient implements WorkerModelClient {
           store: false,
           max_output_tokens: input.maximumOutputTokens,
           reasoning: { effort: input.reasoningLevel },
-          ...(input.structuredOutput
-            ? {
-              text: {
-                format: {
-                  type: "json_schema",
-                  name: input.structuredOutput.name,
-                  strict: true,
-                  schema: input.structuredOutput.schema,
-                },
-              },
-            }
-            : {}),
+          ...(text ? { text } : {}),
         }),
         signal: controller.signal,
       });
@@ -91,7 +232,7 @@ export class OpenAIResponsesClient implements WorkerModelClient {
       throw new Error("OpenAI returned a malformed response.");
     }
     const body = payload as Record<string, unknown>;
-    if (body.status !== "completed") throw new Error("OpenAI did not complete the response.");
+    if (body.status !== "completed") throw safeResponseCompletionError(body);
     const output = Array.isArray(body.output) ? body.output : [];
     const text = output.flatMap((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return [];
