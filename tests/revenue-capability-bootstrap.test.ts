@@ -79,7 +79,7 @@ describe("versioned production revenue capability migration", () => {
     const stronger = await SaraKernel.boot({ stateDirectory: strongerDirectory, ownerTokenSha256: sha256("capability-owner") });
     await stronger.registerCapability(SARA_PRINCIPAL, {
       ...candidate!,
-      registration: { ...candidate!.registration!, evidenceVersion: 2 },
+      registration: { ...candidate!.registration!, evidenceVersion: REVENUE_CAPABILITY_EVIDENCE_VERSION + 1 },
     });
     const preserved = await SaraKernel.boot({
       stateDirectory: strongerDirectory,
@@ -88,7 +88,31 @@ describe("versioned production revenue capability migration", () => {
     });
     assert.equal(
       (await preserved.getStatus()).capabilities.find(({ id }) => id === candidate!.id)?.registration?.evidenceVersion,
-      2,
+      REVENUE_CAPABILITY_EVIDENCE_VERSION + 1,
     );
+  });
+
+  it("upgrades the previous production evidence version after implementation changes", async () => {
+    const stateDirectory = await directory();
+    const base = await SaraKernel.boot({ stateDirectory, ownerTokenSha256: sha256("capability-owner") });
+    const [candidate] = await verifiedRevenueCapabilities();
+    await base.registerCapability(SARA_PRINCIPAL, {
+      ...candidate!,
+      registration: {
+        ...candidate!.registration!,
+        evidenceVersion: REVENUE_CAPABILITY_EVIDENCE_VERSION - 1,
+        implementationDigest: "a".repeat(64),
+        evidenceDigest: "b".repeat(64),
+      },
+    });
+
+    const migrated = await SaraKernel.boot({
+      stateDirectory,
+      ownerTokenSha256: sha256("capability-owner"),
+      bootstrapRevenueCapabilities: true,
+    });
+    const upgraded = (await migrated.getStatus()).capabilities.find(({ id }) => id === candidate!.id);
+    assert.equal(upgraded?.registration?.evidenceVersion, REVENUE_CAPABILITY_EVIDENCE_VERSION);
+    assert.equal(upgraded?.registration?.implementationDigest, candidate!.registration?.implementationDigest);
   });
 });
