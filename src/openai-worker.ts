@@ -9,6 +9,93 @@ const SAFE_RESPONSE_STATUSES = new Set([
   "queued",
 ]);
 const SAFE_INCOMPLETE_REASONS = new Set(["content_filter", "max_output_tokens"]);
+const READINESS_DELIVERY_CONTRACT = "OUTPUT CONTRACT: Return only one JSON object without Markdown fences.";
+
+const REPOSITORY_READINESS_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["categoryEvidence", "findings", "evidenceLimitations"],
+  properties: {
+    categoryEvidence: {
+      type: "array",
+      minItems: 4,
+      maxItems: 4,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["category", "status", "evidenceUrls", "note"],
+        properties: {
+          category: {
+            type: "string",
+            enum: ["code", "dependencies", "secret_exposure", "release_controls"],
+          },
+          status: { type: "string", enum: ["reviewed", "unavailable"] },
+          evidenceUrls: {
+            type: "array",
+            items: { type: "string", minLength: 1 },
+          },
+          note: { type: "string", minLength: 1, maxLength: 500 },
+        },
+      },
+    },
+    findings: {
+      type: "array",
+      maxItems: 20,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "category",
+          "priority",
+          "confidence",
+          "title",
+          "observation",
+          "recommendation",
+          "evidenceUrl",
+        ],
+        properties: {
+          id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
+          category: {
+            type: "string",
+            enum: ["code", "dependencies", "secret_exposure", "release_controls"],
+          },
+          priority: { type: "string", enum: ["urgent", "high", "medium", "low"] },
+          confidence: { type: "string", enum: ["confirmed", "supported", "tentative"] },
+          title: { type: "string", minLength: 1, maxLength: 500 },
+          observation: { type: "string", minLength: 1, maxLength: 500 },
+          recommendation: { type: "string", minLength: 1, maxLength: 500 },
+          evidenceUrl: { type: "string", minLength: 1 },
+        },
+      },
+    },
+    evidenceLimitations: {
+      type: "array",
+      items: { type: "string", minLength: 1, maxLength: 500 },
+    },
+  },
+} as const;
+
+type OpenAITextFormat = {
+  format: {
+    type: "json_schema";
+    name: "sara_repository_readiness_report_v1";
+    strict: true;
+    schema: typeof REPOSITORY_READINESS_JSON_SCHEMA;
+  };
+};
+
+function responseTextFormat(prompt: string): OpenAITextFormat | undefined {
+  if (!prompt.includes(READINESS_DELIVERY_CONTRACT)) return undefined;
+  return {
+    format: {
+      type: "json_schema",
+      name: "sara_repository_readiness_report_v1",
+      strict: true,
+      schema: REPOSITORY_READINESS_JSON_SCHEMA,
+    },
+  };
+}
 
 function safeResponseCompletionError(body: Record<string, unknown>): Error {
   const status = typeof body.status === "string" && SAFE_RESPONSE_STATUSES.has(body.status)
@@ -56,6 +143,7 @@ export class OpenAIResponsesClient implements WorkerModelClient {
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
     let response: Response;
     try {
+      const text = responseTextFormat(prompt);
       response = await this.#fetch("https://api.openai.com/v1/responses/input_tokens", {
         method: "POST",
         headers: {
@@ -65,6 +153,7 @@ export class OpenAIResponsesClient implements WorkerModelClient {
         body: JSON.stringify({
           model: "gpt-5.6-luna",
           input: prompt,
+          ...(text ? { text } : {}),
         }),
         signal: controller.signal,
       });
@@ -104,6 +193,7 @@ export class OpenAIResponsesClient implements WorkerModelClient {
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
     let response: Response;
     try {
+      const text = responseTextFormat(input.prompt);
       response = await this.#fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: {
@@ -116,6 +206,7 @@ export class OpenAIResponsesClient implements WorkerModelClient {
           store: false,
           max_output_tokens: input.maximumOutputTokens,
           reasoning: { effort: input.reasoningLevel },
+          ...(text ? { text } : {}),
         }),
         signal: controller.signal,
       });
