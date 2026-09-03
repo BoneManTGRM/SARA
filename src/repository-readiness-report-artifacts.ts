@@ -5,6 +5,7 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import type { PublicRepositoryEvidenceSnapshot } from "./public-repository-evidence.ts";
 import {
   compileRepositoryReadinessReport,
+  type ReadinessCategory,
   type RepositoryReadinessReport,
   type RepositoryReadinessReportInput,
 } from "./repository-readiness-report.ts";
@@ -13,6 +14,10 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const DRAFT_KEYS = ["categoryEvidence", "evidenceLimitations", "findings"] as const;
+const CATEGORY_BINDING_LIMITATION = "SARA deterministically derived category evidence availability and immutable URLs from the bounded sampled-file paths; reviewed means only that eligible sampled evidence was available, not that the category passed or was complete.";
+const DEPENDENCY_PATH = /(?:^|\/)(?:package(?:-lock)?\.json|pnpm-lock\.ya?ml|yarn\.lock|bun\.lockb?|requirements(?:-[^/]+)?\.txt|pyproject\.toml|poetry\.lock|Pipfile(?:\.lock)?|go\.(?:mod|sum)|Cargo\.(?:toml|lock)|pom\.xml|build\.gradle(?:\.kts)?|composer\.(?:json|lock)|Gemfile(?:\.lock)?)$/iu;
+const RELEASE_CONTROL_PATH = /(?:^|\/)(?:\.github\/workflows\/[^/]+\.ya?ml|\.gitlab-ci\.ya?ml|azure-pipelines\.ya?ml|Jenkinsfile|Dockerfile|docker-compose\.ya?ml|Makefile)$/iu;
+const CODE_PATH = /\.(?:c|cc|cpp|cs|go|h|hpp|java|js|jsx|kt|kts|mjs|cjs|php|py|rb|rs|svelte|swift|ts|tsx|vue)$/iu;
 
 export type RepositoryReadinessReportArtifact = {
   schemaVersion: 1;
@@ -47,27 +52,40 @@ function sampledFileAt(
   return snapshot.sampledFiles[value as number]!;
 }
 
+function eligibleCategoryIndexes(
+  snapshot: PublicRepositoryEvidenceSnapshot,
+  category: unknown,
+): number[] {
+  if (category === "secret_exposure") return snapshot.sampledFiles.map((_, index) => index);
+  if (category !== "code" && category !== "dependencies" && category !== "release_controls") return [];
+  const matcher = category === "code"
+    ? CODE_PATH
+    : category === "dependencies"
+      ? DEPENDENCY_PATH
+      : RELEASE_CONTROL_PATH;
+  return snapshot.sampledFiles.flatMap((file, index) => matcher.test(file.path) ? [index] : []);
+}
+
 function resolveIndexedCategoryEvidence(
   value: unknown,
   snapshot: PublicRepositoryEvidenceSnapshot,
-): unknown {
-  if (!Array.isArray(value)) return value;
-  return value.map((record) => {
+): { categoryEvidence: unknown; derived: boolean } {
+  if (!Array.isArray(value)) return { categoryEvidence: value, derived: false };
+  let derived = false;
+  const categoryEvidence = value.map((record) => {
     if (!record || typeof record !== "object" || Array.isArray(record)) return record;
     const candidate = record as Record<string, unknown>;
-    if (!("evidenceFileIndexes" in candidate)) return record;
-    if (!Array.isArray(candidate.evidenceFileIndexes)) {
-      throw new Error("Category evidenceFileIndexes must be an array.");
-    }
+    if (Array.isArray(candidate.evidenceUrls)) return record;
+    derived = true;
+    const indexes = eligibleCategoryIndexes(snapshot, candidate.category);
     return {
       category: candidate.category,
-      status: candidate.status,
-      evidenceUrls: candidate.evidenceFileIndexes.map((index) =>
-        sampledFileAt(snapshot, index, "Category evidenceFileIndex").permalink
-      ),
+      status: indexes.length > 0 ? "reviewed" : "unavailable",
+      evidenceUrls: indexes.map((index) => snapshot.sampledFiles[index]!.permalink),
       note: candidate.note,
     };
   });
+  return { categoryEvidence, derived };
 }
 
 function resolveIndexedFindings(
@@ -164,12 +182,13 @@ function workerDraft(
     throw new Error(`Repository-readiness worker output must contain exactly: ${DRAFT_KEYS.join(", ")}.`);
   }
   const draft = parsed as Record<string, unknown>;
-  const resolvedCategoryEvidence = resolveIndexedCategoryEvidence(draft.categoryEvidence, snapshot);
+  const resolvedCategory = resolveIndexedCategoryEvidence(draft.categoryEvidence, snapshot);
   const resolvedFindings = resolveIndexedFindings(draft.findings, snapshot);
-  const repaired = repairCategoryEvidenceNotes(resolvedCategoryEvidence);
+  const repaired = repairCategoryEvidenceNotes(resolvedCategory.categoryEvidence);
   const evidenceLimitations = Array.isArray(draft.evidenceLimitations)
     ? [
       ...(draft.evidenceLimitations as readonly string[]),
+      ...(resolvedCategory.derived ? [CATEGORY_BINDING_LIMITATION] : []),
       ...(repaired.repairedCount > 0 ? [categoryNoteRepairLimitation(repaired.repairedCount)] : []),
     ]
     : draft.evidenceLimitations as RepositoryReadinessReportInput["evidenceLimitations"];
