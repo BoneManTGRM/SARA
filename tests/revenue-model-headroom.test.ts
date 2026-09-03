@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { planWorkerModelTask, type WorkerTaskKind } from "../src/model-router.ts";
 
-const READINESS_ROLES: readonly Array<{
+const READINESS_ROLES: ReadonlyArray<{
   taskKind: WorkerTaskKind;
   maximumTaskCostUsd: number;
 }> = [
