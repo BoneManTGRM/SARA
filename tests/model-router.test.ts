@@ -156,7 +156,7 @@ describe("bounded routed model execution", () => {
     assert.equal(execution.evidence.provider, "google");
     assert.equal(execution.evidence.model, "gemini-3.8-flash");
     assert.equal(execution.evidence.attemptCount, 2);
-    assert.equal(execution.evidence.accountedCostUsd, 0.0112);
+    assert.equal(execution.evidence.accountedCostUsd, 0.034);
     assert.equal(execution.evidence.outputDigest.length, 64);
     assert.equal(JSON.stringify(execution.evidence).includes("SECRET_MARKER"), false);
   });

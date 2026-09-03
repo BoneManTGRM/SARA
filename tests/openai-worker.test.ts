@@ -3,6 +3,32 @@ import { describe, it } from "node:test";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
 
 describe("GPT-5.6 Luna Responses transport", () => {
+  it("uses the Responses input-token endpoint instead of treating UTF-8 bytes as tokens", async () => {
+    // Catches the production defect where an 18 KB work packet was rejected as 18K tokens.
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const prompt = "public repository evidence ".repeat(700);
+    assert.ok(Buffer.byteLength(prompt, "utf8") > 10_000);
+    const client = new OpenAIResponsesClient({
+      apiKey: "test-openai-key",
+      fetchImpl: async (url, init) => {
+        requests.push({ url: String(url), init: init ?? {} });
+        return new Response(JSON.stringify({
+          object: "response.input_tokens",
+          input_tokens: 4_321,
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    assert.equal(await client.countInputTokens(prompt), 4_321);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "https://api.openai.com/v1/responses/input_tokens");
+    const headers = new Headers(requests[0].init.headers);
+    assert.equal(headers.get("authorization"), "Bearer test-openai-key");
+    const body = JSON.parse(String(requests[0].init.body)) as Record<string, unknown>;
+    assert.equal(body.model, "gpt-5.6-luna");
+    assert.equal(body.input, prompt);
+  });
+
   it("sends a non-stored bounded Luna request and uses normalized response usage", async () => {
     // Catches selecting a costlier model, enabling response storage, or omitting the output ceiling.
     const requests: Array<{ url: string; init: RequestInit }> = [];
@@ -47,6 +73,39 @@ describe("GPT-5.6 Luna Responses transport", () => {
     });
   });
 
+  it("reports a safe incomplete status and reason without exposing generated content", async () => {
+    // Catches opaque live failures while keeping prompts, partial output, and credentials private.
+    const client = new OpenAIResponsesClient({
+      apiKey: "super-secret-openai-key",
+      fetchImpl: async () => new Response(JSON.stringify({
+        status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+        output: [{
+          type: "message",
+          content: [{ type: "output_text", text: "customer-private-partial-output" }],
+        }],
+        usage: {
+          input_tokens: 4_980,
+          output_tokens: 3_000,
+          output_tokens_details: { reasoning_tokens: 2_900 },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+
+    await assert.rejects(async () => client.execute({
+      prompt: "customer-private-prompt",
+      reasoningLevel: "medium",
+      maximumOutputTokens: 3_000,
+    }), (error: unknown) => {
+      const message = String((error as Error).message);
+      assert.equal(message, "OpenAI response ended with status incomplete: max_output_tokens.");
+      assert.equal(message.includes("super-secret-openai-key"), false);
+      assert.equal(message.includes("customer-private-prompt"), false);
+      assert.equal(message.includes("customer-private-partial-output"), false);
+      return true;
+    });
+  });
+
   it("does not expose the API key or provider response body in failures", async () => {
     // Catches credentials or customer content escaping through provider error logging.
     const client = new OpenAIResponsesClient({
@@ -64,44 +123,6 @@ describe("GPT-5.6 Luna Responses transport", () => {
       assert.equal(message.includes("super-secret-openai-key"), false);
       assert.equal(message.includes("customer prompt"), false);
       return true;
-    });
-  });
-
-  it("enforces a caller-supplied JSON schema through strict Responses structured output", async () => {
-    const requests: RequestInit[] = [];
-    const client = new OpenAIResponsesClient({
-      apiKey: "test-openai-key",
-      fetchImpl: async (_url, init) => {
-        requests.push(init ?? {});
-        return new Response(JSON.stringify({
-          status: "completed",
-          output: [{ type: "message", content: [{ type: "output_text", text: '{"note":"ready"}' }] }],
-          usage: { input_tokens: 10, output_tokens: 5 },
-        }), { status: 200, headers: { "content-type": "application/json" } });
-      },
-    });
-    const schema = {
-      type: "object",
-      additionalProperties: false,
-      required: ["note"],
-      properties: { note: { type: "string" } },
-    };
-
-    await client.execute({
-      prompt: "return the report",
-      reasoningLevel: "medium",
-      maximumOutputTokens: 500,
-      structuredOutput: { name: "repository_readiness_draft", schema },
-    });
-
-    const body = JSON.parse(String(requests[0].body)) as Record<string, unknown>;
-    assert.deepEqual(body.text, {
-      format: {
-        type: "json_schema",
-        name: "repository_readiness_draft",
-        strict: true,
-        schema,
-      },
     });
   });
 });

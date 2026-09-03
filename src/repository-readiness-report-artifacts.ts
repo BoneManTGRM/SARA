@@ -13,50 +13,10 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const SHA256_HEX = /^[a-f0-9]{64}$/u;
 const MAX_ARTIFACT_BYTES = 256 * 1024;
 const DRAFT_KEYS = ["categoryEvidence", "evidenceLimitations", "findings"] as const;
-
-export const REPOSITORY_READINESS_DRAFT_JSON_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: [...DRAFT_KEYS],
-  properties: {
-    categoryEvidence: {
-      type: "array",
-      minItems: 4,
-      maxItems: 4,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["category", "status", "evidenceUrls", "note"],
-        properties: {
-          category: { type: "string", enum: ["code", "dependencies", "secret_exposure", "release_controls"] },
-          status: { type: "string", enum: ["reviewed", "unavailable"] },
-          evidenceUrls: { type: "array", items: { type: "string" } },
-          note: { type: "string" },
-        },
-      },
-    },
-    findings: {
-      type: "array",
-      maxItems: 20,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["id", "category", "priority", "confidence", "title", "observation", "recommendation", "evidenceUrl"],
-        properties: {
-          id: { type: "string" },
-          category: { type: "string", enum: ["code", "dependencies", "secret_exposure", "release_controls"] },
-          priority: { type: "string", enum: ["urgent", "high", "medium", "low"] },
-          confidence: { type: "string", enum: ["confirmed", "supported", "tentative"] },
-          title: { type: "string" },
-          observation: { type: "string" },
-          recommendation: { type: "string" },
-          evidenceUrl: { type: "string" },
-        },
-      },
-    },
-    evidenceLimitations: { type: "array", items: { type: "string" } },
-  },
-};
+const CATEGORY_BINDING_LIMITATION = "SARA deterministically derived category evidence availability and immutable URLs from the bounded sampled-file paths; reviewed means only that eligible sampled evidence was available, not that the category passed or was complete.";
+const DEPENDENCY_PATH = /(?:^|\/)(?:package(?:-lock)?\.json|pnpm-lock\.ya?ml|yarn\.lock|bun\.lockb?|requirements(?:-[^/]+)?\.txt|pyproject\.toml|poetry\.lock|Pipfile(?:\.lock)?|go\.(?:mod|sum)|Cargo\.(?:toml|lock)|pom\.xml|build\.gradle(?:\.kts)?|composer\.(?:json|lock)|Gemfile(?:\.lock)?)$/iu;
+const RELEASE_CONTROL_PATH = /(?:^|\/)(?:\.github\/workflows\/[^/]+\.ya?ml|\.gitlab-ci\.ya?ml|azure-pipelines\.ya?ml|Jenkinsfile|Dockerfile|docker-compose\.ya?ml|Makefile)$/iu;
+const CODE_PATH = /\.(?:c|cc|cpp|cs|go|h|hpp|java|js|jsx|kt|kts|mjs|cjs|php|py|rb|rs|svelte|swift|ts|tsx|vue)$/iu;
 
 export type RepositoryReadinessReportArtifact = {
   schemaVersion: 1;
@@ -80,10 +40,146 @@ function reportPath(stateDirectory: string, jobId: string): string {
   return join(reportDirectory(stateDirectory), `${jobId}.json`);
 }
 
-function workerDraft(outputText: string): Pick<
-  RepositoryReadinessReportInput,
-  "categoryEvidence" | "findings" | "evidenceLimitations"
-> {
+function sampledFileAt(
+  snapshot: PublicRepositoryEvidenceSnapshot,
+  value: unknown,
+  label: string,
+): PublicRepositoryEvidenceSnapshot["sampledFiles"][number] {
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) >= snapshot.sampledFiles.length) {
+    throw new Error(`${label} must identify one supplied sampled evidence file.`);
+  }
+  return snapshot.sampledFiles[value as number]!;
+}
+
+function eligibleCategoryIndexes(
+  snapshot: PublicRepositoryEvidenceSnapshot,
+  category: unknown,
+): number[] {
+  if (category === "secret_exposure") return snapshot.sampledFiles.map((_, index) => index);
+  if (category !== "code" && category !== "dependencies" && category !== "release_controls") return [];
+  const matcher = category === "code"
+    ? CODE_PATH
+    : category === "dependencies"
+      ? DEPENDENCY_PATH
+      : RELEASE_CONTROL_PATH;
+  return snapshot.sampledFiles.flatMap((file, index) => matcher.test(file.path) ? [index] : []);
+}
+
+function resolveIndexedCategoryEvidence(
+  value: unknown,
+  snapshot: PublicRepositoryEvidenceSnapshot,
+): { categoryEvidence: unknown; derived: boolean } {
+  if (!Array.isArray(value)) return { categoryEvidence: value, derived: false };
+  let derived = false;
+  const categoryEvidence = value.map((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+    const candidate = record as Record<string, unknown>;
+    if (Array.isArray(candidate.evidenceUrls)) return record;
+    derived = true;
+    const indexes = eligibleCategoryIndexes(snapshot, candidate.category);
+    return {
+      category: candidate.category,
+      status: indexes.length > 0 ? "reviewed" : "unavailable",
+      evidenceUrls: indexes.map((index) => snapshot.sampledFiles[index]!.permalink),
+      note: candidate.note,
+    };
+  });
+  return { categoryEvidence, derived };
+}
+
+function resolveIndexedFindings(
+  value: unknown,
+  snapshot: PublicRepositoryEvidenceSnapshot,
+): { findings: unknown; omittedCount: number } {
+  if (!Array.isArray(value)) return { findings: value, omittedCount: 0 };
+  let omittedCount = 0;
+  const findings = value.flatMap((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return [record];
+    const candidate = record as Record<string, unknown>;
+    if (!("evidenceFileIndex" in candidate)) return [record];
+    const fileIndex = candidate.evidenceFileIndex;
+    const firstLine = candidate.evidenceLineStart;
+    const lastLine = candidate.evidenceLineEnd;
+    if (
+      !Number.isInteger(fileIndex) ||
+      (fileIndex as number) < 0 ||
+      (fileIndex as number) >= snapshot.sampledFiles.length ||
+      !Number.isInteger(firstLine) ||
+      !Number.isInteger(lastLine) ||
+      (firstLine as number) < 1 ||
+      (lastLine as number) < (firstLine as number)
+    ) {
+      omittedCount += 1;
+      return [];
+    }
+    if (!eligibleCategoryIndexes(snapshot, candidate.category).includes(fileIndex as number)) {
+      omittedCount += 1;
+      return [];
+    }
+    const file = sampledFileAt(snapshot, fileIndex, "Finding evidenceFileIndex");
+    const visibleLineCount = file.sourceText.split(/\r?\n/u).length;
+    if ((lastLine as number) > visibleLineCount) {
+      omittedCount += 1;
+      return [];
+    }
+    const anchor = firstLine === lastLine
+      ? `#L${firstLine as number}`
+      : `#L${firstLine as number}-L${lastLine as number}`;
+    return [{
+      id: candidate.id,
+      category: candidate.category,
+      priority: candidate.priority,
+      confidence: candidate.confidence,
+      title: candidate.title,
+      observation: candidate.observation,
+      recommendation: candidate.recommendation,
+      evidenceUrl: `${file.permalink}${anchor}`,
+    }];
+  });
+  return { findings, omittedCount };
+}
+
+function repairCategoryEvidenceNotes(value: unknown): {
+  categoryEvidence: RepositoryReadinessReportInput["categoryEvidence"];
+  repairedCount: number;
+} {
+  if (!Array.isArray(value)) {
+    return {
+      categoryEvidence: value as RepositoryReadinessReportInput["categoryEvidence"],
+      repairedCount: 0,
+    };
+  }
+  let repairedCount = 0;
+  const categoryEvidence = value.map((record) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return record;
+    const candidate = record as Record<string, unknown>;
+    if (typeof candidate.note === "string" && candidate.note.trim()) return record;
+    repairedCount += 1;
+    return {
+      ...candidate,
+      note: candidate.status === "unavailable"
+        ? "No eligible immutable sampled evidence was available for this category; the model's malformed note was replaced locally."
+        : "Reviewed only from the listed immutable sampled evidence; the model's malformed note was replaced locally.",
+    };
+  });
+  return {
+    categoryEvidence: categoryEvidence as RepositoryReadinessReportInput["categoryEvidence"],
+    repairedCount,
+  };
+}
+
+function categoryNoteRepairLimitation(repairedCount: number): string {
+  return `SARA deterministically replaced ${repairedCount} missing or malformed category evidence ${repairedCount === 1 ? "note" : "notes"}; no evidence URL, finding, priority, confidence, or recommendation was invented.`;
+}
+
+function findingOmissionLimitation(omittedCount: number): string {
+  return `SARA deterministically omitted ${omittedCount} unsupported ${omittedCount === 1 ? "finding" : "findings"} because the model did not bind ${omittedCount === 1 ? "it" : "them"} to a category-eligible sampled file and visible line range; no finding evidence was invented.`;
+}
+
+function workerDraft(
+  outputText: string,
+  snapshot: PublicRepositoryEvidenceSnapshot,
+): Pick<RepositoryReadinessReportInput, "categoryEvidence" | "findings" | "evidenceLimitations"> {
   if (Buffer.byteLength(outputText, "utf8") > MAX_ARTIFACT_BYTES) {
     throw new Error("Repository-readiness worker output exceeds 256 KiB.");
   }
@@ -100,11 +196,22 @@ function workerDraft(outputText: string): Pick<
   if (keys.length !== DRAFT_KEYS.length || keys.some((key, index) => key !== DRAFT_KEYS[index])) {
     throw new Error(`Repository-readiness worker output must contain exactly: ${DRAFT_KEYS.join(", ")}.`);
   }
-  const draft = parsed as Partial<RepositoryReadinessReportInput>;
+  const draft = parsed as Record<string, unknown>;
+  const resolvedCategory = resolveIndexedCategoryEvidence(draft.categoryEvidence, snapshot);
+  const resolvedFindings = resolveIndexedFindings(draft.findings, snapshot);
+  const repaired = repairCategoryEvidenceNotes(resolvedCategory.categoryEvidence);
+  const evidenceLimitations = Array.isArray(draft.evidenceLimitations)
+    ? [
+      ...(draft.evidenceLimitations as readonly string[]),
+      ...(resolvedCategory.derived ? [CATEGORY_BINDING_LIMITATION] : []),
+      ...(resolvedFindings.omittedCount > 0 ? [findingOmissionLimitation(resolvedFindings.omittedCount)] : []),
+      ...(repaired.repairedCount > 0 ? [categoryNoteRepairLimitation(repaired.repairedCount)] : []),
+    ]
+    : draft.evidenceLimitations as RepositoryReadinessReportInput["evidenceLimitations"];
   return {
-    categoryEvidence: draft.categoryEvidence as RepositoryReadinessReportInput["categoryEvidence"],
-    findings: draft.findings as RepositoryReadinessReportInput["findings"],
-    evidenceLimitations: draft.evidenceLimitations as RepositoryReadinessReportInput["evidenceLimitations"],
+    categoryEvidence: repaired.categoryEvidence,
+    findings: resolvedFindings.findings as RepositoryReadinessReportInput["findings"],
+    evidenceLimitations,
   };
 }
 
@@ -139,7 +246,7 @@ export function compileRepositoryReadinessWorkerOutput(input: {
   outputText: string;
   snapshot: PublicRepositoryEvidenceSnapshot;
 }): RepositoryReadinessReport {
-  const draft = workerDraft(input.outputText);
+  const draft = workerDraft(input.outputText, input.snapshot);
   const report = compileRepositoryReadinessReport({
     repository: input.snapshot.repository,
     immutableCommitSha: input.snapshot.immutableCommitSha,
