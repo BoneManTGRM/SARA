@@ -73,6 +73,39 @@ describe("GPT-5.6 Luna Responses transport", () => {
     });
   });
 
+  it("reports a safe incomplete status and reason without exposing generated content", async () => {
+    // Catches opaque live failures while keeping prompts, partial output, and credentials private.
+    const client = new OpenAIResponsesClient({
+      apiKey: "super-secret-openai-key",
+      fetchImpl: async () => new Response(JSON.stringify({
+        status: "incomplete",
+        incomplete_details: { reason: "max_output_tokens" },
+        output: [{
+          type: "message",
+          content: [{ type: "output_text", text: "customer-private-partial-output" }],
+        }],
+        usage: {
+          input_tokens: 4_980,
+          output_tokens: 3_000,
+          output_tokens_details: { reasoning_tokens: 2_900 },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    });
+
+    await assert.rejects(async () => client.execute({
+      prompt: "customer-private-prompt",
+      reasoningLevel: "medium",
+      maximumOutputTokens: 3_000,
+    }), (error: unknown) => {
+      const message = String((error as Error).message);
+      assert.equal(message, "OpenAI response ended with status incomplete: max_output_tokens.");
+      assert.equal(message.includes("super-secret-openai-key"), false);
+      assert.equal(message.includes("customer-private-prompt"), false);
+      assert.equal(message.includes("customer-private-partial-output"), false);
+      return true;
+    });
+  });
+
   it("does not expose the API key or provider response body in failures", async () => {
     // Catches credentials or customer content escaping through provider error logging.
     const client = new OpenAIResponsesClient({
