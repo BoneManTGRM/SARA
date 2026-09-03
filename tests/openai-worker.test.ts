@@ -3,6 +3,32 @@ import { describe, it } from "node:test";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
 
 describe("GPT-5.6 Luna Responses transport", () => {
+  it("uses the Responses input-token endpoint instead of treating UTF-8 bytes as tokens", async () => {
+    // Catches the production defect where an 18 KB work packet was rejected as 18K tokens.
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const prompt = "public repository evidence ".repeat(700);
+    assert.ok(Buffer.byteLength(prompt, "utf8") > 10_000);
+    const client = new OpenAIResponsesClient({
+      apiKey: "test-openai-key",
+      fetchImpl: async (url, init) => {
+        requests.push({ url: String(url), init: init ?? {} });
+        return new Response(JSON.stringify({
+          object: "response.input_tokens",
+          input_tokens: 4_321,
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    assert.equal(await client.countInputTokens(prompt), 4_321);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].url, "https://api.openai.com/v1/responses/input_tokens");
+    const headers = new Headers(requests[0].init.headers);
+    assert.equal(headers.get("authorization"), "Bearer test-openai-key");
+    const body = JSON.parse(String(requests[0].init.body)) as Record<string, unknown>;
+    assert.equal(body.model, "gpt-5.6-luna");
+    assert.equal(body.input, prompt);
+  });
+
   it("sends a non-stored bounded Luna request and uses normalized response usage", async () => {
     // Catches selecting a costlier model, enabling response storage, or omitting the output ceiling.
     const requests: Array<{ url: string; init: RequestInit }> = [];
