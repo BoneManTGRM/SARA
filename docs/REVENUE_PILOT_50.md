@@ -11,10 +11,10 @@ Observable acceptance criteria:
 1. SARA accepts a public opportunity record, rejects automation-prohibited or unsafe scope, and deduplicates it durably.
 2. Every selectable service comes from the fixed catalog below and has its own immutable customer price, per-job execution cap, compatible goal, required capabilities, and deliverables.
 3. Missing service capabilities become zero-cost self-development jobs whose candidates stop at `SHADOW`.
-4. Fulfillment cannot begin until exact realized customer revenue is recorded and the authenticated owner separately approves the job-bound contract target.
+4. Fulfillment cannot begin until exact on-chain customer revenue is verified and an authenticated owner has activated a time-, service-, channel-, cost-, and volume-bounded standing mandate covering fixed-service fulfillment.
 5. Director, specialist, verifier, and delivery roles run sequentially through expiring leases and survive restart.
 6. The verifier must be a different logical worker from the specialist.
-7. A failed verification stops the job; successful delivery preparation stops at owner review with no external delivery authority.
+7. A failed verification stops the job; successful deterministic compilation may proceed to exact-digest customer delivery only under a separately covered verified-report-delivery mandate action.
 8. The constitutional emergency stop freezes discovery and worker mutations.
 9. GPT-5.6 Luna is the default paid worker. Gemini 3.8 Flash is a bounded fallback/challenger, never an automatic authority increase.
 10. Every routed call has token, attempt, wall-time, and task-cost ceilings; success and all-route failure both produce durable cost evidence without storing prompts or outputs.
@@ -27,7 +27,7 @@ Out of scope for this candidate:
 - creating or funding provider accounts;
 - changing the Constitution or its `$0` bootstrap target;
 - giving a worker owner credentials;
-- autonomous outreach, application submission, contracting, collection, refund, merge, deployment, or customer-system access;
+- autonomous outreach, application submission, custom contracting, refunds, merge, deployment, or customer-system access;
 - claiming that a generated skill is production-ready before staged evidence and owner promotion;
 - installing arbitrary dependencies, granting generated programs network or secret access, or letting a candidate merge, deploy, or rewrite SARA;
 - adding a second backend, policy authority, ledger, memory system, or dashboard.
@@ -42,8 +42,8 @@ Out of scope for this candidate:
 | Maximum execution cost per paid job | `$1–$3`, fixed by service |
 | Owner-funded monthly operating envelope | `$50` |
 | Concurrent paid jobs | `1` |
-| Automated external delivery | Disabled |
-| Final state | Owner review |
+| Automated external delivery | Exact-digest only under active standing mandate |
+| Final state | Authorized automated delivery or fail-closed exception |
 
 ### Initial service catalog
 

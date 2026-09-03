@@ -7,6 +7,8 @@ export const ROUTINE_ACTION_KINDS = [
   "inbound_customer_reply",
   "calendar_scheduling",
   "bounded_outreach",
+  "fixed_service_fulfillment",
+  "verified_report_delivery",
 ] as const;
 
 export type RoutineActionKind = (typeof ROUTINE_ACTION_KINDS)[number];

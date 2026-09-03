@@ -8,6 +8,7 @@ import { RevenuePilotOperator } from "./revenue-pilot-operator.ts";
 import { PILOT_REQUIRED_CAPABILITIES } from "./revenue-pilot.ts";
 import { createSaraServer } from "./server.ts";
 import { compileCommercialTerms } from "./commercial-terms.ts";
+import { NicoOperatorClient } from "./nico-operator.ts";
 
 const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? ".sara-state");
 const host = process.env.SARA_HOST ?? "127.0.0.1";
@@ -27,6 +28,8 @@ const approvedTermsDigest = process.env.SARA_COMMERCIAL_TERMS_APPROVED_SHA256?.t
 const baseRpcUrl = process.env.SARA_BASE_RPC_URL?.trim() ?? "https://mainnet.base.org";
 const publicBaseUrl = process.env.SARA_PUBLIC_BASE_URL?.trim()
   ?? (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : undefined);
+const nicoBaseUrl = process.env.SARA_NICO_BASE_URL?.trim();
+const nicoOperatorPassword = process.env.SARA_NICO_OPERATOR_PASSWORD?.trim();
 if (!ownerTokenSha256 || !/^[a-f0-9]{64}$/i.test(ownerTokenSha256)) {
   throw new Error("Set SARA_OWNER_TOKEN_SHA256 to a SHA-256 digest before starting the owner dashboard.");
 }
@@ -96,6 +99,12 @@ const client = apiKey ? new OpenAIResponsesClient({ apiKey }) : null;
 const ownerAssistant = client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
   ? new OwnerAssistant({ modelClient: client, stateDirectory, monthlyBudgetUsd: telegramMonthlyBudgetUsd })
   : null;
+if (Boolean(nicoBaseUrl) !== Boolean(nicoOperatorPassword)) {
+  throw new Error("SARA_NICO_BASE_URL and SARA_NICO_OPERATOR_PASSWORD must be configured together.");
+}
+const nicoOperator = nicoBaseUrl && nicoOperatorPassword
+  ? new NicoOperatorClient({ baseUrl: nicoBaseUrl, operatorPassword: nicoOperatorPassword })
+  : null;
 const activeTelegramMonthlyBudgetUsd = ownerAssistant ? telegramMonthlyBudgetUsd : 0;
 let operator: RevenuePilotOperator | null = null;
 let startupProof: LunaStartupProof = {
@@ -117,6 +126,7 @@ const server = createSaraServer(kernel, {
   ...(telegramBridgeTokenSha256 ? { telegramBridgeTokenSha256 } : {}),
   ...(ownerAssistant ? { ownerAssistant } : {}),
   ...(commerce ? { commerce } : {}),
+  ...(nicoOperator ? { nicoOperator } : {}),
   ...(client ? {
     runtimeStatus: async () => ({
       worker: operator ? await operator.status() : {

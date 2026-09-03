@@ -16,10 +16,15 @@ import {
 } from "./revenue-pilot-artifacts.ts";
 import type { RevenuePilotJob, RevenuePilotLease } from "./revenue-pilot.ts";
 import { getRevenueService } from "./revenue-service-catalog.ts";
-import { persistRepositoryReadinessReportArtifact } from "./repository-readiness-report-artifacts.ts";
+import {
+  persistRepositoryReadinessReportArtifact,
+  readRepositoryReadinessReportArtifact,
+} from "./repository-readiness-report-artifacts.ts";
 import type { MemoryRecall } from "./types.ts";
 
 export type RevenuePilotOperatorTick =
+  | { outcome: "authorized_job"; jobId: string; paymentIntentId: string }
+  | { outcome: "authorized_delivery"; jobId: string; deliveryId: string; reportDigest: string }
   | { outcome: "completed_role"; jobId: string; role: RevenuePilotLease["role"]; costUsd: number }
   | {
     outcome: "idle";
@@ -150,14 +155,14 @@ function roleInstruction(role: RevenuePilotLease["role"]): string {
   if (role === "independent_verifier") {
     return "Independently verify the draft against the work packet. Begin with exactly VERDICT: PASS or VERDICT: FAIL, then give concise evidence and limitations.";
   }
-  return "Prepare a private owner-review package. Do not send, publish, contact anyone, merge code, deploy code, or imply customer delivery.";
+  return "Prepare the bounded delivery candidate for deterministic compilation. Do not send, publish, contact anyone, merge code, deploy code, or claim authorization; SARA's separate policy gate controls delivery.";
 }
 
 function requiredOutput(role: RevenuePilotLease["role"]): string[] {
   if (role === "work_director") return ["scope", "immutable revision", "evidence map", "acceptance criteria", "evidence gaps"];
   if (role === "specialist_worker") return ["observations", "source permalinks", "prioritized findings", "limitations"];
   if (role === "independent_verifier") return ["VERDICT: PASS or VERDICT: FAIL", "claim-by-claim evidence", "unresolved limitations"];
-  return ["private owner-review summary", "verified findings", "limitations", "explicit owner decision required"];
+  return ["delivery candidate summary", "verified findings", "limitations", "separate policy decision required"];
 }
 
 function readinessReportInstruction(job: RevenuePilotJob, role: RevenuePilotLease["role"]): string | null {
@@ -190,13 +195,13 @@ function buildPrompt(
     repository: evidence.snapshot.repository,
     repositoryEvidenceDigest: evidence.snapshotDigest,
     repositoryEvidence: evidence.snapshot,
-    permittedActions: ["analyze supplied public evidence", "produce a private SARA artifact"],
+    permittedActions: ["analyze supplied public evidence", "produce a private SARA artifact for separate verification and authorization"],
     prohibitedActions: [
       "outreach",
       "applications",
       "contracts",
       "payments",
-      "customer delivery",
+      "self-authorized customer delivery",
       "customer-system access",
       "repository mutation",
       "merge",
@@ -299,6 +304,53 @@ export class RevenuePilotOperator {
     this.#lastTickAt = now.toISOString();
     const status = await this.#kernel.getStatus();
     if (status.emergencyStopped) return this.#record({ outcome: "idle", reason: "emergency_stop" });
+    const mandate = status.standingMandate;
+    const mandateActive = Boolean(
+      mandate &&
+      !mandate.revokedAt &&
+      Date.parse(mandate.startsAt) <= now.getTime() &&
+      now.getTime() < Date.parse(mandate.expiresAt),
+    );
+    const confirmedIntent = status.revenuePaymentIntents.find((candidate) => candidate.status === "confirmed");
+    if (confirmedIntent && mandateActive && mandate?.allowedActions.includes("fixed_service_fulfillment")) {
+      const authorized = await this.#kernel.authorizeRevenuePilotFromConfirmedPaymentUnderMandate(
+        SARA_PRINCIPAL,
+        confirmedIntent.jobId,
+        confirmedIntent.id,
+        now.toISOString(),
+      );
+      return this.#record({
+        outcome: "authorized_job",
+        jobId: authorized.job.id,
+        paymentIntentId: authorized.paymentIntent.id,
+      });
+    }
+    const completedJob = status.revenuePilotJobs.find((candidate) => candidate.status === "owner_review");
+    if (completedJob && mandateActive && mandate?.allowedActions.includes("verified_report_delivery")) {
+      const intent = status.revenuePaymentIntents.find((candidate) =>
+        candidate.jobId === completedJob.id && candidate.status === "authorized"
+      );
+      if (intent) {
+        const report = await readRepositoryReadinessReportArtifact({
+          stateDirectory: this.#stateDirectory,
+          jobId: completedJob.id,
+        });
+        const authorized = await this.#kernel.authorizeRevenuePilotDeliveryUnderMandate(SARA_PRINCIPAL, {
+          deliveryId: `delivery_${completedJob.id}`,
+          jobId: completedJob.id,
+          reportDigest: report.reportDigest,
+          accessSecretDigest: intent.clientSecretDigest,
+          lifetimeHours: 168,
+          maximumDownloads: 10,
+        }, now.toISOString());
+        return this.#record({
+          outcome: "authorized_delivery",
+          jobId: completedJob.id,
+          deliveryId: authorized.delivery.id,
+          reportDigest: report.reportDigest,
+        });
+      }
+    }
     const job = status.revenuePilotJobs.find((candidate) =>
       candidate.status === "queued" || candidate.status === "running"
     );
