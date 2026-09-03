@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { sha256 } from "../src/canonical.ts";
 import { SaraKernel } from "../src/kernel.ts";
+import type { WorkerModelClient } from "../src/model-router.ts";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
 import {
   GitHubPublicRepositoryEvidenceCollector,
@@ -89,9 +90,43 @@ try {
   };
   await kernel.authorizeRevenuePilotJob(owner, job.id, syntheticRevenue.id, approval);
 
+  const rawClient = new OpenAIResponsesClient({ apiKey, timeoutMs: 120_000 });
+  const diagnosticClient: WorkerModelClient = {
+    routeKey: rawClient.routeKey,
+    maximumWallTimeMs: rawClient.maximumWallTimeMs,
+    async countInputTokens(prompt) {
+      const count = await rawClient.countInputTokens(prompt);
+      console.log(`SARA_INTERNAL_FREE_PROOF_MODEL_PREFLIGHT=${JSON.stringify({
+        utf8Bytes: Buffer.byteLength(prompt, "utf8"),
+        reportedInputTokens: count,
+      })}`);
+      return count;
+    },
+    async execute(input) {
+      console.log(`SARA_INTERNAL_FREE_PROOF_MODEL_EXECUTE=${JSON.stringify({
+        reasoningLevel: input.reasoningLevel,
+        maximumOutputTokens: input.maximumOutputTokens,
+      })}`);
+      try {
+        const result = await rawClient.execute(input);
+        console.log(`SARA_INTERNAL_FREE_PROOF_MODEL_USAGE=${JSON.stringify({
+          inputTokens: result.inputTokens,
+          billableOutputTokens: result.billableOutputTokens,
+          outputDigest: sha256(result.outputText),
+        })}`);
+        return result;
+      } catch (error) {
+        console.error(`SARA_INTERNAL_FREE_PROOF_MODEL_ERROR=${JSON.stringify({
+          message: error instanceof Error ? error.message : String(error),
+        })}`);
+        throw error;
+      }
+    },
+  };
+
   const operator = new RevenuePilotOperator({
     kernel,
-    modelClient: new OpenAIResponsesClient({ apiKey, timeoutMs: 120_000 }),
+    modelClient: diagnosticClient,
     repositoryEvidenceCollector: {
       async collect(repository) {
         if (repository !== snapshot.repository) throw new Error("Internal proof repository changed after evidence collection.");
@@ -104,7 +139,20 @@ try {
 
   const ticks: unknown[] = [];
   for (let index = 0; index < 4; index += 1) {
-    const tick = await operator.tick();
+    let tick: unknown;
+    try {
+      tick = await operator.tick();
+    } catch (error) {
+      const current = (await kernel.getStatus()).revenuePilotJobs.find((candidate) => candidate.id === job.id);
+      console.error(`SARA_INTERNAL_FREE_PROOF_TICK_ERROR=${JSON.stringify({
+        index: index + 1,
+        message: error instanceof Error ? error.message : String(error),
+        status: current?.status,
+        nextRole: current?.nextRole,
+        receipts: current?.receipts,
+      })}`);
+      throw error;
+    }
     ticks.push(tick);
     const current = (await kernel.getStatus()).revenuePilotJobs.find((candidate) => candidate.id === job.id);
     console.log(`SARA_INTERNAL_FREE_PROOF_TICK=${JSON.stringify({ index: index + 1, tick, status: current?.status, nextRole: current?.nextRole })}`);
