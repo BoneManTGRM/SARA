@@ -4,7 +4,7 @@
   "private": true,
   "description": "SARA — an owner-controlled self-development kernel built on TGRM.",
   "type": "module",
-  "license": "MIT",
+  "license": "UNLICENSED",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/BoneManTGRM/SARA.git"

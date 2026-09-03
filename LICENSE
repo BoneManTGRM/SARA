@@ -1,21 +1,24 @@
-MIT License
+SARA PROPRIETARY SOURCE CODE NOTICE
 
-Copyright (c) 2026 Reparodynamics
+Copyright (c) 2026 Reparodynamics. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+SARA and its original source code, documentation, prompts, workflows, designs,
+and associated materials are proprietary works. No license or
+permission is granted to use, copy, reproduce, fork, modify, merge, publish,
+distribute, sublicense, sell, host, create derivative works from, or otherwise
+exploit any portion of these materials without prior written permission from
+the copyright holder.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Access to or visibility of the source code does not grant any intellectual
+property rights. Any permission must be explicit, written, and limited to the
+scope stated in that permission.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Third-party software and assets included with or used by SARA remain subject to
+their respective license terms and notices. This notice does not restrict rights
+granted directly by those third-party licensors.
+
+THE MATERIALS ARE PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE
+COPYRIGHT HOLDER IS NOT LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY
+ARISING FROM THE MATERIALS OR THEIR USE.
