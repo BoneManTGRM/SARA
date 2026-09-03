@@ -9,9 +9,10 @@ const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_INVENTORY_ENTRIES = 80;
 const MAX_SAMPLED_FILES = 6;
-const MAX_FILE_SOURCE_BYTES = 1_500;
-const MAX_TOTAL_SOURCE_BYTES = 6_000;
+const MAX_FILE_SOURCE_BYTES = 5_000;
+const MAX_TOTAL_SOURCE_BYTES = 16_000;
 const MAX_PERSISTED_BYTES = 32 * 1024;
+const SOURCE_CODE_PATH = /\.(?:c|cc|cpp|cs|go|h|hpp|java|js|jsx|kt|kts|mjs|cjs|php|py|rb|rs|svelte|swift|ts|tsx|vue)$/iu;
 
 type GitHubRepository = {
   private: boolean;
@@ -124,6 +125,81 @@ function samplePriority(path: string): number {
   return Number.POSITIVE_INFINITY;
 }
 
+function isDependencyManifest(path: string): boolean {
+  const lower = path.toLowerCase();
+  return [
+    "package.json",
+    "pyproject.toml",
+    "cargo.toml",
+    "go.mod",
+    "requirements.txt",
+    "pom.xml",
+    "composer.json",
+    "gemfile",
+  ].includes(lower);
+}
+
+function isReadme(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower === "readme" || lower === "readme.md";
+}
+
+function isWorkflow(path: string): boolean {
+  const lower = path.toLowerCase();
+  return lower.startsWith(".github/workflows/") && (lower.endsWith(".yml") || lower.endsWith(".yaml"));
+}
+
+function isCodeqlWorkflow(path: string): boolean {
+  return isWorkflow(path) && /(?:^|[-_.])codeql(?:[-_.]|$)/iu.test(path.split("/").at(-1) ?? "");
+}
+
+function isCiWorkflow(path: string): boolean {
+  if (!isWorkflow(path)) return false;
+  const name = path.split("/").at(-1)?.toLowerCase() ?? "";
+  return /^(?:ci|test|tests|build)(?:[-_.]|$)/u.test(name);
+}
+
+function sourcePriority(path: string): number {
+  if (!SOURCE_CODE_PATH.test(path)) return Number.POSITIVE_INFINITY;
+  const lower = path.toLowerCase();
+  if (/^src\/(?:index|main)\.[^/]+$/u.test(lower)) return 1;
+  if (lower.startsWith("src/")) return 2;
+  if (/^(?:index|main)\.[^/]+$/u.test(lower)) return 3;
+  return 4;
+}
+
+function selectSampleCandidates(entries: readonly GitHubTreeEntry[]): GitHubTreeEntry[] {
+  const blobs = entries.filter((entry) => entry.type === "blob");
+  const selected: GitHubTreeEntry[] = [];
+  const selectedPaths = new Set<string>();
+  const add = (entry: GitHubTreeEntry | undefined): void => {
+    if (!entry || selectedPaths.has(entry.path) || selected.length >= MAX_SAMPLED_FILES) return;
+    selected.push(entry);
+    selectedPaths.add(entry.path);
+  };
+  const first = (
+    predicate: (path: string) => boolean,
+    rank: (path: string) => number = () => 0,
+  ): GitHubTreeEntry | undefined => blobs
+    .filter((entry) => predicate(entry.path))
+    .sort((left, right) => rank(left.path) - rank(right.path) || left.path.localeCompare(right.path))[0];
+
+  add(first(isDependencyManifest));
+  add(first(isReadme));
+  add(first(isCodeqlWorkflow));
+  add(first(isCiWorkflow));
+  add(first((path) => Number.isFinite(sourcePriority(path)), sourcePriority));
+  add(first((path) => path.toLowerCase() === "security.md"));
+
+  for (const entry of [...blobs].sort((left, right) =>
+    samplePriority(left.path) - samplePriority(right.path) || left.path.localeCompare(right.path)
+  )) {
+    if (!Number.isFinite(samplePriority(entry.path))) continue;
+    add(entry);
+  }
+  return selected.slice(0, MAX_SAMPLED_FILES);
+}
+
 function decodeBoundedSource(content: GitHubContent, remainingBytes: number): { text: string; truncated: boolean } {
   if (content.type !== "file" || content.encoding !== "base64" || typeof content.content !== "string") {
     throw new Error("GitHub returned malformed file evidence.");
@@ -222,10 +298,7 @@ export class GitHubPublicRepositoryEvidenceCollector implements PublicRepository
       type: entry.type,
       size: entry.size === undefined ? null : finiteNonNegativeInteger(entry.size, "GitHub tree entry size"),
     }));
-    const sampleCandidates = safeEntries
-      .filter((entry) => entry.type === "blob" && Number.isFinite(samplePriority(entry.path)))
-      .sort((left, right) => samplePriority(left.path) - samplePriority(right.path) || left.path.localeCompare(right.path))
-      .slice(0, MAX_SAMPLED_FILES);
+    const sampleCandidates = selectSampleCandidates(safeEntries);
     const sampledFiles: PublicRepositoryEvidenceSnapshot["sampledFiles"] = [];
     let sampledBytes = 0;
     for (const entry of sampleCandidates) {
