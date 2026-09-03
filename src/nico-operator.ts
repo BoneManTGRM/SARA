@@ -41,6 +41,12 @@ export type NicoDeliveryAuthorizationInput = {
   confirmDelivery: boolean;
 };
 
+export type NicoAutomatedDeliveryInput = {
+  expectedArtifactIdentity: NicoArtifactIdentity;
+  confirmExactArtifact: boolean;
+  confirmAutomatedDisclosure: boolean;
+};
+
 export type NicoArtifactFormat = "markdown" | "html" | "json" | "pdf";
 
 export interface NicoOperator {
@@ -52,6 +58,7 @@ export interface NicoOperator {
   finalizeExactDraft(runId: string, password: string | undefined, input: NicoFinalizeInput): Promise<Record<string, unknown>>;
   authorizeDelivery(runId: string, password: string | undefined, input: NicoDeliveryAuthorizationInput): Promise<Record<string, unknown>>;
   getApprovedDeliveryPackage(runId: string, password?: string): Promise<{ contentType: string; body: Uint8Array; digest: string | null }>;
+  getAutomatedDeliveryPackage(runId: string, password: string | undefined, input: NicoAutomatedDeliveryInput): Promise<{ contentType: string; body: Uint8Array; digest: string | null }>;
 }
 
 type ClientOptions = {
@@ -286,6 +293,41 @@ export class NicoOperatorClient implements NicoOperator {
     });
     if (response.status >= 300 && response.status < 400) throw new Error("NICO refused a redirected package request.");
     if (!response.ok) throw new Error(`NICO package request failed with HTTP ${response.status}.`);
+    return {
+      contentType: response.headers.get("content-type") ?? "application/octet-stream",
+      body: await boundedBody(response, MAX_ARTIFACT_BYTES),
+      digest: response.headers.get("x-nico-certified-package-sha256"),
+    };
+  }
+
+  async getAutomatedDeliveryPackage(
+    idInput: string,
+    secret: string | undefined,
+    input: NicoAutomatedDeliveryInput,
+  ): Promise<{ contentType: string; body: Uint8Array; digest: string | null }> {
+    const id = runId(idInput);
+    if (input.confirmExactArtifact !== true || input.confirmAutomatedDisclosure !== true) {
+      throw new Error("Exact-artifact and automated-disclosure confirmations are required.");
+    }
+    const response = await this.#fetch(new URL(`assessment/comprehensive-run/${id}/automated-delivery-package`, this.#baseUrl), {
+      method: "POST",
+      redirect: "manual",
+      signal: AbortSignal.timeout(this.#timeoutMs),
+      ...this.#privilegedJsonBody(this.#credential(secret), {
+        automated_authorization_confirmed: true,
+        exact_artifact_confirmed: true,
+        automated_disclosure_confirmed: true,
+        expected_artifact_identity: artifactIdentity(input.expectedArtifactIdentity, id),
+      }),
+    });
+    if (response.status >= 300 && response.status < 400) throw new Error("NICO refused a redirected automated-delivery request.");
+    if (!response.ok) throw new Error(`NICO automated-delivery request failed with HTTP ${response.status}.`);
+    if (response.headers.get("x-nico-authorization-mode") !== "automated_policy") {
+      throw new Error("NICO returned an invalid automated authorization mode.");
+    }
+    if (response.headers.get("x-nico-human-reviewed") !== "false") {
+      throw new Error("NICO returned an invalid human-review disclosure.");
+    }
     return {
       contentType: response.headers.get("content-type") ?? "application/octet-stream",
       body: await boundedBody(response, MAX_ARTIFACT_BYTES),

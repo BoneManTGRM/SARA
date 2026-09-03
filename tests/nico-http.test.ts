@@ -38,6 +38,13 @@ describe("SARA owner-only NICO operator HTTP boundary", () => {
     async finalizeExactDraft(_runId, password) { calls.push({ action: "finalize", password }); return { approval_status: "approved" }; },
     async authorizeDelivery(_runId, password) { calls.push({ action: "delivery", password }); return { delivery_status: "authorized" }; },
     async getApprovedDeliveryPackage(_runId, password) { calls.push({ action: "package", password }); return { contentType: "application/zip", body: new TextEncoder().encode("zip"), digest: "c".repeat(64) }; },
+    async getAutomatedDeliveryPackage(_runId, password, input) {
+      calls.push({ action: "automated-package", password });
+      assert.equal(input.confirmExactArtifact, true);
+      assert.equal(input.confirmAutomatedDisclosure, true);
+      assert.deepEqual(input.expectedArtifactIdentity, identity);
+      return { contentType: "application/zip", body: new Uint8Array([80, 75, 3, 4]), digest: "e".repeat(64) };
+    },
   };
 
   before(async () => {
@@ -103,6 +110,22 @@ describe("SARA owner-only NICO operator HTTP boundary", () => {
     });
     assert.equal(response.status, 200);
     assert.equal((await response.json() as { delivery_status: string }).delivery_status, "authorized");
+  });
+
+  it("authorizes an automated package without collecting a specialist identity", async () => {
+    const response = await fetch(`${baseUrl}/api/nico/runs/${RUN_ID}/authorize-automated-delivery`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        expectedArtifactIdentity: identity,
+        confirmExactArtifact: true,
+        confirmAutomatedDisclosure: true,
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("x-nico-certified-package-sha256"), "e".repeat(64));
+    assert.deepEqual([...new Uint8Array(await response.arrayBuffer())], [80, 75, 3, 4]);
+    assert.equal(calls.at(-1)?.action, "automated-package");
   });
 
   it("freezes NICO network actions under emergency stop", async () => {

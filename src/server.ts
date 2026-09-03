@@ -866,6 +866,23 @@ async function handleOwnerNicoOperation(
     binary(response, artifact.contentType, artifact.body, artifact.digest ? { "x-nico-certified-package-sha256": artifact.digest } : {});
     return true;
   }
+  const automatedPackageMatch = url.pathname.match(/^\/api\/nico\/runs\/(comprun_[0-9a-f]{32})\/authorize-automated-delivery$/u);
+  if (request.method === "POST" && automatedPackageMatch) {
+    const id = automatedPackageMatch[1]!;
+    const body = await readJson(request);
+    if (body.confirmExactArtifact !== true || body.confirmAutomatedDisclosure !== true) {
+      throw new Error("Exact-artifact and automated-disclosure confirmations are required.");
+    }
+    await kernel.authorizeOwnerNicoOperation(owner, `nico:${id}:authorize-automated-delivery`, "external_write");
+    const override = body.nicoPassword === undefined ? undefined : boundedText(body.nicoPassword, 8, 512, "nicoPassword");
+    const artifact = await operator.getAutomatedDeliveryPackage(id, override, {
+      expectedArtifactIdentity: body.expectedArtifactIdentity as NicoArtifactIdentity,
+      confirmExactArtifact: true,
+      confirmAutomatedDisclosure: true,
+    });
+    binary(response, artifact.contentType, artifact.body, artifact.digest ? { "x-nico-certified-package-sha256": artifact.digest } : {});
+    return true;
+  }
   json(response, 404, { error: "Not found." });
   return true;
 }
