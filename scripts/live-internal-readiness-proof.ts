@@ -24,13 +24,13 @@ const startedAt = new Date();
 
 const PROOF_SAMPLE_PATHS = [
   "package.json",
-  "src/openai-worker.ts",
-  "src/model-router.ts",
   ".github/workflows/ci.yml",
   ".github/workflows/codeql.yml",
+  "src/openai-worker.ts",
+  "src/model-router.ts",
 ] as const;
-const MAX_FILE_SOURCE_BYTES = 1_500;
-const MAX_TOTAL_SOURCE_BYTES = 6_000;
+const MAX_FILE_SOURCE_BYTES = 5_000;
+const MAX_TOTAL_SOURCE_BYTES = 16_000;
 
 async function fetchPinnedSource(path: string, remainingBytes: number): Promise<{
   sourceText: string;
