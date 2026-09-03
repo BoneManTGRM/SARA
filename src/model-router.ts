@@ -112,6 +112,7 @@ export type WorkerModelPlanInput = {
 type TaskProfile = {
   maximumInputTokens: number;
   maximumOutputTokens: number;
+  lunaMaximumOutputTokens?: number;
   reasoningLevel: WorkerModelRoute["reasoningLevel"];
   primary: WorkerModelRoute["model"];
   requiresIndependentVerification: boolean;
@@ -128,6 +129,7 @@ const TASK_PROFILES: Record<WorkerTaskKind, TaskProfile> = {
   requirements_analysis: {
     maximumInputTokens: 10_000,
     maximumOutputTokens: 3_000,
+    lunaMaximumOutputTokens: 25_000,
     reasoningLevel: "medium",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: false,
@@ -149,6 +151,7 @@ const TASK_PROFILES: Record<WorkerTaskKind, TaskProfile> = {
   repository_investigation: {
     maximumInputTokens: 20_000,
     maximumOutputTokens: 6_000,
+    lunaMaximumOutputTokens: 25_000,
     reasoningLevel: "medium",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
@@ -163,6 +166,7 @@ const TASK_PROFILES: Record<WorkerTaskKind, TaskProfile> = {
   customer_deliverable: {
     maximumInputTokens: 20_000,
     maximumOutputTokens: 6_000,
+    lunaMaximumOutputTokens: 25_000,
     reasoningLevel: "medium",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
@@ -177,6 +181,7 @@ const TASK_PROFILES: Record<WorkerTaskKind, TaskProfile> = {
   critical_security_verification: {
     maximumInputTokens: 30_000,
     maximumOutputTokens: 8_000,
+    lunaMaximumOutputTokens: 25_000,
     reasoningLevel: "high",
     primary: "gpt-5.6-luna",
     requiresIndependentVerification: true,
@@ -217,9 +222,12 @@ function route(
     ? "free"
     : "paid";
   const rates = rateFor(model, billingMode, pricedAt);
+  const maximumOutputTokens = model === "gpt-5.6-luna"
+    ? profile.lunaMaximumOutputTokens ?? profile.maximumOutputTokens
+    : profile.maximumOutputTokens;
   const worstCaseCostUsd = Math.ceil((
     profile.maximumInputTokens * rates.input / 1_000_000 +
-    profile.maximumOutputTokens * rates.output / 1_000_000
+    maximumOutputTokens * rates.output / 1_000_000
   ) * 1_000_000) / 1_000_000;
   return {
     provider,
@@ -227,7 +235,7 @@ function route(
     billingMode,
     reasoningLevel: profile.reasoningLevel,
     maximumInputTokens: profile.maximumInputTokens,
-    maximumOutputTokens: profile.maximumOutputTokens,
+    maximumOutputTokens,
     inputUsdPerMillionTokens: rates.input,
     outputUsdPerMillionTokens: rates.output,
     worstCaseCostUsd,
@@ -247,19 +255,25 @@ export function planWorkerModelTask(input: WorkerModelPlanInput): WorkerModelPla
   const fallbackModel: WorkerModelRoute["model"] = profile.primary === "gemini-3.8-flash"
     ? "gpt-5.6-luna"
     : "gemini-3.8-flash";
-  const routes = [profile.primary, fallbackModel].map((model) => route(
+  const candidates = [profile.primary, fallbackModel].map((model) => route(
     model,
     profile,
     input.dataClassification,
     input.allowGeminiFreeTier,
     pricedAt,
   ));
-  const worstCaseCostUsd = Math.ceil(
-    routes.reduce((total, candidate) => total + candidate.worstCaseCostUsd, 0) * 1_000_000,
-  ) / 1_000_000;
-  if (worstCaseCostUsd > input.maximumTaskCostUsd) {
+  const routes: WorkerModelRoute[] = [];
+  let worstCaseCostUsd = 0;
+  for (const candidate of candidates) {
+    const nextCostUsd = Math.ceil((worstCaseCostUsd + candidate.worstCaseCostUsd) * 1_000_000) / 1_000_000;
+    if (nextCostUsd > input.maximumTaskCostUsd) continue;
+    routes.push(candidate);
+    worstCaseCostUsd = nextCostUsd;
+  }
+  if (routes.length === 0) {
+    const cheapest = Math.min(...candidates.map((candidate) => candidate.worstCaseCostUsd));
     throw new RangeError(
-      `The bounded model route could cost $${worstCaseCostUsd.toFixed(6)}, exceeding the $${input.maximumTaskCostUsd.toFixed(6)} task cost cap.`,
+      `The cheapest bounded model route could cost $${cheapest.toFixed(6)}, exceeding the $${input.maximumTaskCostUsd.toFixed(6)} task cost cap.`,
     );
   }
   return {
@@ -302,13 +316,13 @@ export async function executeWorkerModelTask(
     }
   };
 
-  for (const route of plan.routes.slice(0, plan.maximumAttempts)) {
-    const client = clientMap.get(workerModelRouteKey(route));
+  for (const candidate of plan.routes.slice(0, plan.maximumAttempts)) {
+    const client = clientMap.get(workerModelRouteKey(candidate));
     if (!client) {
       attempts.push({
-        provider: route.provider,
-        model: route.model,
-        billingMode: route.billingMode,
+        provider: candidate.provider,
+        model: candidate.model,
+        billingMode: candidate.billingMode,
         outcome: "unavailable",
         accountedCostUsd: 0,
       });
@@ -320,19 +334,19 @@ export async function executeWorkerModelTask(
       countedInputTokens = await client.countInputTokens(prompt);
     } catch {
       attempts.push({
-        provider: route.provider,
-        model: route.model,
-        billingMode: route.billingMode,
+        provider: candidate.provider,
+        model: candidate.model,
+        billingMode: candidate.billingMode,
         outcome: "unavailable",
         accountedCostUsd: 0,
       });
       continue;
     }
-    if (!Number.isInteger(countedInputTokens) || countedInputTokens < 0 || countedInputTokens > route.maximumInputTokens) {
+    if (!Number.isInteger(countedInputTokens) || countedInputTokens < 0 || countedInputTokens > candidate.maximumInputTokens) {
       attempts.push({
-        provider: route.provider,
-        model: route.model,
-        billingMode: route.billingMode,
+        provider: candidate.provider,
+        model: candidate.model,
+        billingMode: candidate.billingMode,
         outcome: "rejected",
         accountedCostUsd: 0,
       });
@@ -343,17 +357,17 @@ export async function executeWorkerModelTask(
     try {
       result = await client.execute({
         prompt,
-        reasoningLevel: route.reasoningLevel,
-        maximumOutputTokens: route.maximumOutputTokens,
+        reasoningLevel: candidate.reasoningLevel,
+        maximumOutputTokens: candidate.maximumOutputTokens,
       });
     } catch {
-      addCost(route.worstCaseCostUsd);
+      addCost(candidate.worstCaseCostUsd);
       attempts.push({
-        provider: route.provider,
-        model: route.model,
-        billingMode: route.billingMode,
+        provider: candidate.provider,
+        model: candidate.model,
+        billingMode: candidate.billingMode,
         outcome: "failed",
-        accountedCostUsd: route.worstCaseCostUsd,
+        accountedCostUsd: candidate.worstCaseCostUsd,
       });
       continue;
     }
@@ -365,21 +379,21 @@ export async function executeWorkerModelTask(
       result.billableOutputTokens >= 0;
     const actualCostUsd = usageIsValid
       ? Math.ceil((
-        result.inputTokens * route.inputUsdPerMillionTokens / 1_000_000 +
-        result.billableOutputTokens * route.outputUsdPerMillionTokens / 1_000_000
+        result.inputTokens * candidate.inputUsdPerMillionTokens / 1_000_000 +
+        result.billableOutputTokens * candidate.outputUsdPerMillionTokens / 1_000_000
       ) * 1_000_000) / 1_000_000
-      : route.worstCaseCostUsd;
+      : candidate.worstCaseCostUsd;
     addCost(actualCostUsd);
     if (
       !usageIsValid ||
-      result.inputTokens > route.maximumInputTokens ||
-      result.billableOutputTokens > route.maximumOutputTokens ||
+      result.inputTokens > candidate.maximumInputTokens ||
+      result.billableOutputTokens > candidate.maximumOutputTokens ||
       !result.outputText.trim()
     ) {
       attempts.push({
-        provider: route.provider,
-        model: route.model,
-        billingMode: route.billingMode,
+        provider: candidate.provider,
+        model: candidate.model,
+        billingMode: candidate.billingMode,
         outcome: "rejected",
         accountedCostUsd: actualCostUsd,
       });
@@ -387,9 +401,9 @@ export async function executeWorkerModelTask(
     }
 
     attempts.push({
-      provider: route.provider,
-      model: route.model,
-      billingMode: route.billingMode,
+      provider: candidate.provider,
+      model: candidate.model,
+      billingMode: candidate.billingMode,
       outcome: "succeeded",
       accountedCostUsd: actualCostUsd,
     });
@@ -398,10 +412,10 @@ export async function executeWorkerModelTask(
       evidence: {
         schemaVersion: 1,
         taskKind: plan.taskKind,
-        provider: route.provider,
-        model: route.model,
-        billingMode: route.billingMode,
-        reasoningLevel: route.reasoningLevel,
+        provider: candidate.provider,
+        model: candidate.model,
+        billingMode: candidate.billingMode,
+        reasoningLevel: candidate.reasoningLevel,
         inputTokens: result.inputTokens,
         billableOutputTokens: result.billableOutputTokens,
         attemptCount: attempts.length,
