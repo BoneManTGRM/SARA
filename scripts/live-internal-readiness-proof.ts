@@ -5,16 +5,15 @@ import { sha256 } from "../src/canonical.ts";
 import { SaraKernel } from "../src/kernel.ts";
 import type { WorkerModelClient } from "../src/model-router.ts";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
-import {
-  GitHubPublicRepositoryEvidenceCollector,
-  type PublicRepositoryEvidenceSnapshot,
-} from "../src/public-repository-evidence.ts";
+import type { PublicRepositoryEvidenceSnapshot } from "../src/public-repository-evidence.ts";
 import { RevenuePilotOperator } from "../src/revenue-pilot-operator.ts";
 import { readRepositoryReadinessReportArtifact } from "../src/repository-readiness-report-artifacts.ts";
 import type { OwnerApproval } from "../src/types.ts";
 
 const targetRepository = process.env.SARA_PROOF_TARGET_REPOSITORY?.trim()
   || "https://github.com/BoneManTGRM/SARA";
+const pinnedCommit = process.env.SARA_PROOF_PINNED_COMMIT?.trim()
+  || "c14f5113c34271abd69e0a9fbcbd29d4dcf4f750";
 const apiKey = process.env.OPENAI_API_KEY?.trim();
 if (!apiKey) throw new Error("OPENAI_API_KEY is required for the live internal proof.");
 
@@ -22,6 +21,124 @@ const stateDirectory = await mkdtemp(join(tmpdir(), "sara-live-readiness-proof-"
 const ownerToken = "sara-isolated-live-proof-owner";
 const ownerTokenSha256 = sha256(ownerToken);
 const startedAt = new Date();
+
+const PROOF_SAMPLE_PATHS = [
+  "package.json",
+  "src/openai-worker.ts",
+  "src/model-router.ts",
+  ".github/workflows/ci.yml",
+  ".github/workflows/codeql.yml",
+] as const;
+const MAX_FILE_SOURCE_BYTES = 1_500;
+const MAX_TOTAL_SOURCE_BYTES = 6_000;
+
+async function fetchPinnedSource(path: string, remainingBytes: number): Promise<{
+  sourceText: string;
+  sourceTruncated: boolean;
+}> {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const url = new URL(
+    `https://raw.githubusercontent.com/BoneManTGRM/SARA/${pinnedCommit}/${encodedPath}`,
+  );
+  if (url.protocol !== "https:" || url.hostname !== "raw.githubusercontent.com") {
+    throw new Error("Pinned proof source must use raw.githubusercontent.com over HTTPS.");
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      redirect: "error",
+      headers: { "user-agent": "SARA-Isolated-Acceptance-Proof/1.0" },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if ((error as Error).name === "AbortError") throw new Error(`Pinned source ${path} timed out.`);
+    throw new Error(`Pinned source ${path} could not be read.`);
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) throw new Error(`Pinned source ${path} failed with status ${response.status}.`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > 256 * 1024) throw new Error(`Pinned source ${path} exceeded its proof limit.`);
+  const limit = Math.max(0, Math.min(MAX_FILE_SOURCE_BYTES, remainingBytes));
+  const slice = bytes.subarray(0, limit);
+  return {
+    sourceText: slice.toString("utf8").replace(/\u0000/gu, ""),
+    sourceTruncated: bytes.length > slice.length,
+  };
+}
+
+async function buildConnectorVerifiedPinnedSnapshot(): Promise<PublicRepositoryEvidenceSnapshot> {
+  if (targetRepository !== "https://github.com/BoneManTGRM/SARA") {
+    throw new Error("The connector-verified proof snapshot is bound only to BoneManTGRM/SARA.");
+  }
+  if (!/^[a-f0-9]{40}$/u.test(pinnedCommit)) {
+    throw new Error("SARA_PROOF_PINNED_COMMIT must be one lowercase 40-character commit SHA.");
+  }
+  const sampledFiles: PublicRepositoryEvidenceSnapshot["sampledFiles"] = [];
+  let sampledBytes = 0;
+  for (const path of PROOF_SAMPLE_PATHS) {
+    if (sampledBytes >= MAX_TOTAL_SOURCE_BYTES) break;
+    const source = await fetchPinnedSource(path, MAX_TOTAL_SOURCE_BYTES - sampledBytes);
+    sampledBytes += Buffer.byteLength(source.sourceText, "utf8");
+    const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+    sampledFiles.push({
+      path,
+      permalink: `${targetRepository}/blob/${pinnedCommit}/${encodedPath}`,
+      sourceText: source.sourceText,
+      sourceTruncated: source.sourceTruncated,
+    });
+  }
+  if (sampledFiles.length !== PROOF_SAMPLE_PATHS.length || sampledBytes !== MAX_TOTAL_SOURCE_BYTES) {
+    throw new Error("The pinned proof evidence packet did not reach its expected bounded source coverage.");
+  }
+  return {
+    schemaVersion: 1,
+    provider: "github",
+    repository: targetRepository,
+    immutableCommitSha: pinnedCommit,
+    defaultBranch: "main",
+    collectedAt: new Date().toISOString(),
+    collectionMode: "anonymous_read_only",
+    repositoryFacts: {
+      archived: false,
+      disabled: false,
+      fork: false,
+      stars: 0,
+      openIssues: 1,
+      licenseSpdx: "NOASSERTION",
+    },
+    inventory: [
+      { path: ".github/workflows/ci.yml", type: "blob", size: 273 },
+      { path: ".github/workflows/cloudflare-self-build.yml", type: "blob", size: 2701 },
+      { path: ".github/workflows/codeql.yml", type: "blob", size: 4685 },
+      { path: ".github/workflows/sara-revenue-scout.yml", type: "blob", size: 1488 },
+      { path: ".github/workflows/self-build.yml", type: "blob", size: 1009 },
+      { path: "LICENSE", type: "blob", size: 1230 },
+      { path: "README.md", type: "blob", size: 18382 },
+      { path: "docs/REVENUE_PILOT_50.md", type: "blob", size: 9938 },
+      { path: "package-lock.json", type: "blob", size: 16751 },
+      { path: "package.json", type: "blob", size: 1573 },
+      { path: "src/model-router.ts", type: "blob", size: null },
+      { path: "src/openai-worker.ts", type: "blob", size: null },
+      { path: "src/public-repository-evidence.ts", type: "blob", size: null },
+      { path: "src/repository-readiness-report.ts", type: "blob", size: null },
+      { path: "src/revenue-pilot-operator.ts", type: "blob", size: null },
+      { path: "tests/model-router.test.ts", type: "blob", size: null },
+      { path: "tests/openai-worker.test.ts", type: "blob", size: null },
+      { path: "tests/repository-readiness-report.test.ts", type: "blob", size: null },
+    ],
+    inventoryTruncated: true,
+    sampledFiles,
+    limitations: [
+      "This isolated unpaid acceptance proof is bound to an owner-connected GitHub-verified immutable commit; sampled source bytes were reread anonymously from raw.githubusercontent.com after the anonymous GitHub API returned HTTP 429.",
+      "The pinned proof packet is deliberately bounded to selected public files and is not evidence that unobserved files, history, branches, dependencies, vulnerabilities, or exposed secrets are absent.",
+      "No private repository, credential, issue mutation, branch mutation, merge, deployment, or customer-system access was used.",
+    ],
+  };
+}
 
 try {
   const kernel = await SaraKernel.boot({
@@ -31,20 +148,19 @@ try {
   });
   const owner = kernel.authenticateOwnerToken(ownerToken);
 
-  const collector = new GitHubPublicRepositoryEvidenceCollector({ timeoutMs: 60_000 });
-  let snapshot: PublicRepositoryEvidenceSnapshot;
-  try {
-    snapshot = await collector.collect(targetRepository);
-    console.log(`SARA_INTERNAL_FREE_PROOF_EVIDENCE=${JSON.stringify({
-      repository: snapshot.repository,
-      immutableCommitSha: snapshot.immutableCommitSha,
-      inventoryEntries: snapshot.inventory.length,
-      inventoryTruncated: snapshot.inventoryTruncated,
-      sampledFiles: snapshot.sampledFiles.map((file) => file.path),
-    })}`);
-  } catch (error) {
-    throw new Error(`Repository evidence collection failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  const snapshot = await buildConnectorVerifiedPinnedSnapshot();
+  console.log(`SARA_INTERNAL_FREE_PROOF_EVIDENCE=${JSON.stringify({
+    evidenceMode: "CONNECTOR_VERIFIED_PINNED_IMMUTABLE_SNAPSHOT",
+    repository: snapshot.repository,
+    immutableCommitSha: snapshot.immutableCommitSha,
+    inventoryEntries: snapshot.inventory.length,
+    inventoryTruncated: snapshot.inventoryTruncated,
+    sampledFiles: snapshot.sampledFiles.map((file) => file.path),
+    sampledSourceBytes: snapshot.sampledFiles.reduce(
+      (total, file) => total + Buffer.byteLength(file.sourceText, "utf8"),
+      0,
+    ),
+  })}`);
 
   const job = await kernel.createRevenuePilotJob(owner, {
     opportunityId: `internal-free-proof-${startedAt.getTime()}`,
@@ -177,6 +293,7 @@ try {
     schemaVersion: 1,
     proof: "SARA_LIVE_INTERNAL_FREE_PUBLIC_REPOSITORY_READINESS_SNAPSHOT",
     testMode: "ISOLATED_UNPAID_ACCEPTANCE_TEST",
+    evidenceMode: "CONNECTOR_VERIFIED_PINNED_IMMUTABLE_SNAPSHOT",
     productionLedgerTouched: false,
     paymentReceived: false,
     targetRepository,
@@ -201,6 +318,7 @@ try {
     productionLedgerTouched: false,
     paymentReceived: false,
     targetRepository,
+    pinnedCommit,
     message: error instanceof Error ? error.message : String(error),
   };
   console.error(`SARA_INTERNAL_FREE_PROOF_FAILURE=${JSON.stringify(failure)}`);
