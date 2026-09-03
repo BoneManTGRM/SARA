@@ -23,16 +23,17 @@ const REPOSITORY_READINESS_JSON_SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["category", "status", "evidenceUrls", "note"],
+        required: ["category", "status", "evidenceFileIndexes", "note"],
         properties: {
           category: {
             type: "string",
             enum: ["code", "dependencies", "secret_exposure", "release_controls"],
           },
           status: { type: "string", enum: ["reviewed", "unavailable"] },
-          evidenceUrls: {
+          evidenceFileIndexes: {
             type: "array",
-            items: { type: "string", minLength: 1 },
+            maxItems: 8,
+            items: { type: "integer", minimum: 0, maximum: 63 },
           },
           note: { type: "string", minLength: 1, maxLength: 500 },
         },
@@ -52,7 +53,9 @@ const REPOSITORY_READINESS_JSON_SCHEMA = {
           "title",
           "observation",
           "recommendation",
-          "evidenceUrl",
+          "evidenceFileIndex",
+          "evidenceLineStart",
+          "evidenceLineEnd",
         ],
         properties: {
           id: { type: "string", pattern: "^[a-z0-9][a-z0-9-]{0,63}$" },
@@ -65,7 +68,9 @@ const REPOSITORY_READINESS_JSON_SCHEMA = {
           title: { type: "string", minLength: 1, maxLength: 500 },
           observation: { type: "string", minLength: 1, maxLength: 500 },
           recommendation: { type: "string", minLength: 1, maxLength: 500 },
-          evidenceUrl: { type: "string", minLength: 1 },
+          evidenceFileIndex: { type: "integer", minimum: 0, maximum: 63 },
+          evidenceLineStart: { type: "integer", minimum: 1, maximum: 100000 },
+          evidenceLineEnd: { type: "integer", minimum: 1, maximum: 100000 },
         },
       },
     },
@@ -79,7 +84,7 @@ const REPOSITORY_READINESS_JSON_SCHEMA = {
 type OpenAITextFormat = {
   format: {
     type: "json_schema";
-    name: "sara_repository_readiness_report_v1";
+    name: "sara_repository_readiness_report_v2";
     strict: true;
     schema: typeof REPOSITORY_READINESS_JSON_SCHEMA;
   };
@@ -90,7 +95,7 @@ function responseTextFormat(prompt: string): OpenAITextFormat | undefined {
   return {
     format: {
       type: "json_schema",
-      name: "sara_repository_readiness_report_v1",
+      name: "sara_repository_readiness_report_v2",
       strict: true,
       schema: REPOSITORY_READINESS_JSON_SCHEMA,
     },
