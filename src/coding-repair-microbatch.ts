@@ -20,7 +20,7 @@ export type CodingMicroBatchModel = {
   proposeBatch(tasks: readonly CodingMicroBatchTask[]): Promise<CodingMicroBatchUsage & {
     proposals: CodingMicroBatchProposal[];
   }>;
-  proposeSingle(task: CodingMicroBatchTask): Promise<CodingMicroBatchUsage & {
+  proposeSingle(task: CodingMicroBatchTask, maximumSpendUsd?: number): Promise<CodingMicroBatchUsage & {
     proposal: CodingMicroBatchProposal;
   }>;
 };
@@ -107,47 +107,78 @@ export async function runVerifiedCodingMicroBatch(input: {
   let outputTokens = 0;
   let accountedCostUsd = 0;
   let activeModelMilliseconds = 0;
-  const account = (usage: CodingMicroBatchUsage) => {
-    assertUsage(usage);
-    if (accountedCostUsd + usage.accountedCostUsd > input.maximumSpendUsd + Number.EPSILON) {
-      throw new Error("Coding micro-batch exceeded its configured spend ceiling.");
-    }
-    accountedCostUsd += usage.accountedCostUsd;
-    inputTokens += usage.inputTokens;
-    outputTokens += usage.outputTokens;
-    activeModelMilliseconds += usage.elapsedMilliseconds;
-    modelCalls += 1;
-  };
 
   const batch = await input.model.proposeBatch(structuredClone(input.tasks));
-  account(batch);
+  assertUsage(batch);
+  if (batch.accountedCostUsd > input.maximumSpendUsd + Number.EPSILON) {
+    throw new Error("Coding micro-batch exceeded its configured spend ceiling.");
+  }
+  accountedCostUsd = batch.accountedCostUsd;
+  inputTokens = batch.inputTokens;
+  outputTokens = batch.outputTokens;
+  activeModelMilliseconds = batch.elapsedMilliseconds;
+  modelCalls = 1;
+
   assertProposalIdentities(input.tasks, batch.proposals);
   const proposalsById = new Map(batch.proposals.map((proposal) => [proposal.id, proposal]));
+  const resultsById = new Map<string, CodingMicroBatchResult["results"][number]>();
+  const failedTasks: CodingMicroBatchTask[] = [];
 
-  const results: CodingMicroBatchResult["results"] = [];
   for (const task of input.tasks) {
     const proposal = proposalsById.get(task.id);
     if (!proposal) throw new Error("Coding micro-batch proposal identities are malformed.");
     const verification = await input.verify(structuredClone(task), proposal.source);
     if (verification.passed) {
-      results.push({ id: task.id, passed: true, score: verification.score, attempts: 1 });
-      continue;
+      resultsById.set(task.id, { id: task.id, passed: true, score: verification.score, attempts: 1 });
+    } else {
+      failedTasks.push(structuredClone(task));
     }
-
-    const fallback = await input.model.proposeSingle(structuredClone(task));
-    account(fallback);
-    if (fallback.proposal.id !== task.id) {
-      throw new Error("Coding micro-batch fallback proposal identity does not match its task.");
-    }
-    const fallbackVerification = await input.verify(structuredClone(task), fallback.proposal.source);
-    results.push({
-      id: task.id,
-      passed: fallbackVerification.passed,
-      score: fallbackVerification.score,
-      attempts: 2,
-    });
   }
 
+  if (failedTasks.length > 0) {
+    const remainingSpendUsd = input.maximumSpendUsd - accountedCostUsd;
+    if (remainingSpendUsd <= 0) {
+      throw new Error("Coding micro-batch has no remaining spend for failed-member fallback.");
+    }
+    const perFallbackSpendCeilingUsd = remainingSpendUsd / failedTasks.length;
+    const fallbacks = await Promise.all(failedTasks.map(async (task) => {
+      const response = await input.model.proposeSingle(structuredClone(task), perFallbackSpendCeilingUsd);
+      assertUsage(response);
+      if (response.accountedCostUsd > perFallbackSpendCeilingUsd + Number.EPSILON) {
+        throw new Error("Coding micro-batch fallback exceeded its reserved spend ceiling.");
+      }
+      if (response.proposal.id !== task.id) {
+        throw new Error("Coding micro-batch fallback proposal identity does not match its task.");
+      }
+      return { task, response };
+    }));
+
+    const fallbackCostUsd = fallbacks.reduce((sum, entry) => sum + entry.response.accountedCostUsd, 0);
+    if (accountedCostUsd + fallbackCostUsd > input.maximumSpendUsd + Number.EPSILON) {
+      throw new Error("Coding micro-batch exceeded its configured spend ceiling.");
+    }
+    accountedCostUsd += fallbackCostUsd;
+    inputTokens += fallbacks.reduce((sum, entry) => sum + entry.response.inputTokens, 0);
+    outputTokens += fallbacks.reduce((sum, entry) => sum + entry.response.outputTokens, 0);
+    activeModelMilliseconds += Math.max(...fallbacks.map((entry) => entry.response.elapsedMilliseconds));
+    modelCalls += fallbacks.length;
+
+    await Promise.all(fallbacks.map(async ({ task, response }) => {
+      const fallbackVerification = await input.verify(structuredClone(task), response.proposal.source);
+      resultsById.set(task.id, {
+        id: task.id,
+        passed: fallbackVerification.passed,
+        score: fallbackVerification.score,
+        attempts: 2,
+      });
+    }));
+  }
+
+  const results = input.tasks.map((task) => {
+    const result = resultsById.get(task.id);
+    if (!result) throw new Error("Coding micro-batch did not produce a verification result for every task.");
+    return result;
+  });
   const verifiedComplete = results.filter((result) => result.passed).length;
   const accuracyPreserved = verifiedComplete === input.tasks.length;
   const modelCallThroughputRatio = accuracyPreserved ? verifiedComplete / modelCalls : null;
