@@ -24,6 +24,7 @@ export type RevenuePilotTestingPlan = Omit<RevenuePilotPlan, "priceUsd" | "safes
 
 export type RevenuePilotTestingStatus =
   | "testing_ready"
+  | "testing_review"
   | "queued"
   | "running"
   | "failed"
@@ -99,9 +100,9 @@ function testingJobFromCommercial(
 ): RevenuePilotTestingJob {
   const status: RevenuePilotTestingStatus = job.status === "offer_ready"
     ? "testing_ready"
-    : job.status === "rejected"
-      ? "failed"
-      : "testing_complete";
+    : job.status === "owner_review"
+      ? "testing_review"
+      : "failed";
   return {
     id: job.id,
     input: withoutCallerPrice(testingInput),
