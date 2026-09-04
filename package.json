@@ -34,13 +34,14 @@
     "proof:self-build": "node --import tsx proof/self-build.ts",
     "proof:revenue-pilot": "node --import tsx proof/revenue-pilot.ts",
     "proof:reparodynamic-coding": "node --import tsx proof/reparodynamic-coding.ts",
-    "benchmark:coding:offline": "node --import tsx proof/reparodynamic-coding.ts",
+    "proof:coding-benchmark": "node --import tsx proof/coding-repair-benchmark.ts",
+    "benchmark:coding:offline": "node --import tsx proof/coding-repair-benchmark.ts",
     "benchmark:coding:live": "node --import tsx scripts/benchmark-reparodynamic-coding.ts --live",
     "proof:http": "node --import tsx --test tests/http.test.ts",
     "executor:site": "node --import tsx scripts/site-directive-executor.ts",
     "executor:cloudflare": "node --import tsx scripts/cloudflare-objective-executor.ts",
     "typecheck": "tsc --noEmit",
-    "verify": "npm test && npm run typecheck && npm run demo && npm run proof:bootstrap && npm run proof:self-build && npm run proof:revenue-pilot && npm run proof:reparodynamic-coding && npm run proof:http"
+    "verify": "npm test && npm run typecheck && npm run demo && npm run proof:bootstrap && npm run proof:self-build && npm run proof:revenue-pilot && npm run proof:reparodynamic-coding && npm run proof:coding-benchmark && npm run proof:http"
   },
   "engines": {
     "node": ">=22"
