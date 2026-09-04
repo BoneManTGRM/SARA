@@ -6,6 +6,10 @@ import {
   digestCodingRepairAttemptLessons,
   passingVerificationChecks,
 } from "./coding-repair-lessons.ts";
+import {
+  buildCodingRepairPerformanceGauge,
+  sanitizeCodingRepairVerification,
+} from "./coding-repair-performance-gauge.ts";
 import { chooseCodingRepairStrategy, INITIAL_CODING_REPAIR_LIMITS, repairYieldPerEnergy } from "./coding-repair-policy.ts";
 import { validateCodingRepairProposal } from "./coding-repair-prompt.ts";
 import { summarizeCodingRepairSourceChanges } from "./coding-repair-source-signals.ts";
@@ -92,10 +96,12 @@ function runResult(input: {
   receipts: CodingRepairReceipt[];
   attemptLessons: CodingRepairAttemptLesson[];
   accountedCostUsd: number;
+  limits: CodingRepairLimits;
+  verifierExecutions: number;
   runStarted: number;
 }): CodingRepairRun {
   const attemptLessons = boundCodingRepairAttemptLessons(input.attemptLessons);
-  return {
+  const result = {
     baseline: input.baseline,
     baselineVerification: input.baselineVerification,
     champion: input.champion,
@@ -106,7 +112,15 @@ function runResult(input: {
     attemptLessonsDigest: digestCodingRepairAttemptLessons(attemptLessons),
     accountedCostUsd: input.accountedCostUsd,
     elapsedMilliseconds: performance.now() - input.runStarted,
+    performanceGauge: buildCodingRepairPerformanceGauge({
+      baselineVerification: input.baselineVerification,
+      finalVerification: input.verification,
+      receipts: input.receipts,
+      limits: input.limits,
+      verifierExecutions: input.verifierExecutions,
+    }),
   };
+  return result;
 }
 
 export async function runCodingRepairController(input: {
@@ -118,8 +132,13 @@ export async function runCodingRepairController(input: {
 }): Promise<CodingRepairRun> {
   const runStarted = performance.now();
   const limits = input.limits ?? INITIAL_CODING_REPAIR_LIMITS;
+  let verifierExecutions = 0;
+  const verifyCandidate = async (candidate: ProgramCandidateProposal): Promise<ProgramVerificationResult> => {
+    verifierExecutions += 1;
+    return sanitizeCodingRepairVerification(await input.verify(structuredClone(candidate)));
+  };
   let champion = structuredClone(input.baseline);
-  let verification = await input.verify(champion);
+  let verification = await verifyCandidate(champion);
   const baselineVerification = structuredClone(verification);
   let state: CodingRepairRun["state"] = verification.passed ? "VERIFIED_CANDIDATE" : "BASELINE";
   const receipts: CodingRepairReceipt[] = [];
@@ -138,6 +157,8 @@ export async function runCodingRepairController(input: {
       receipts,
       attemptLessons,
       accountedCostUsd,
+      limits,
+      verifierExecutions,
       runStarted,
     });
   }
@@ -310,7 +331,7 @@ export async function runCodingRepairController(input: {
 
     const beforeVerification = verification;
     const started = performance.now();
-    const nextVerification = await input.verify(applied.candidate);
+    const nextVerification = await verifyCandidate(applied.candidate);
     const verificationMilliseconds = performance.now() - started;
     const improved = nextVerification.score > beforeVerification.score && !hasRegression(beforeVerification, nextVerification);
     const outcome: CodingRepairReceipt["outcome"] = nextVerification.passed
@@ -384,6 +405,8 @@ export async function runCodingRepairController(input: {
     receipts,
     attemptLessons,
     accountedCostUsd,
+    limits,
+    verifierExecutions,
     runStarted,
   });
 }
