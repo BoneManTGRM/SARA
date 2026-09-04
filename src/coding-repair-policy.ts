@@ -46,6 +46,9 @@ export function chooseCodingRepairStrategy(input: {
   if (remainingCostUsd < 0.01) {
     return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "cost_limit" };
   }
+  if (input.failures.some(failure => failure.kind === "policy" && failure.code === "GENOME_LAB_INVALID_STRUCTURE")) {
+    return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "invalid_candidate_structure" };
+  }
   if (protectedFailure || critical) {
     return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "protected_or_critical" };
   }

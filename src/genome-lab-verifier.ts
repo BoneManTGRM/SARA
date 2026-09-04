@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { posix } from "node:path";
 import { canonicalJson, sha256 } from "./canonical.ts";
-import { buildVerifiedSkillCandidate } from "./genome-lab.ts";
+import { buildVerifiedSkillCandidate, validateProgramCandidateStructure } from "./genome-lab.ts";
 import type { CodingFailureKind, CodingFailureSignal, ProgramVerificationResult } from "./coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "./types.ts";
 
@@ -81,14 +81,17 @@ function typeDiagnostics(candidate: ProgramCandidateProposal): ts.Diagnostic[] {
   return [...ts.getPreEmitDiagnostics(ts.createProgram([...files.keys()], options, host))];
 }
 
+function programArtifactDigest(candidate: ProgramCandidateProposal): string {
+  const files = candidate.files.map(file => ({ path: file.path, contentDigest: sha256(file.content) }))
+    .sort((a, b) => a.path.localeCompare(b.path));
+  return sha256(canonicalJson({ schemaVersion: 1, files }));
+}
+
 export async function verifyProgramCandidate(input: {
   candidate: ProgramCandidateProposal;
   behaviorCheck?: (candidate: ProgramCandidateProposal) => Promise<CodingFailureSignal[]>;
 }): Promise<ProgramVerificationResult> {
-  const canonicalFiles = [...input.candidate.files]
-    .map((file) => ({ path: file.path, contentDigest: sha256(file.content) }))
-    .sort((left, right) => left.path.localeCompare(right.path));
-  const artifactDigest = sha256(canonicalJson({ schemaVersion: 1, files: canonicalFiles }));
+  const artifactDigest = programArtifactDigest(input.candidate);
   const failures: CodingFailureSignal[] = [];
   const paths = new Set<string>();
   for (const file of input.candidate.files) {
@@ -135,6 +138,17 @@ export async function verifyGenomeLabProgramCandidate(input: {
   constitutionDigest: string;
   maximumBudgetUsd?: number;
 }): Promise<ProgramVerificationResult> {
+  // Missing modules cannot be created through the bounded existing-file repair contract.
+  // Use the same structural validator as Genome Lab, without weakening its restrictions.
+  try {
+    validateProgramCandidateStructure(input.candidate);
+  } catch {
+    const failure = signal({ kind: "policy", code: "GENOME_LAB_INVALID_STRUCTURE", note: "Candidate structure cannot enter the existing Genome Lab contract.", severity: "high" });
+    return {
+      passed: false, score: 0, artifactDigest: programArtifactDigest(input.candidate),
+      failures: [failure], completedChecks: ["source_policy", "artifact_integrity"], evidenceDigests: [failure.evidenceDigest],
+    };
+  }
   const initial = await verifyProgramCandidate({ candidate: input.candidate });
   if (initial.failures.length > 0) return initial;
   const root = await mkdtemp(join(tmpdir(), "sara-reparodynamic-verify-"));
