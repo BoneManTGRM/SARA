@@ -1,1 +1,0 @@
-Exact-head CodeQL proof branch for V4. Temporary and unmerged.
