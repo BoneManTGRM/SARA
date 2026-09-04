@@ -1,0 +1,149 @@
+name: Telegram NICO release evidence ledger
+
+on:
+  push:
+    branches:
+      - automation/telegram-nico-release-evidence-20260904
+
+permissions:
+  contents: write
+  deployments: read
+  checks: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: telegram-nico-release-evidence-ledger
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Capture immutable GitHub and production evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: BoneManTGRM/SARA
+          HEAD_BRANCH: feature/telegram-nico-gmail-delivery-final
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$REPOSITORY"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+          mkdir -p evidence/telegram-nico-gmail
+
+          pr=""
+          for attempt in $(seq 1 180); do
+            pulls="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls?state=closed&head=${REPOSITORY%%/*}:$HEAD_BRANCH&per_page=20")"
+            pr="$(jq '[.[] | select(.merged_at != null)] | sort_by(.merged_at) | last // empty' <<<"$pulls")"
+            [ -n "$pr" ] && break
+            sleep 15
+          done
+          test -n "$pr"
+          number="$(jq -r '.number' <<<"$pr")"
+          head_sha="$(jq -r '.head.sha' <<<"$pr")"
+          merged_sha="$(jq -r '.merge_commit_sha' <<<"$pr")"
+          test "${#head_sha}" = "40"
+          test "${#merged_sha}" = "40"
+
+          checks="$(curl --fail --silent --show-error "${auth[@]}" "$api/commits/$head_sha/check-runs?per_page=100")"
+          latest() {
+            local name="$1"
+            jq -r --arg name "$name" '[.check_runs[] | select(.name == $name)] | sort_by(.completed_at // .started_at // .created_at) | last | .conclusion // "missing"'
+          }
+          test "$(latest test <<<"$checks")" = "success"
+          test "$(latest CodeQL <<<"$checks")" = "success"
+          test "$(latest 'Analyze (javascript-typescript)' <<<"$checks")" = "success"
+          test "$(latest verify <<<"$checks")" = "success"
+          test "$(latest codeql <<<"$checks")" = "success"
+
+          alerts="$(curl --fail --silent --show-error "${auth[@]}" "$api/code-scanning/alerts?state=open&per_page=100")"
+          exact_alerts="$(jq --arg sha "$head_sha" '[.[] | select(.most_recent_instance.commit_sha == $sha)] | length' <<<"$alerts")"
+          test "$exact_alerts" = "0"
+
+          deployment=""
+          deployment_status=""
+          for attempt in $(seq 1 160); do
+            deployments="$(curl --fail --silent --show-error "${auth[@]}" "$api/deployments?sha=$merged_sha&per_page=100")"
+            deployment="$(jq '[.[] | select((.environment | ascii_downcase) == "production" or (.environment | ascii_downcase | contains("production")))] | sort_by(.created_at) | last // empty' <<<"$deployments")"
+            if [ -n "$deployment" ]; then
+              deployment_id="$(jq -r '.id' <<<"$deployment")"
+              statuses="$(curl --fail --silent --show-error "${auth[@]}" "$api/deployments/$deployment_id/statuses?per_page=100")"
+              deployment_status="$(jq 'sort_by(.created_at) | last // empty' <<<"$statuses")"
+              state="$(jq -r '.state // empty' <<<"$deployment_status")"
+              [ "$state" = "success" ] && break
+              case "$state" in error|failure|inactive) exit 1 ;; esac
+            fi
+            sleep 15
+          done
+          test -n "$deployment"
+          test "$(jq -r '.state' <<<"$deployment_status")" = "success"
+          deployment_id="$(jq -r '.id' <<<"$deployment")"
+          deployment_status_id="$(jq -r '.id' <<<"$deployment_status")"
+          deployment_url="$(jq -r '.environment_url // .target_url // empty' <<<"$deployment_status")"
+
+          health_url=""
+          health_code=""
+          health_body_commit=false
+          for candidate in \
+            "${deployment_url%/}/health" \
+            "${deployment_url%/}/api/health" \
+            "https://saraseed.app/health" \
+            "https://saraseed.app/api/health" \
+            "https://saraseed.app/"; do
+            [ -n "$candidate" ] || continue
+            for attempt in $(seq 1 25); do
+              code="$(curl --location --silent --show-error --output /tmp/sara-health-body --write-out '%{http_code}' --max-time 20 "$candidate" || true)"
+              if [ "$code" = "200" ]; then
+                health_url="$candidate"
+                health_code="$code"
+                if grep -Fqi "$merged_sha" /tmp/sara-health-body || grep -Fqi "${merged_sha:0:12}" /tmp/sara-health-body; then
+                  health_body_commit=true
+                fi
+                break 2
+              fi
+              sleep 10
+            done
+          done
+          test "$health_code" = "200"
+
+          jq -n \
+            --arg schema "sara.telegram_nico_gmail.release_evidence.v1" \
+            --arg captured_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg pr_number "$number" \
+            --arg pr_url "$(jq -r '.html_url' <<<"$pr")" \
+            --arg head_sha "$head_sha" \
+            --arg merged_sha "$merged_sha" \
+            --arg merged_at "$(jq -r '.merged_at' <<<"$pr")" \
+            --arg deployment_id "$deployment_id" \
+            --arg deployment_status_id "$deployment_status_id" \
+            --arg deployment_environment "$(jq -r '.environment' <<<"$deployment")" \
+            --arg deployment_state "$(jq -r '.state' <<<"$deployment_status")" \
+            --arg deployment_url "$deployment_url" \
+            --arg health_url "$health_url" \
+            --arg health_code "$health_code" \
+            --argjson health_body_commit "$health_body_commit" \
+            --argjson checks "$(jq '[.check_runs[] | {name,status,conclusion,completed_at,html_url}]' <<<"$checks")" \
+            '{schema:$schema,captured_at:$captured_at,pull_request:($pr_number|tonumber),pull_request_url:$pr_url,head_sha:$head_sha,merged_commit_sha:$merged_sha,merged_at:$merged_at,ci_result:"success",codeql_result:"success",open_codeql_alerts_for_exact_head:0,checks:$checks,deployment:{github_deployment_id:($deployment_id|tonumber),github_deployment_status_id:($deployment_status_id|tonumber),environment:$deployment_environment,state:$deployment_state,url:$deployment_url,exact_commit_proven_by_deployment_record:true},production_health:{url:$health_url,http_status:($health_code|tonumber),body_exposed_exact_commit:$health_body_commit},gmail:{authenticated_sender_identity:null,authorized_sender:"sara.reparodynamics@gmail.com",authorized_recipient:"reparodynamics@gmail.com",oauth_consent_required:true,email_sent:false},private_test:{repository:"https://github.com/sindresorhus/p-map",locked_commit:"22dda61ea29037ba85af25e84bc5efba77e62f44",started:false,report_sent:false},truth:{no_gmail_access_claimed:true,no_assessment_completion_claimed:true,no_email_delivery_claimed:true}}' \
+            > evidence/telegram-nico-gmail/release-evidence.json
+
+      - name: Commit the non-secret evidence ledger
+        run: |
+          git config user.name "Reparodynamics Release Evidence"
+          git config user.email "actions@users.noreply.github.com"
+          git add evidence/telegram-nico-gmail/release-evidence.json
+          git diff --cached --check
+          git commit -m "docs: record Telegram NICO production release evidence"
+          git push origin HEAD:automation/telegram-nico-release-evidence-20260904
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: telegram-nico-release-evidence-ledger
+          path: evidence/telegram-nico-gmail/release-evidence.json
+          if-no-files-found: error
+          retention-days: 30
