@@ -38,7 +38,11 @@ describe("owner-only no-price testing HTTP boundary", () => {
 
   before(async () => {
     directory = await mkdtemp(join(tmpdir(), "sara-testing-http-"));
-    const kernel = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: tokenHash });
+    const kernel = await SaraKernel.boot({
+      stateDirectory: directory,
+      ownerTokenSha256: tokenHash,
+      bootstrapRevenueCapabilities: true,
+    });
     const modelClient = {
       routeKey: "openai:gpt-5.6-luna:paid",
       maximumWallTimeMs: 1_000,
