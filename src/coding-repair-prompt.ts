@@ -51,12 +51,14 @@ export function validateCodingRepairProposal(input: {
   artifactDigest: string;
   failureFingerprints: ReadonlySet<string>;
   limits: CodingRepairLimits;
+  expectedStrategy: "surgical" | "deep";
 }): void {
-  const { proposal, candidate, artifactDigest, failureFingerprints, limits } = input;
+  const { proposal, candidate, artifactDigest, failureFingerprints, limits, expectedStrategy } = input;
   if (proposal.schemaVersion !== 1) throw new Error("Coding repair schema version is unsupported.");
   if (proposal.baseArtifactDigest !== artifactDigest) throw new Error("Coding repair proposal targets a stale artifact.");
   if (!failureFingerprints.has(proposal.failureFingerprint)) throw new Error("Coding repair proposal targets an unknown failure.");
-  const maximumFiles = proposal.strategy === "surgical" ? limits.surgicalFiles : limits.deepFiles;
+  if (proposal.strategy !== expectedStrategy) throw new Error("Coding repair proposal attempted a strategy escalation.");
+  const maximumFiles = expectedStrategy === "surgical" ? limits.surgicalFiles : limits.deepFiles;
   if (!proposal.changes.length || proposal.changes.length > maximumFiles) throw new Error("Coding repair proposal exceeds its file limit.");
   const files = new Map(candidate.files.map((file) => [file.path, file.content]));
   const seen = new Set<string>();

@@ -124,6 +124,7 @@ export async function runCodingRepairController(input: {
       artifactDigest: verification.artifactDigest,
       failureFingerprints: new Set(verification.failures.map((failure) => failure.fingerprint)),
       limits,
+      expectedStrategy: modelStrategy,
     });
     const applied = applyProposal(champion, response.proposal);
     const lineLimit = modelStrategy === "surgical" ? limits.surgicalChangedLines : limits.deepChangedLines;
