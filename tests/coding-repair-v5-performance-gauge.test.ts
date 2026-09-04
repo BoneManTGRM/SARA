@@ -58,6 +58,7 @@ type PerformanceGaugeView = {
   semanticRepeatRejections: number;
   verifierExecutionsAvoided: number;
   modelCalls: number;
+  accountedCostUsd: number;
   completionGain: number;
   scoreGain: number;
   behavioralProgress: {
@@ -129,6 +130,7 @@ describe("V5 bounded performance gauge", () => {
     assert.equal(gauge.verifierExecutionsAvoided, 1);
     assert.equal(gauge.modelCalls, modelCalls);
     assert.equal(gauge.modelCalls, 3);
+    assert.equal(gauge.accountedCostUsd, 0.03);
     assert.equal(gauge.completionGain, 0);
     assert.equal(gauge.scoreGain, 0);
     assert.equal(gauge.counterfactualBasis, "semantic_tactic_repeat_rejections_only");
@@ -193,6 +195,7 @@ describe("V5 bounded performance gauge", () => {
     assert.equal(run.performanceGauge.behavioralProgress, null);
     assert.equal(run.performanceGauge.verifierExecutions, 1);
     assert.equal(run.performanceGauge.modelCalls, 0);
+    assert.equal(run.performanceGauge.accountedCostUsd, 0);
     assert.equal(JSON.stringify(run).includes(privateUnsafeOutput), false);
   });
 });
