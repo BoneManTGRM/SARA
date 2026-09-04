@@ -87,6 +87,22 @@ describe("owner-only no-price revenue-pilot testing", () => {
     assert.equal(authorized.testingAuthorizationId, "test-authorization-1");
   });
 
+  it("keeps an incomplete no-price plan in testing review instead of marking it complete", () => {
+    const testingJob = createRevenuePilotTestingJob(
+      qualified({ repositoryOwnerPermissionConfirmed: false }),
+      undefined,
+      new Date("2026-09-04T17:00:00.000Z"),
+    );
+
+    assert.equal(testingJob.plan.decision, "owner_review");
+    assert.equal(testingJob.status, "testing_review");
+    assert.match(testingJob.plan.safestNextStep, /resolve.*gap|before starting/i);
+    assert.throws(() => authorizeRevenuePilotForTesting(testingJob, {
+      testingAuthorizationId: "test-authorization-review",
+      ownerApprovalTarget: `revenue-pilot-test:${testingJob.id}:fulfillment`,
+    }), /testing-ready/i);
+  });
+
   it("runs the bounded worker sequence but cannot become a customer delivery", () => {
     let job = createRevenuePilotTestingJob(
       qualified(),
