@@ -87,7 +87,7 @@ describe("V5 matched benchmark evidence", () => {
     assert.deepEqual(result.contract.horizonGovernance, {
       horizonSource: "controller_owned_remaining_cycles_within_existing_three_cycle_ceiling",
       finalOpportunity: "remaining_cycles_equals_one",
-      diversifyTrigger: "prior_verified_gain_plus_latest_evidence_backed_no_gain_rollback",
+      diversifyTrigger: "prior_verified_gain_plus_latest_evidence_backed_no_gain_rejection",
       missingTacticEvidence: "conserve_without_invented_novelty",
       tacticFamilyRule: "disallow_latest_rejected_family_only_for_diversify_rethink_or_retreat",
       authorityEffect: "selection_only_no_cycle_budget_or_mutation_ceiling_expansion",
