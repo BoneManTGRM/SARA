@@ -40,7 +40,7 @@ export function createReparodynamicCandidateGenerator(input: {
       });
       await input.onRun?.(structuredClone(run));
       if (input.mode === "shadow") return baseline;
-      if (run.state !== "VERIFIED_CANDIDATE") throw new Error("Reparodynamic CANARY candidate did not pass deterministic verification.");
+      if (run.state !== "VERIFIED_CANDIDATE") return baseline;
       return run.champion;
     },
   };
