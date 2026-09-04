@@ -11,13 +11,19 @@ const baseline: ProgramCandidateProposal = {
   schemaVersion: 1,
   candidateKind: "typescript_program",
   programName: "Matched benchmark fixture",
-  summary: "A two-step deterministic repair fixture.",
+  summary: "A deterministic matched control fixture.",
   limitations: [],
   files: [
     { path: "src/value.ts", content: "export const value = 0;\n" },
     { path: "tests/value.test.ts", content: "// immutable hidden-test stand-in\n" },
   ],
 };
+
+function numericValue(candidate: ProgramCandidateProposal): number {
+  const match = candidate.files[0].content.match(/value = (-?\d+)/u);
+  if (!match) throw new Error("Fixture value is malformed.");
+  return Number(match[1]);
+}
 
 function failure(code: string, candidate: ProgramCandidateProposal): CodingFailureSignal {
   return {
@@ -34,10 +40,10 @@ function failure(code: string, candidate: ProgramCandidateProposal): CodingFailu
 }
 
 async function verify(candidate: ProgramCandidateProposal): Promise<ProgramVerificationResult> {
-  const source = candidate.files[0].content;
-  const passed = source.includes("42");
-  const score = passed ? 1 : source.includes("1") ? 0.8 : 0.6;
-  const failures = passed ? [] : [failure(source.includes("1") ? "NEEDS_FINAL_REPAIR" : "NEEDS_FIRST_REPAIR", candidate)];
+  const value = numericValue(candidate);
+  const passed = value === 42;
+  const score = passed ? 1 : value === 1 ? 0.8 : value === 2 ? 0.7 : value === 0 ? 0.6 : 0.4;
+  const failures = passed ? [] : [failure(value === 1 ? "NEEDS_DEEP_REPAIR" : `VALUE_${value}`, candidate)];
   return {
     passed,
     score,
@@ -52,7 +58,18 @@ function makeModel(counter: { calls: number }, completeFirst = false): CodingRep
   return {
     async propose({ candidate, verification, strategy }) {
       counter.calls += 1;
-      const nextValue = completeFirst || counter.calls > 1 ? 42 : 1;
+      const current = numericValue(candidate);
+      const nextValue = completeFirst
+        ? 42
+        : current === 0
+          ? 1
+          : current === 1 && strategy === "deep"
+            ? 42
+            : current === 1
+              ? -1
+              : current === -1
+                ? 2
+                : 2;
       return {
         proposal: {
           schemaVersion: 1,
@@ -79,7 +96,7 @@ function benchmarkInput(
   verifier: (candidate: ProgramCandidateProposal) => Promise<ProgramVerificationResult> = verify,
 ): Parameters<typeof runMatchedCodingRepairBenchmark>[0] {
   return {
-    caseId: "two-step-fixture-v1",
+    caseId: "latest-state-versus-reparodynamic-v1",
     sourceCommit: "a".repeat(40),
     modelRouteKey: "openai:gpt-5.6-luna:paid",
     environment: { node: "test", platform: "test", typescript: "test" },
@@ -94,44 +111,55 @@ function benchmarkInput(
 }
 
 describe("matched Reparodynamic coding benchmark", () => {
-  it("uses the first Luna proposal as the one-shot control and measures only bounded continuation", async () => {
+  it("compares bounded Luna latest-state retry against bounded Reparodynamic Luna under identical limits", async () => {
     const counter = { calls: 0 };
     const result = await runMatchedCodingRepairBenchmark(benchmarkInput(makeModel(counter)));
 
-    assert.equal(counter.calls, 2);
     assert.equal(result.valid, true);
     assert.equal(result.control.verifiedComplete, false);
     assert.equal(result.canary.verifiedComplete, true);
-    assert.equal(result.control.accountedCostUsd, 0.01);
-    assert.equal(result.canary.accountedCostUsd, 0.02);
-    assert.equal(result.physicalSpendUsd, 0.02);
+    assert.equal(result.control.accountedCostUsd, 0.03);
+    assert.equal(result.canary.accountedCostUsd, 0.03);
+    assert.equal(result.physicalSpendUsd, 0.05);
+    assert.equal(result.physicalModelCalls, 5);
+    assert.equal(counter.calls, 5);
+    assert.equal(result.control.modelCalls, 3);
+    assert.equal(result.canary.modelCalls, 3);
     assert.equal(result.deltas.verifiedCompletion, 1);
-    assert(result.deltas.activeExecutionMilliseconds >= 0);
     assert.equal(result.timeAndCostComparable, false);
     assert.equal(result.conclusion.verifiedCompletionImproved, true);
     assert.equal(result.conclusion.executionTimeReduced, null);
     assert.equal(result.conclusion.costReduced, null);
-    assert.equal(result.conclusion.verifiedVelocityImproved, true);
-    assert.equal(result.conclusion.verifiedCostEfficiencyImproved, true);
     assert.equal(result.generalClaimSupported, false);
-    assert.equal(result.contract.controlPolicy, "same_first_luna_proposal_then_stop");
-    assert.equal(result.contract.canaryPolicy, "same_first_luna_proposal_then_bounded_verify_repair_retain");
-    assert.equal(result.contract.limits.maximumCycles, INITIAL_CODING_REPAIR_LIMITS.maximumCycles);
-    assert.equal(result.receipts.length, 2);
-    assert.deepEqual(result.receipts.map((receipt) => receipt.outcome), ["accepted_improvement", "verified_complete"]);
+    assert.equal(result.contract.controlPolicy, "bounded_latest_state_luna_retry");
+    assert.equal(result.contract.canaryPolicy, "existing_reparodynamic_controller");
+    assert.equal(result.contract.sharedFirstProposal, true);
+    assert.deepEqual(result.contract.armLimits.control, result.contract.armLimits.canary);
+    assert.equal(result.contract.armLimits.canary.maximumCycles, INITIAL_CODING_REPAIR_LIMITS.maximumCycles);
+    assert.equal(result.contract.armLimits.canary.maximumModelSpendUsd, INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd);
+    assert.equal(result.contract.physicalMaximumSpendUsd, INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd);
+    assert.deepEqual(result.control.receipts.map((receipt) => receipt.outcome), [
+      "advanced_latest_state",
+      "advanced_latest_state",
+      "advanced_latest_state",
+    ]);
+    assert.deepEqual(result.canary.receipts.map((receipt) => receipt.outcome), [
+      "accepted_improvement",
+      "rolled_back",
+      "verified_complete",
+    ]);
     assert.equal(result.authority.repositoryMutation, false);
     assert.equal(result.authority.merge, false);
     assert.equal(result.authority.deploy, false);
     assert.equal(result.authority.promotion, false);
-    assert.match(result.baselineVerificationDigest, /^[a-f0-9]{64}$/u);
-    assert.match(result.control.verificationDigest, /^[a-f0-9]{64}$/u);
-    assert.match(result.canary.verificationDigest, /^[a-f0-9]{64}$/u);
+    assert.match(result.sharedFirstProposalDigest, /^[a-f0-9]{64}$/u);
+    assert.equal(result.control.receipts[0].proposalDigest, result.sharedFirstProposalDigest);
+    assert.equal(result.canary.receipts[0].proposalDigest, result.sharedFirstProposalDigest);
     assert.match(result.contractDigest, /^[a-f0-9]{64}$/u);
-    assert.match(result.receiptsDigest, /^[a-f0-9]{64}$/u);
     assert.match(result.pairDigest, /^[a-f0-9]{64}$/u);
   });
 
-  it("rejects any attempt to increase the existing canary authority before verification or model use", async () => {
+  it("rejects any attempt to increase arm or physical authority before verification or model use", async () => {
     const counter = { calls: 0 };
     let verifierCalls = 0;
     await assert.rejects(
@@ -144,26 +172,36 @@ describe("matched Reparodynamic coding benchmark", () => {
       }),
       /cannot expand maximumCycles/,
     );
+    await assert.rejects(
+      runMatchedCodingRepairBenchmark({
+        ...benchmarkInput(makeModel(counter)),
+        physicalMaximumSpendUsd: INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd + 0.01,
+      }),
+      /cannot expand physical spend/,
+    );
     assert.equal(counter.calls, 0);
     assert.equal(verifierCalls, 0);
   });
 
-  it("invalidates the pair when independent post-verification evidence changes", async () => {
+  it("invalidates the pair when either arm changes under independent post-verification", async () => {
     const counter = { calls: 0 };
-    let verifierCalls = 0;
+    let verifiedCandidateChecks = 0;
     const result = await runMatchedCodingRepairBenchmark(benchmarkInput(makeModel(counter), async (candidate) => {
-      verifierCalls += 1;
       const checked = await verify(candidate);
-      return verifierCalls === 4 ? { ...checked, evidenceDigests: [sha256("unstable-post-verification")] } : checked;
+      if (numericValue(candidate) === 42) {
+        verifiedCandidateChecks += 1;
+        if (verifiedCandidateChecks === 2) {
+          return { ...checked, evidenceDigests: [sha256("unstable-post-verification")] };
+        }
+      }
+      return checked;
     }));
 
     assert.equal(result.valid, false);
-    assert(result.invalidReasons.includes("control_post_verification_changed"));
-    assert.equal(counter.calls, 2);
-    assert.equal(verifierCalls, 5);
+    assert(result.invalidReasons.some((reason) => reason.endsWith("_post_verification_changed")));
   });
 
-  it("compares raw time and cost only when both arms reach the same verified outcome", async () => {
+  it("compares raw time and cost only when both matched arms independently verify", async () => {
     const counter = { calls: 0 };
     const result = await runMatchedCodingRepairBenchmark(benchmarkInput(makeModel(counter, true)));
 
@@ -171,8 +209,11 @@ describe("matched Reparodynamic coding benchmark", () => {
     assert.equal(result.control.verifiedComplete, true);
     assert.equal(result.canary.verifiedComplete, true);
     assert.equal(result.timeAndCostComparable, true);
+    assert.equal(result.control.accountedCostUsd, result.canary.accountedCostUsd);
+    assert.equal(result.physicalSpendUsd, 0.01);
+    assert.equal(result.physicalModelCalls, 1);
+    assert.equal(counter.calls, 1);
     assert.equal(result.conclusion.costReduced, false);
     assert.notEqual(result.conclusion.executionTimeReduced, null);
-    assert.equal(counter.calls, 1);
   });
 });
