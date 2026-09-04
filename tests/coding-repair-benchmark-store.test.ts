@@ -17,6 +17,7 @@ import {
   persistCodingBenchmarkArmReceipt,
   persistCodingBenchmarkEvidenceSnapshot,
   persistCodingBenchmarkPairReceipt,
+  type CodingBenchmarkArmReceipt,
   type CodingBenchmarkManifest,
 } from "../src/coding-repair-benchmark-store.ts";
 
@@ -64,6 +65,20 @@ function arm(method: CodingBenchmarkArmResult["method"], finalScore = 1): Coding
   };
 }
 
+function armReceipt(method: CodingBenchmarkArmResult["method"]): CodingBenchmarkArmReceipt {
+  return {
+    schemaVersion: 1,
+    benchmarkId,
+    pairIndex: 1,
+    caseId: "case-001",
+    bindings,
+    result: arm(method),
+    completedAt: method === "luna"
+      ? "2026-09-04T00:00:30.000Z"
+      : "2026-09-04T00:00:50.000Z",
+  };
+}
+
 function pair(): CodingBenchmarkPairReceipt {
   return {
     schemaVersion: 1,
@@ -85,38 +100,27 @@ async function temporaryState(): Promise<string> {
   return mkdtemp(join(tmpdir(), "sara-coding-benchmark-store-"));
 }
 
+async function persistBothArms(stateDirectory: string): Promise<void> {
+  await persistCodingBenchmarkArmReceipt({ stateDirectory, receipt: armReceipt("luna") });
+  await persistCodingBenchmarkArmReceipt({
+    stateDirectory,
+    receipt: armReceipt("luna_reparodynamic"),
+  });
+}
+
 describe("coding benchmark evidence store", () => {
   it("persists each arm before pair completion and resumes only missing work", async () => {
     const stateDirectory = await temporaryState();
     try {
       await initializeCodingBenchmarkStore({ stateDirectory, manifest });
-      await persistCodingBenchmarkArmReceipt({
-        stateDirectory,
-        receipt: {
-          schemaVersion: 1,
-          benchmarkId,
-          pairIndex: 1,
-          caseId: "case-001",
-          bindings,
-          result: arm("luna"),
-          completedAt: "2026-09-04T00:00:30.000Z",
-        },
-      });
+      await persistCodingBenchmarkArmReceipt({ stateDirectory, receipt: armReceipt("luna") });
       let progress = await loadCodingBenchmarkProgress({ stateDirectory, benchmarkId });
       assert.deepEqual(missingCodingBenchmarkArms(progress, 1), ["luna_reparodynamic"]);
       assert.equal(progress.pairs.length, 0);
 
       await persistCodingBenchmarkArmReceipt({
         stateDirectory,
-        receipt: {
-          schemaVersion: 1,
-          benchmarkId,
-          pairIndex: 1,
-          caseId: "case-001",
-          bindings,
-          result: arm("luna_reparodynamic"),
-          completedAt: "2026-09-04T00:00:50.000Z",
-        },
+        receipt: armReceipt("luna_reparodynamic"),
       });
       await persistCodingBenchmarkPairReceipt({ stateDirectory, pair: pair() });
       progress = await loadCodingBenchmarkProgress({ stateDirectory, benchmarkId });
@@ -128,25 +132,43 @@ describe("coding benchmark evidence store", () => {
     }
   });
 
+  it("refuses to finalize a pair until both matching immutable arms exist", async () => {
+    const stateDirectory = await temporaryState();
+    try {
+      await initializeCodingBenchmarkStore({ stateDirectory, manifest });
+      await assert.rejects(
+        persistCodingBenchmarkPairReceipt({ stateDirectory, pair: pair() }),
+        /both immutable arm receipts/,
+      );
+      await persistCodingBenchmarkArmReceipt({ stateDirectory, receipt: armReceipt("luna") });
+      await assert.rejects(
+        persistCodingBenchmarkPairReceipt({ stateDirectory, pair: pair() }),
+        /both immutable arm receipts/,
+      );
+      await persistCodingBenchmarkArmReceipt({
+        stateDirectory,
+        receipt: armReceipt("luna_reparodynamic"),
+      });
+      await persistCodingBenchmarkPairReceipt({ stateDirectory, pair: pair() });
+    } finally {
+      await rm(stateDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("makes an identical replay idempotent but rejects conflicting evidence", async () => {
     const stateDirectory = await temporaryState();
     try {
       await initializeCodingBenchmarkStore({ stateDirectory, manifest });
-      const receipt = {
-        schemaVersion: 1 as const,
-        benchmarkId,
-        pairIndex: 1,
-        caseId: "case-001",
-        bindings,
-        result: arm("luna"),
-        completedAt: "2026-09-04T00:00:30.000Z",
-      };
+      const receipt = armReceipt("luna");
       await persistCodingBenchmarkArmReceipt({ stateDirectory, receipt });
       await persistCodingBenchmarkArmReceipt({ stateDirectory, receipt });
       await assert.rejects(
         persistCodingBenchmarkArmReceipt({
           stateDirectory,
-          receipt: { ...receipt, result: { ...receipt.result, finalScore: 0.8, verifiedComplete: false } },
+          receipt: {
+            ...receipt,
+            result: { ...receipt.result, finalScore: 0.8, verifiedComplete: false },
+          },
         }),
         /conflicts with immutable benchmark evidence/,
       );
@@ -159,18 +181,7 @@ describe("coding benchmark evidence store", () => {
     const stateDirectory = await temporaryState();
     try {
       await initializeCodingBenchmarkStore({ stateDirectory, manifest });
-      await persistCodingBenchmarkArmReceipt({
-        stateDirectory,
-        receipt: {
-          schemaVersion: 1,
-          benchmarkId,
-          pairIndex: 1,
-          caseId: "case-001",
-          bindings,
-          result: arm("luna"),
-          completedAt: "2026-09-04T00:00:30.000Z",
-        },
-      });
+      await persistCodingBenchmarkArmReceipt({ stateDirectory, receipt: armReceipt("luna") });
       const path = join(
         stateDirectory,
         "coding-repair-benchmarks",
@@ -192,10 +203,34 @@ describe("coding benchmark evidence store", () => {
     }
   });
 
+  it("rejects a summary snapshot whose proof or bindings do not match persisted pairs", async () => {
+    const stateDirectory = await temporaryState();
+    try {
+      await initializeCodingBenchmarkStore({ stateDirectory, manifest });
+      await persistBothArms(stateDirectory);
+      await persistCodingBenchmarkPairReceipt({ stateDirectory, pair: pair() });
+      const summary = summarizeCodingBenchmark({ pairs: [pair()], bootstrapSamples: 500 });
+      const decision = evaluateCodingBenchmarkPromotion({ summary, currentCanaryPercent: 5 });
+      const tampered = structuredClone(summary);
+      tampered.bindings.policyDigest = digest("9");
+      await assert.rejects(
+        persistCodingBenchmarkEvidenceSnapshot({
+          stateDirectory,
+          summary: tampered,
+          decision,
+        }),
+        /proof|bindings/,
+      );
+    } finally {
+      await rm(stateDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("preserves immutable generated summary and promotion snapshots", async () => {
     const stateDirectory = await temporaryState();
     try {
       await initializeCodingBenchmarkStore({ stateDirectory, manifest });
+      await persistBothArms(stateDirectory);
       await persistCodingBenchmarkPairReceipt({ stateDirectory, pair: pair() });
       const summary = summarizeCodingBenchmark({ pairs: [pair()], bootstrapSamples: 500 });
       const decision = evaluateCodingBenchmarkPromotion({ summary, currentCanaryPercent: 5 });
