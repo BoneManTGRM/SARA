@@ -1,0 +1,30 @@
+name: NICO source inspection export
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-a8da6f6
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download exact NICO source
+        run: |
+          curl --fail --location --retry 3 \
+            https://codeload.github.com/BoneManTGRM/NICO/zip/6a57912f98604c61ab85558026050862461dc519 \
+            --output nico-source.zip
+          unzip -q nico-source.zip
+          rm nico-source.zip
+      - name: Upload exact NICO source
+        uses: actions/upload-artifact@v4
+        with:
+          name: nico-6a57912f-source
+          path: NICO-6a57912f98604c61ab85558026050862461dc519
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
