@@ -58,8 +58,10 @@ async function readJsonObject(request: IncomingMessage): Promise<Record<string, 
 function testingJobId(pathname: string): string | null {
   const match = pathname.match(new RegExp(`^${TESTING_ROOT}/jobs/([^/]+)$`, "u"));
   if (!match) return null;
+  const encodedJobId = match[1];
+  if (!encodedJobId) return null;
   try {
-    const decoded = decodeURIComponent(match[1]);
+    const decoded = decodeURIComponent(encodedJobId);
     return SAFE_ROUTE_ID.test(decoded) ? decoded : null;
   } catch {
     return null;
