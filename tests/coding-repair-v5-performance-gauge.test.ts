@@ -118,7 +118,7 @@ describe("V5 bounded performance gauge", () => {
       model,
     });
 
-    const gauge = (run as unknown as { performanceGauge?: PerformanceGaugeView }).performanceGauge;
+    const gauge: PerformanceGaugeView = run.performanceGauge;
     assert(gauge, "the controller must emit a bounded performance gauge");
     assert.equal(gauge.schemaVersion, 1);
     assert.equal(gauge.evidenceLevel, "DETERMINISTIC_SINGLE_RUN");
