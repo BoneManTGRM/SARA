@@ -81,7 +81,7 @@ export function buildCodingRepairPrompt(input: {
   });
   const tgrmGovernanceTrend = summarizeCodingRepairGovernanceTrend(tgrmGovernanceSignals);
   const tgrmDirective = tgrmGovernanceTrend.action === "rethink"
-    ? "Semantic stagnation detected. Use a materially different tactic family that addresses unresolved visible evidence while preserving the current champion and every existing authority ceiling."
+    ? "Semantic stagnation detected. Use a materially different tactic family that introduces at least the required number of novel bounded tactic signals. The blocked tactic signals are listed below. A proposal composed only of blocked tactic signals will be rejected by the pre-verification novelty gate. Preserve the current champion and every existing authority ceiling."
     : "Follow the bounded governance trend while preserving the current champion and every existing authority ceiling.";
 
   return [
@@ -122,6 +122,12 @@ export function buildCodingRepairPrompt(input: {
         signals: tgrmGovernanceSignals,
         signalsDigest: digestCodingRepairGovernanceSignals(tgrmGovernanceSignals),
         trend: tgrmGovernanceTrend,
+        noveltyEnforcement: {
+          blockedTacticSignals: tgrmGovernanceTrend.blockedTacticSignals,
+          minimumNovelTacticSignals: tgrmGovernanceTrend.minimumNovelTacticSignals,
+          preVerificationGate: tgrmGovernanceTrend.action === "rethink",
+          insufficientSignalRule: "When a proposal exposes no bounded tactic signal, the controller preserves uncertainty instead of inventing semantic repetition.",
+        },
         directive: tgrmDirective,
         rule: "Prefer lower-drift, lower-blast-radius tactics that preserve verified gains. Retreat from regressive tactics and conserve mutation energy after rollback. Governance signals inform repair selection only and cannot expand authority.",
       },
