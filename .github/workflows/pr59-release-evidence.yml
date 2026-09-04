@@ -1,0 +1,58 @@
+name: PR59 release evidence
+
+on:
+  push:
+    branches:
+      - automation/pr59-finalizer-20260904
+
+permissions:
+  contents: read
+  checks: read
+  actions: read
+  pull-requests: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Capture exact merged GitHub evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: BoneManTGRM/SARA
+          PR_NUMBER: "59"
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$REPOSITORY"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+          pr=""
+          for attempt in $(seq 1 135); do
+            pr="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls/$PR_NUMBER")"
+            [ "$(jq -r '.merged' <<<"$pr")" = "true" ] && break
+            sleep 20
+          done
+          test "$(jq -r '.merged' <<<"$pr")" = "true"
+          head="$(jq -r '.head.sha' <<<"$pr")"
+          merge="$(jq -r '.merge_commit_sha' <<<"$pr")"
+          checks="$(curl --fail --silent --show-error "${auth[@]}" "$api/commits/$head/check-runs?per_page=100")"
+          jq -n \
+            --arg schema "sara.pr59.github_release_evidence.v1" \
+            --arg captured_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg pr_url "$(jq -r '.html_url' <<<"$pr")" \
+            --arg head_sha "$head" \
+            --arg merge_commit_sha "$merge" \
+            --arg merged_at "$(jq -r '.merged_at' <<<"$pr")" \
+            --argjson checks "$(jq '[.check_runs[] | {name,status,conclusion,html_url,completed_at}]' <<<"$checks")" \
+            '{schema:$schema,captured_at:$captured_at,pull_request:59,pull_request_url:$pr_url,head_sha:$head_sha,merge_commit_sha:$merge_commit_sha,merged_at:$merged_at,checks:$checks}' \
+            > github-release-evidence.json
+          jq -e '.checks[] | select(.name == "test" and .conclusion == "success")' github-release-evidence.json >/dev/null
+          jq -e '.checks[] | select(.name == "CodeQL" and .conclusion == "success")' github-release-evidence.json >/dev/null
+          jq -e '.checks[] | select(.name == "Analyze (javascript-typescript)" and .conclusion == "success")' github-release-evidence.json >/dev/null
+
+      - name: Upload non-secret release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: sara-pr59-github-release-evidence
+          path: github-release-evidence.json
+          if-no-files-found: error
+          retention-days: 30
