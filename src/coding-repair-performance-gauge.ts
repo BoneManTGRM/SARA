@@ -1,55 +1,20 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
 import type {
+  CodingBehavioralCheckSummary,
+  CodingRepairBehavioralProgress,
   CodingRepairLimits,
+  CodingRepairPerformanceGauge,
   CodingRepairReceipt,
   ProgramVerificationResult,
 } from "./coding-repair-types.ts";
 
 const HEX_DIGEST = /^[a-f0-9]{64}$/u;
 
-type AggregateBehavioralChecks = {
-  schemaVersion: 1;
-  passed: number;
-  total: number;
-  evidenceDigest: string;
-  disclosure: "aggregate_only";
-};
-
-type AggregateBehavioralProgress = {
-  disclosure: "aggregate_only";
-  comparable: boolean;
-  baseline: Omit<AggregateBehavioralChecks, "schemaVersion" | "disclosure">;
-  final: Omit<AggregateBehavioralChecks, "schemaVersion" | "disclosure">;
-  passedDelta: number | null;
-  completionRatioDelta: number | null;
-};
-
-export type CodingRepairPerformanceGauge = {
-  schemaVersion: 1;
-  evidenceLevel: "DETERMINISTIC_SINGLE_RUN";
-  verifierExecutions: number;
-  advisoryOnlyCounterfactualVerifierExecutions: number;
-  semanticRepeatRejections: number;
-  verifierExecutionsAvoided: number;
-  modelCalls: number;
-  completionGain: number;
-  scoreGain: number;
-  behavioralProgress: AggregateBehavioralProgress | null;
-  counterfactualBasis: "semantic_tactic_repeat_rejections_only";
-  limitsDigest: string;
-  evidenceDigest: string;
-  generalClaimSupported: false;
-};
-
-type SanitizedVerification = ProgramVerificationResult & {
-  behavioralChecks?: AggregateBehavioralChecks;
-};
-
 function rounded(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
-function aggregateBehavioralChecks(value: unknown): AggregateBehavioralChecks | undefined {
+function aggregateBehavioralChecks(value: unknown): CodingBehavioralCheckSummary | undefined {
   if (!value || typeof value !== "object") return undefined;
   const candidate = value as Record<string, unknown>;
   if (
@@ -76,15 +41,13 @@ function aggregateBehavioralChecks(value: unknown): AggregateBehavioralChecks | 
 
 function knownBehavioralChecks(
   verification: ProgramVerificationResult,
-): AggregateBehavioralChecks | undefined {
-  return aggregateBehavioralChecks(
-    (verification as ProgramVerificationResult & { behavioralChecks?: unknown }).behavioralChecks,
-  );
+): CodingBehavioralCheckSummary | undefined {
+  return aggregateBehavioralChecks(verification.behavioralChecks);
 }
 
 export function sanitizeCodingRepairVerification(
   verification: ProgramVerificationResult,
-): SanitizedVerification {
+): ProgramVerificationResult {
   const behavioralChecks = knownBehavioralChecks(verification);
   return {
     passed: verification.passed,
@@ -107,7 +70,7 @@ export function sanitizeCodingRepairVerification(
   };
 }
 
-function projectBehavioralChecks(summary: AggregateBehavioralChecks) {
+function projectBehavioralChecks(summary: CodingBehavioralCheckSummary) {
   return {
     passed: summary.passed,
     total: summary.total,
@@ -118,7 +81,7 @@ function projectBehavioralChecks(summary: AggregateBehavioralChecks) {
 function buildBehavioralProgress(
   baselineVerification: ProgramVerificationResult,
   finalVerification: ProgramVerificationResult,
-): AggregateBehavioralProgress | null {
+): CodingRepairBehavioralProgress | null {
   const baseline = knownBehavioralChecks(baselineVerification);
   const final = knownBehavioralChecks(finalVerification);
   if (!baseline || !final) return null;
