@@ -1,0 +1,190 @@
+name: Release PR59 after exact checks
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-20260904
+    paths:
+      - .github/workflows/release-pr59-after-exact-checks.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  statuses: read
+
+concurrency:
+  group: release-pr59-after-exact-checks
+  cancel-in-progress: false
+
+jobs:
+  exact-release-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: BoneManTGRM/SARA
+      PR_NUMBER: "59"
+    steps:
+      - name: Lock the current pull-request head
+        id: pr
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" > pr.json
+          state="$(jq -r .state pr.json)"
+          merged="$(jq -r .merged pr.json)"
+          head="$(jq -r .head.sha pr.json)"
+          base="$(jq -r .base.ref pr.json)"
+          test "$state" = open
+          test "$merged" = false
+          test "$base" = main
+          test "$head" != null
+          test "${#head}" -eq 40
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for exact-head CI and CodeQL conclusions
+        env:
+          HEAD_SHA: ${{ steps.pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          complete=false
+          for attempt in $(seq 1 120); do
+            gh api -H 'Accept: application/vnd.github+json' "repos/$REPOSITORY/commits/$HEAD_SHA/check-runs?per_page=100" > check-runs.json
+            count="$(jq '.check_runs | length' check-runs.json)"
+            pending="$(jq '[.check_runs[] | select(.status != "completed")] | length' check-runs.json)"
+            if [ "$count" -gt 0 ] && [ "$pending" -eq 0 ]; then
+              complete=true
+              break
+            fi
+            sleep 10
+          done
+          test "$complete" = true
+
+          jq '[.check_runs | sort_by(.started_at // .created_at) | group_by(.name)[] | last]' check-runs.json > latest-checks.json
+          jq -e '[.[] | select((.name | ascii_downcase | test("codeql|code scanning|analy[sz]e")) and .conclusion == "success")] | length > 0' latest-checks.json
+          jq -e '[.[] | select((.name | ascii_downcase | test("(^|[^a-z])(ci|test|verify|build)([^a-z]|$)")) and .conclusion == "success")] | length > 0' latest-checks.json
+          jq -e '[.[] | select((.name | ascii_downcase | test("codeql|code scanning|analy[sz]e|(^|[^a-z])(ci|test|verify|build)([^a-z]|$)")) and (.conclusion != "success" and .conclusion != "neutral" and .conclusion != "skipped"))] | length == 0' latest-checks.json
+
+          gh api "repos/$REPOSITORY/commits/$HEAD_SHA/status" > statuses.json
+          jq -e '.state != "failure" and .state != "error"' statuses.json
+
+      - name: Check out the exact checked PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Independently rerun the full repository gate
+        run: |
+          set -o pipefail
+          npm ci
+          npm run verify 2>&1 | tee exact-head-verify.log
+
+      - name: Inspect scope, credentials, identities, and claims
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git diff --check origin/main...HEAD
+          unexpected="$(git diff --name-only origin/main...HEAD | awk '!/^(src|tests|docs)\// { count += 1 } END { print count + 0 }')"
+          test "$unexpected" -eq 0
+          ! git grep -n 'beardedwarrior5161@gmail.com' HEAD -- src tests docs
+          ! git grep -n -E '(gmail|google).*(password|app password)' HEAD -- src docs
+          ! git grep -n -E 'console\.(log|error|warn).*(refreshToken|clientSecret|authorization)' HEAD -- 'src/gmail-*.ts' 'src/telegram-nico-*.ts'
+          git grep -n 'sara.reparodynamics@gmail.com' HEAD -- src docs >/dev/null
+          git grep -n 'reparodynamics@gmail.com' HEAD -- src docs >/dev/null
+          test "$(git grep -n 'handleTelegramNicoProductionRequest({' HEAD -- src/server.ts | wc -l)" -eq 1
+          test "$(git diff --name-only origin/main...HEAD | wc -l)" -le 24
+
+      - name: Confirm the PR head has not moved
+        env:
+          LOCKED_HEAD: ${{ steps.pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+          test "$current" = "$LOCKED_HEAD"
+
+      - name: Update the PR evidence statement and mark ready
+        env:
+          LOCKED_HEAD: ${{ steps.pr.outputs.head }}
+        run: |
+          cat > pr-body.md <<EOF
+          ## Purpose
+
+          Add a separate authenticated, deterministic Telegram action bridge for exact-commit NICO automated assessments and independently verified report delivery from SARA's designated Gmail identity.
+
+          ## Trust boundaries
+
+          - Existing Telegram Luna remains analysis-only.
+          - Only Cody's paired Telegram identity plus the existing bridge credential may submit the five supported schemas.
+          - Commands are durable and replay-safe; one immutable NICO run identity is reused after restart.
+          - Targets require one canonical public GitHub repository URL and a lowercase 40-character commit SHA.
+          - Automated delivery requires a terminal exact-target NICO record, zero unresolved review workload, exact artifact schema/hash/size identity, independent package verification, and an explicit no-human-review disclosure.
+          - Gmail is fixed to `sara.reparodynamics@gmail.com` -> `reparodynamics@gmail.com`; sender identity is freshly checked immediately before send.
+          - OAuth uses PKCE, single-use state, OpenID email identity plus `gmail.send`, exact-account refusal, and protected Railway-secret installation.
+          - Emergency stop, owner revocation, exact mandate, daily limit, concurrency one, cost ceiling, and provider-acceptance truth remain fail-closed.
+
+          ## Exact-head verification
+
+          Locked head: `$LOCKED_HEAD`
+
+          - Normal pull-request CI: success on this exact head.
+          - CodeQL/code-scanning analysis: success on this exact head.
+          - `npm run verify`: passed again in this release gate.
+          - Diff/credential/identity/claim review: passed.
+          - No assessment or email was executed by CI.
+
+          ## Activation state
+
+          Production Gmail remains disabled until Cody completes the one-time Google OAuth consent for exactly `sara.reparodynamics@gmail.com`. The p-map assessment and email remain gated until deployment, fresh identity verification, and the terminal NICO evidence all succeed.
+          EOF
+          gh pr edit "$PR_NUMBER" --body-file pr-body.md
+          gh pr ready "$PR_NUMBER"
+
+      - name: Merge only the exact verified head
+        id: merge
+        env:
+          LOCKED_HEAD: ${{ steps.pr.outputs.head }}
+        run: |
+          set -euo pipefail
+          gh api --method PUT "repos/$REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f sha="$LOCKED_HEAD" \
+            -f merge_method=merge \
+            -f commit_title='Add bounded Telegram NICO assessment and verified Gmail delivery (#59)' \
+            -f commit_message='Merged only after exact-head CI, CodeQL, full repository verification, and bounded trust-boundary review.' \
+            > merge.json
+          jq -e '.merged == true' merge.json
+          merged_sha="$(jq -r .sha merge.json)"
+          test "${#merged_sha}" -eq 40
+          echo "merged_sha=$merged_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Record non-secret release evidence
+        env:
+          LOCKED_HEAD: ${{ steps.pr.outputs.head }}
+          MERGED_SHA: ${{ steps.merge.outputs.merged_sha }}
+        run: |
+          jq -n \
+            --arg pr "$PR_NUMBER" \
+            --arg head "$LOCKED_HEAD" \
+            --arg merged "$MERGED_SHA" \
+            --arg ci success \
+            --arg codeql success \
+            --arg verify success \
+            '{pullRequest:($pr|tonumber), verifiedHead:$head, mergedCommit:$merged, ci:$ci, codeql:$codeql, fullVerify:$verify, assessmentExecuted:false, emailSent:false}' \
+            > pr59-release-evidence.json
+          gh pr comment "$PR_NUMBER" --body "Merged exact verified head \`$LOCKED_HEAD\` as \`$MERGED_SHA\`. Production Gmail, assessment execution, and report delivery remain inactive pending deployment and exact-account OAuth."
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr59-release-evidence
+          path: |
+            pr.json
+            check-runs.json
+            latest-checks.json
+            statuses.json
+            exact-head-verify.log
+            merge.json
+            pr59-release-evidence.json
+          if-no-files-found: error
+          retention-days: 14
