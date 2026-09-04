@@ -54,8 +54,8 @@ async function assertExactSourceCheckout(expectedRevision: string): Promise<void
         timeout: 5_000,
       }),
     ]);
-    revision = revisionResult.stdout;
-    trackedChanges = statusResult.stdout;
+    revision = String(revisionResult.stdout);
+    trackedChanges = String(statusResult.stdout);
   } catch {
     throw new Error("The live coding benchmark could not verify its Git source checkout.");
   }
@@ -137,10 +137,18 @@ const constitutionSource = await readFile(
 );
 const constitutionDigest = sha256(constitutionSource);
 const client = new OpenAIResponsesClient({ apiKey: config.apiKey });
+const modelImplementationDigest = await digestSourceFiles([
+  "src/luna-coding-repair-model.ts",
+  "src/openai-worker.ts",
+  "src/model-router.ts",
+]);
 const bindings: CodingBenchmarkBindings = {
   sourceCommit: sha256(config.sourceRevision),
   corpusDigest,
-  modelDigest: sha256(client.routeKey),
+  modelDigest: sha256(canonicalJson({
+    routeKey: client.routeKey,
+    implementationDigest: modelImplementationDigest,
+  })),
   controllerDigest: await digestSourceFiles([
     "src/coding-repair-controller.ts",
     "src/coding-repair-benchmark-runner.ts",
