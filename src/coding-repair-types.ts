@@ -30,6 +30,14 @@ export type CodingVerificationCheck =
   | "behavior_tests"
   | "artifact_integrity";
 
+export type CodingBehavioralCheckSummary = {
+  schemaVersion: 1;
+  passed: number;
+  total: number;
+  evidenceDigest: string;
+  disclosure: "aggregate_only";
+};
+
 export type ProgramVerificationResult = {
   passed: boolean;
   score: number;
@@ -37,6 +45,7 @@ export type ProgramVerificationResult = {
   failures: CodingFailureSignal[];
   completedChecks: CodingVerificationCheck[];
   evidenceDigests: string[];
+  behavioralChecks?: CodingBehavioralCheckSummary;
 };
 
 export type CodingRepairStrategy = "deterministic" | "luna_surgical" | "luna_deep" | "challenger" | "stop";
@@ -177,6 +186,40 @@ export type CodingRepairLimits = {
   protectedPaths: readonly string[];
 };
 
+export type CodingRepairBehavioralProgress = {
+  disclosure: "aggregate_only";
+  comparable: boolean;
+  baseline: {
+    passed: number;
+    total: number;
+    evidenceDigest: string;
+  };
+  final: {
+    passed: number;
+    total: number;
+    evidenceDigest: string;
+  };
+  passedDelta: number | null;
+  completionRatioDelta: number | null;
+};
+
+export type CodingRepairPerformanceGauge = {
+  schemaVersion: 1;
+  evidenceLevel: "DETERMINISTIC_SINGLE_RUN";
+  verifierExecutions: number;
+  advisoryOnlyCounterfactualVerifierExecutions: number;
+  semanticRepeatRejections: number;
+  verifierExecutionsAvoided: number;
+  modelCalls: number;
+  completionGain: number;
+  scoreGain: number;
+  behavioralProgress: CodingRepairBehavioralProgress | null;
+  counterfactualBasis: "semantic_tactic_repeat_rejections_only";
+  limitsDigest: string;
+  evidenceDigest: string;
+  generalClaimSupported: false;
+};
+
 export type CodingRepairRun = {
   baseline: ProgramCandidateProposal;
   baselineVerification: ProgramVerificationResult;
@@ -188,4 +231,5 @@ export type CodingRepairRun = {
   attemptLessonsDigest: string;
   accountedCostUsd: number;
   elapsedMilliseconds: number;
+  performanceGauge: CodingRepairPerformanceGauge;
 };
