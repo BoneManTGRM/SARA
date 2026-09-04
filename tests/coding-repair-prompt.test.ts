@@ -14,10 +14,11 @@ function proposal(path = "src/value.ts"): CodingRepairProposal {
 }
 
 describe("strict coding repair proposal", () => {
-  it("rejects stale artifacts, unknown files, and model-authored test changes", () => {
-    const validate = (candidateProposal: CodingRepairProposal) => validateCodingRepairProposal({ proposal: candidateProposal, candidate, artifactDigest: "a".repeat(64), failureFingerprints: new Set(["b".repeat(64)]), limits: INITIAL_CODING_REPAIR_LIMITS });
+  it("rejects stale artifacts, unknown files, model-authored tests, and strategy escalation", () => {
+    const validate = (candidateProposal: CodingRepairProposal) => validateCodingRepairProposal({ proposal: candidateProposal, candidate, artifactDigest: "a".repeat(64), failureFingerprints: new Set(["b".repeat(64)]), limits: INITIAL_CODING_REPAIR_LIMITS, expectedStrategy: "surgical" });
     assert.throws(() => validate({ ...proposal(), baseArtifactDigest: "c".repeat(64) }), /stale artifact/);
     assert.throws(() => validate({ ...proposal(), changes: [{ path: "src/missing.ts", expectedContentDigest: sha256(""), replacementText: "x" }] }), /unknown or duplicate/);
     assert.throws(() => validate(proposal("tests/value.test.ts")), /protected path/);
+    assert.throws(() => validate({ ...proposal(), strategy: "deep" }), /strategy escalation/);
   });
 });
