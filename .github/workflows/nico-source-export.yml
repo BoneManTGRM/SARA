@@ -17,7 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: BoneManTGRM/NICO
-          ref: c68280f2e8faf53a427e0c41c46fcd24a435f0fc
+          ref: 6a57912f98604c61ab85558026050862461dc519
           persist-credentials: false
       - name: Remove Git metadata
         run: rm -rf .git
