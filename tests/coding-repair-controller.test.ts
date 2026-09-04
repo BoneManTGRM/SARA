@@ -38,7 +38,7 @@ describe("Reparodynamic coding controller", () => {
     const run = await runCodingRepairController({
       baseline,
       verify: async () => before,
-      model: { propose: async ({ candidate, verification }) => ({ proposal: { schemaVersion: 1, baseArtifactDigest: verification.artifactDigest, failureFingerprint: typeFailure.fingerprint, strategy: "surgical", changes: [{ path: "src/value.ts", expectedContentDigest: sha256(candidate.files[1].content), replacementText: "export const value = 2;\n" }], limitations: [] }, inputTokens: 10, outputTokens: 10, accountedCostUsd: 0.01 }) },
+      model: { propose: async ({ candidate, verification, strategy }) => ({ proposal: { schemaVersion: 1, baseArtifactDigest: verification.artifactDigest, failureFingerprint: typeFailure.fingerprint, strategy, changes: [{ path: "src/value.ts", expectedContentDigest: sha256(candidate.files[1].content), replacementText: "export const value = 2;\n" }], limitations: [] }, inputTokens: 10, outputTokens: 10, accountedCostUsd: 0.01 }) },
     });
     assert.equal(run.state, "STOPPED");
     assert.equal(run.receipts[0].outcome, "rolled_back");
