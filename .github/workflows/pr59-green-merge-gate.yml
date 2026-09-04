@@ -1,0 +1,77 @@
+name: PR59 green merge gate
+
+on:
+  push:
+    branches:
+      - automation/export-pr59-44788ca
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+
+concurrency:
+  group: pr59-green-merge-gate
+  cancel-in-progress: true
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Require fresh green CI and CodeQL, then merge exact head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: BoneManTGRM/SARA
+          PR_NUMBER: "59"
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$REPOSITORY"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+
+          green_head=""
+          for attempt in $(seq 1 60); do
+            pr="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls/$PR_NUMBER")"
+            state="$(jq -r '.state' <<<"$pr")"
+            merged="$(jq -r '.merged' <<<"$pr")"
+            if [ "$merged" = "true" ]; then
+              exit 0
+            fi
+            test "$state" = "open"
+            head="$(jq -r '.head.sha' <<<"$pr")"
+            checks="$(curl --fail --silent --show-error "${auth[@]}" "$api/commits/$head/check-runs?per_page=100")"
+
+            test_result="$(jq -r '[.check_runs[] | select(.name == "test")][-1].conclusion // "missing"' <<<"$checks")"
+            codeql_result="$(jq -r '[.check_runs[] | select(.name == "CodeQL")][-1].conclusion // "missing"' <<<"$checks")"
+            analyze_result="$(jq -r '[.check_runs[] | select(.name == "Analyze (javascript-typescript)")][-1].conclusion // "missing"' <<<"$checks")"
+            incomplete="$(jq '[.check_runs[] | select(.status != "completed")] | length' <<<"$checks")"
+            failures="$(jq '[.check_runs[] | select(.status == "completed" and (.conclusion | IN("failure", "cancelled", "timed_out", "action_required", "stale")))] | length' <<<"$checks")"
+
+            if [ "$test_result" = "success" ] && [ "$codeql_result" = "success" ] && [ "$analyze_result" = "success" ] && [ "$incomplete" = "0" ] && [ "$failures" = "0" ]; then
+              green_head="$head"
+              break
+            fi
+            sleep 20
+          done
+
+          test -n "$green_head"
+          current_head="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls/$PR_NUMBER" | jq -r '.head.sha')"
+          test "$current_head" = "$green_head"
+
+          curl --fail --silent --show-error -X PATCH "${auth[@]}" \
+            "$api/pulls/$PR_NUMBER" \
+            -d '{"draft":false}' >/dev/null
+
+          for attempt in $(seq 1 12); do
+            mergeable="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls/$PR_NUMBER" | jq -r '.mergeable')"
+            [ "$mergeable" = "true" ] && break
+            sleep 5
+          done
+          test "$mergeable" = "true"
+
+          result="$(curl --fail --silent --show-error -X PUT "${auth[@]}" \
+            "$api/pulls/$PR_NUMBER/merge" \
+            -d "$(jq -nc --arg sha "$green_head" '{sha:$sha,merge_method:"squash"}')")"
+          test "$(jq -r '.merged' <<<"$result")" = "true"
+          jq -e '.sha | strings | length == 40' <<<"$result" >/dev/null
