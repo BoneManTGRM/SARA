@@ -14,6 +14,7 @@ import { verifyBaseUsdcPayment } from "./usdc-payment.ts";
 import { sha256 } from "./canonical.ts";
 import { listRevenueServices } from "./revenue-service-catalog.ts";
 import { readRepositoryReadinessReportArtifact } from "./repository-readiness-report-artifacts.ts";
+import { readRevenueNicoArtifact, readRevenueNicoPackage } from "./revenue-nico-artifacts.ts";
 import { listSaraTools } from "./tool-registry.ts";
 import type { NicoArtifactFormat, NicoArtifactIdentity, NicoOperator } from "./nico-operator.ts";
 import type { CandidateProposal, MutationStage } from "./types.ts";
@@ -265,12 +266,20 @@ async function handlePublicCommerce(
     const delivery = (await kernel.getStatus()).revenueDeliveries.find((candidate) =>
       candidate.jobId === intent.jobId && candidate.status !== "revoked"
     );
-    let deliveryAccess: null | { status: string; expiresAt: string; downloadUrl: string } = null;
+    let deliveryAccess: null | { status: string; expiresAt: string; downloadUrl: string; nicoDownloadUrl?: string } = null;
     if (delivery) {
       const base = options.publicBaseUrl ?? `https://${request.headers.host ?? "sara-operator-production.up.railway.app"}`;
       const download = new URL(`/api/public/revenue-pilot/deliveries/${encodeURIComponent(delivery.id)}`, base);
       download.searchParams.set("access", accessSecret);
       deliveryAccess = { status: delivery.status, expiresAt: delivery.expiresAt, downloadUrl: download.toString() };
+      if (options.stateDirectory) {
+        const nico = await readRevenueNicoArtifact(options.stateDirectory, intent.jobId);
+        if (nico?.state === "package_ready") {
+          const nicoDownload = new URL(`/api/public/revenue-pilot/deliveries/${encodeURIComponent(delivery.id)}/nico-package`, base);
+          nicoDownload.searchParams.set("access", accessSecret);
+          deliveryAccess.nicoDownloadUrl = nicoDownload.toString();
+        }
+      }
     }
     json(response, 200, { ...publicPaymentIntent(intent), delivery: deliveryAccess });
     return true;
@@ -301,6 +310,31 @@ async function handlePublicDelivery(
   kernel: SaraKernel,
   options: ServerOptions,
 ): Promise<boolean> {
+  const nicoMatch = url.pathname.match(/^\/api\/public\/revenue-pilot\/deliveries\/([^/]+)\/nico-package$/u);
+  if (request.method === "GET" && nicoMatch) {
+    if (!options.stateDirectory) {
+      json(response, 503, { error: "Private report storage is not configured." });
+      return true;
+    }
+    const secret = url.searchParams.get("access") ?? "";
+    const accessed = await kernel.accessRevenueDelivery(decodeURIComponent(nicoMatch[1]!), secret);
+    const report = await readRepositoryReadinessReportArtifact({ stateDirectory: options.stateDirectory, jobId: accessed.job.id });
+    const packaged = await readRevenueNicoPackage(options.stateDirectory, accessed.job.id);
+    if (packaged.artifact.commitSha !== report.report.immutableCommitSha) throw new Error("NICO delivery commit does not match the readiness report.");
+    response.writeHead(200, {
+      "content-type": packaged.artifact.contentType ?? "application/zip",
+      "content-disposition": `attachment; filename="nico-authorized-${packaged.artifact.runId}.zip"`,
+      "content-length": String(packaged.body.byteLength),
+      "cache-control": "private, no-store, max-age=0",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "x-nico-certified-package-sha256": packaged.artifact.packageDigest!,
+      "x-nico-human-reviewed": "false",
+      "x-nico-authorization-mode": "automated_policy",
+    });
+    response.end(packaged.body);
+    return true;
+  }
   const match = url.pathname.match(/^\/api\/public\/revenue-pilot\/deliveries\/([^/]+)$/u);
   if (request.method !== "GET" || !match) return false;
   if (!options.stateDirectory) {

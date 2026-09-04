@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   NicoOperatorClient,
+  extractNicoArtifactIdentity,
   type NicoArtifactIdentity,
 } from "../src/nico-operator.ts";
 
@@ -22,6 +23,11 @@ const IDENTITY: NicoArtifactIdentity = {
 };
 
 describe("NICO operator client", () => {
+  it("extracts only an exact nested artifact identity", () => {
+    assert.deepEqual(extractNicoArtifactIdentity({ result: { artifact_identity: IDENTITY } }, RUN_ID), IDENTITY);
+    assert.equal(extractNicoArtifactIdentity({ result: { artifact_identity: { ...IDENTITY, run_id: "comprun_ffffffffffffffffffffffffffffffff" } } }, RUN_ID), null);
+  });
+
   it("accepts only the fixed production HTTPS API boundary", () => {
     assert.throws(() => new NicoOperatorClient({ baseUrl: "http://app.nicoaudit.com/api/nico/" }), /HTTPS/);
     assert.throws(() => new NicoOperatorClient({ baseUrl: "https://evil.example/api/nico/" }), /app\.nicoaudit\.com/);
