@@ -1,0 +1,100 @@
+name: PR59 final release v2
+
+on:
+  push:
+    branches:
+      - automation/pr59-finalizer-20260904
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+  actions: read
+
+concurrency:
+  group: pr59-final-release-v2
+  cancel-in-progress: true
+
+jobs:
+  verify-and-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out current PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/telegram-nico-gmail-delivery
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify complete exact tree
+        run: |
+          npm ci
+          npm run verify
+          git diff --check
+          test -z "$(git status --porcelain)"
+          echo "LOCAL_HEAD=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Require fresh exact-head CI and CodeQL
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: BoneManTGRM/SARA
+          PR_NUMBER: "59"
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/$REPOSITORY"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+          for attempt in $(seq 1 105); do
+            pr="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls/$PR_NUMBER")"
+            if [ "$(jq -r '.merged' <<<"$pr")" = "true" ]; then
+              exit 0
+            fi
+            test "$(jq -r '.state' <<<"$pr")" = "open"
+            test "$(jq -r '.head.sha' <<<"$pr")" = "$LOCAL_HEAD"
+            checks="$(curl --fail --silent --show-error "${auth[@]}" "$api/commits/$LOCAL_HEAD/check-runs?per_page=100")"
+            test_result="$(jq -r '[.check_runs[] | select(.name == "test")][-1].conclusion // "missing"' <<<"$checks")"
+            codeql_result="$(jq -r '[.check_runs[] | select(.name == "CodeQL")][-1].conclusion // "missing"' <<<"$checks")"
+            analyze_result="$(jq -r '[.check_runs[] | select(.name == "Analyze (javascript-typescript)")][-1].conclusion // "missing"' <<<"$checks")"
+            incomplete="$(jq '[.check_runs[] | select(.status != "completed")] | length' <<<"$checks")"
+            failures="$(jq '[.check_runs[] | select(.status == "completed" and (.conclusion | IN("failure", "cancelled", "timed_out", "action_required", "stale")))] | length' <<<"$checks")"
+            if [ "$test_result" = "success" ] && [ "$codeql_result" = "success" ] && [ "$analyze_result" = "success" ] && [ "$incomplete" = "0" ] && [ "$failures" = "0" ]; then
+              exit 0
+            fi
+            sleep 20
+          done
+          exit 1
+
+      - name: Mark ready through GitHub's review-state API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: BoneManTGRM/SARA
+          PR_NUMBER: "59"
+        run: |
+          set -euo pipefail
+          merged="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.merged')"
+          [ "$merged" = "true" ] && exit 0
+          draft="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.draft')"
+          if [ "$draft" = "true" ]; then
+            gh pr ready "$PR_NUMBER" --repo "$REPOSITORY"
+          fi
+
+      - name: Merge only the exact green head
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: BoneManTGRM/SARA
+          PR_NUMBER: "59"
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER")"
+          [ "$(jq -r '.merged' <<<"$pr")" = "true" ] && exit 0
+          test "$(jq -r '.head.sha' <<<"$pr")" = "$LOCAL_HEAD"
+          mergeable="null"
+          for attempt in $(seq 1 20); do
+            mergeable="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.mergeable')"
+            [ "$mergeable" = "true" ] && break
+            sleep 5
+          done
+          test "$mergeable" = "true"
+          result="$(gh api -X PUT "repos/$REPOSITORY/pulls/$PR_NUMBER/merge" -f sha="$LOCAL_HEAD" -f merge_method="squash")"
+          test "$(jq -r '.merged' <<<"$result")" = "true"
+          jq -e '.sha | strings | length == 40' <<<"$result" >/dev/null
