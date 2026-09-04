@@ -1,0 +1,46 @@
+name: Reparodynamic efficiency lab
+on:
+  pull_request:
+    branches: [experiment/reparodynamic-learning-v5-horizon-aware]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.ref == 'experiment/reparodynamic-efficiency-v6' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - name: Verify exact head
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify > /tmp/efficiency-verification.log 2>&1
+          tail -n 35 /tmp/efficiency-verification.log
+      - name: Export reproducible source and installed toolchain
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/efficiency-artifact
+          git rev-parse HEAD > /tmp/efficiency-artifact/commit.txt
+          git archive --format=tar.gz HEAD > /tmp/efficiency-artifact/source.tar.gz
+          tar -czf /tmp/efficiency-artifact/node_modules.tar.gz node_modules
+          cp /tmp/efficiency-verification.log /tmp/efficiency-artifact/verification.log
+          cd /tmp/efficiency-artifact
+          sha256sum source.tar.gz node_modules.tar.gz verification.log > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: efficiency-lab-${{ github.event.pull_request.head.sha }}
+          path: /tmp/efficiency-artifact/
+          retention-days: 14
+          if-no-files-found: error
