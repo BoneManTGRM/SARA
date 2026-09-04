@@ -1,0 +1,170 @@
+name: Apply PR59 Telegram NICO integration v2
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-20260904
+    paths:
+      - .github/workflows/apply-pr59-telegram-nico-integration-v2.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-pr59-telegram-nico-integration-v2
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/telegram-nico-gmail-delivery
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Apply deterministic integration corrections
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          http_test = Path('tests/telegram-nico-http.test.ts')
+          if http_test.exists():
+              value = http_test.read_text().replace(
+                  'import { createServer, type AddressInfo } from "node:http";',
+                  'import { createServer } from "node:http";\nimport type { AddressInfo } from "node:net";'
+              )
+              http_test.write_text(value)
+
+          operator = Path('src/telegram-nico-delivery.ts')
+          value = operator.read_text()
+          value = value.replace(
+              '      if (existing.status === "failed" && existing.failure) throw new Error(existing.failure.reason);\n',
+              '      // Re-evaluate a blocked/interrupted command using the same immutable request and run identity.\n'
+          )
+          if 'const humanReviewed = firstValue(source, new Set(["humanreviewed"]));' not in value:
+              marker = '  const identity = artifactIdentity(source) ?? run.artifactIdentity;\n  if (!identity) throw new Error("NICO did not return an exact artifact schema plus hash-and-size identity.");\n'
+              replacement = marker + '  const humanReviewed = firstValue(source, new Set(["humanreviewed"]));\n  if (humanReviewed !== false) throw new Error("The automated NICO package must explicitly state that it was not human reviewed.");\n'
+              if marker not in value:
+                  raise SystemExit('package identity marker not found')
+              value = value.replace(marker, replacement)
+          value = value.replace('    humanReviewed: firstValue(source, new Set(["humanreviewed"])) === true,', '    humanReviewed: false,')
+          operator.write_text(value)
+
+          http = Path('src/telegram-nico-http.ts')
+          value = http.read_text()
+          if 'function htmlEscape(' not in value:
+              marker = 'function html(response: ServerResponse, status: number, title: string, message: string): void {'
+              escape = 'function htmlEscape(value: string): string {\n  return value.replace(/[&<>"\']/gu, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\\\"": "&quot;", "\\\'": "&#39;" }[character] ?? character));\n}\n\n'
+              value = value.replace(marker, escape + marker)
+              value = value.replace('<title>${title}</title>', '<title>${htmlEscape(title)}</title>')
+              value = value.replace('<h1>${title}</h1><p>${message}</p>', '<h1>${htmlEscape(title)}</h1><p>${htmlEscape(message)}</p>')
+          http.write_text(value)
+
+          server = Path('src/server.ts')
+          text = server.read_text()
+          import_line = 'import { handleTelegramNicoProductionRequest } from "./telegram-nico-production.ts";\n'
+          if import_line not in text:
+              lines = text.splitlines(True)
+              last_import = max(i for i, line in enumerate(lines) if line.startswith('import '))
+              lines.insert(last_import + 1, import_line)
+              text = ''.join(lines)
+          if 'handleTelegramNicoProductionRequest({' not in text:
+              anchor = text.rfind('createServer(')
+              if anchor < 0:
+                  raise SystemExit('createServer anchor not found')
+              callback = re.search(r'(async\s+)?\(\s*([A-Za-z_$][\w$]*)\s*,\s*([A-Za-z_$][\w$]*)\s*\)\s*=>', text[anchor:])
+              if not callback or not callback.group(1):
+                  raise SystemExit('async HTTP callback parameters not found')
+              request_name, response_name = callback.group(2), callback.group(3)
+              url_match = re.search(r'(?m)^(\s*)const\s+url\s*=\s*new\s+URL\(', text[anchor:])
+              if not url_match:
+                  raise SystemExit('request URL initialization not found')
+              absolute = anchor + url_match.start()
+              semicolon = text.find(';', absolute)
+              if semicolon < 0:
+                  raise SystemExit('request URL terminator not found')
+              indent = url_match.group(1)
+              insertion = (
+                  f'\n{indent}if (await handleTelegramNicoProductionRequest({{\n'
+                  f'{indent}  request: {request_name},\n'
+                  f'{indent}  response: {response_name},\n'
+                  f'{indent}  url,\n'
+                  f'{indent}  kernel,\n'
+                  f'{indent}  options,\n'
+                  f'{indent}}})) return;'
+              )
+              text = text[:semicolon + 1] + insertion + text[semicolon + 1:]
+          server.write_text(text)
+          PY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Focused tests
+        id: focused
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          node --import tsx --test \
+            tests/telegram-nico-delivery.test.ts \
+            tests/telegram-nico-delivery-workflow.test.ts \
+            tests/telegram-nico-http.test.ts \
+            tests/telegram-nico-production.test.ts \
+            tests/github-exact-target-verifier.test.ts \
+            tests/nico-automated-package-verifier.test.ts \
+            tests/gmail-oauth-activation.test.ts \
+            tests/gmail-verified-report-sender.test.ts 2>&1 | tee focused.log
+
+      - name: Typecheck
+        id: typecheck
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee typecheck.log
+
+      - name: Full verify
+        id: verify
+        if: steps.focused.outcome == 'success' && steps.typecheck.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run verify 2>&1 | tee verify.log
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr59-verification-logs-v2
+          path: |
+            focused.log
+            typecheck.log
+            verify.log
+          if-no-files-found: warn
+          retention-days: 2
+
+      - name: Enforce verification results
+        if: always()
+        run: |
+          test "${{ steps.focused.outcome }}" = success
+          test "${{ steps.typecheck.outcome }}" = success
+          test "${{ steps.verify.outcome }}" = success
+          ! grep -RIn --exclude-dir=node_modules --exclude='*.test.ts' 'beardedwarrior5161@gmail.com' src docs proof scripts
+          ! grep -RIn --exclude-dir=node_modules --exclude='*.test.ts' -E '(gmail|google).*(password|app password)' src docs proof scripts
+          git diff --check
+
+      - name: Commit exact verified tree to PR #59
+        run: |
+          git config user.name "Reparodynamics"
+          git config user.email "papadenico@yahoo.com"
+          git add src tests
+          if git diff --cached --quiet; then
+            echo "No integration correction remained to commit."
+            exit 0
+          fi
+          git commit -m "Complete bounded Telegram NICO and Gmail integration"
+          git push origin HEAD:feature/telegram-nico-gmail-delivery
