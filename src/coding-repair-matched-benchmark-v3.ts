@@ -32,6 +32,14 @@ export async function runMatchedCodingRepairBenchmarkV3(
       canary: "bounded_information_dense_last_two_lessons_fed_to_model" as const,
       modelProjection: "sanitized_failure_and_ast_tactic_deltas_without_raw_source_or_test_content" as const,
     },
+    tgrmGovernance: {
+      loop: "measure_repair_validate" as const,
+      driftMetric: "negative_independent_verifier_movement_only" as const,
+      energyMetric: "max_file_or_changed_line_ratio_against_existing_strategy_ceiling" as const,
+      adaptation: "conserve_after_rollback_retreat_on_drift_or_full_blast_radius" as const,
+      strategyAuthority: "controller_owned_visible_evidence_only" as const,
+      authorityEffect: "selection_only_no_ceiling_expansion" as const,
+    },
   };
   const contractDigest = sha256(canonicalJson(contract));
   const learningEvidenceDigest = sha256(canonicalJson({
