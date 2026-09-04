@@ -1,0 +1,219 @@
+name: Finalize Telegram NICO after hardening
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-20260904
+    paths:
+      - .github/workflows/finalize-telegram-nico-after-hardening.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+  actions: read
+  security-events: write
+
+concurrency:
+  group: finalize-telegram-nico-after-hardening
+  cancel-in-progress: false
+
+jobs:
+  exact-tree-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: BoneManTGRM/SARA
+      HARDEN_WORKFLOW: harden-telegram-nico-final-gates.yml
+    steps:
+      - name: Wait for the exact hardening gate
+        id: harden
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id=""
+          for attempt in $(seq 1 60); do
+            run_id="$(gh run list --repo "$REPOSITORY" --workflow "$HARDEN_WORKFLOW" --branch automation/export-sara-pr59-20260904 --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+          test -n "$run_id"
+          for attempt in $(seq 1 180); do
+            status="$(gh run view "$run_id" --repo "$REPOSITORY" --json status --jq .status)"
+            [ "$status" = completed ] && break
+            sleep 10
+          done
+          conclusion="$(gh run view "$run_id" --repo "$REPOSITORY" --json conclusion --jq .conclusion)"
+          test "$conclusion" = success
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the exact candidate and open PR
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api repos/$REPOSITORY/pulls/59 > pr59.json
+          if [ "$(jq -r .state pr59.json)" = open ] && [ "$(jq -r .merged pr59.json)" = false ]; then
+            pr=59
+            sha="$(jq -r .head.sha pr59.json)"
+            branch="$(jq -r .head.ref pr59.json)"
+            mode=merge_pr
+          else
+            gh pr list --repo "$REPOSITORY" --head fix/telegram-nico-final-safety --state open --json number,headRefOid,headRefName > followups.json
+            pr="$(jq -r '.[0].number // empty' followups.json)"
+            if [ -n "$pr" ]; then
+              sha="$(jq -r '.[0].headRefOid' followups.json)"
+              branch="$(jq -r '.[0].headRefName' followups.json)"
+              mode=merge_pr
+            else
+              sha="$(gh api repos/$REPOSITORY/branches/main --jq .commit.sha)"
+              branch=main
+              mode=verify_main
+            fi
+          fi
+          test "${#sha}" -eq 40
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the immutable candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Initialize CodeQL on the exact candidate
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+
+      - name: Install exact dependency tree
+        run: npm ci
+
+      - name: Run focused Telegram, NICO, Gmail, owner, and revenue tests
+        run: >-
+          node --import tsx --test
+          tests/telegram-nico-delivery.test.ts
+          tests/telegram-nico-delivery-workflow.test.ts
+          tests/telegram-nico-security-regressions.test.ts
+          tests/telegram-nico-final-safety.test.ts
+          tests/telegram-nico-http.test.ts
+          tests/telegram-nico-production.test.ts
+          tests/github-exact-target-verifier.test.ts
+          tests/nico-automated-package-verifier.test.ts
+          tests/gmail-oauth-activation.test.ts
+          tests/gmail-verified-report-sender.test.ts
+          tests/nico-operator.test.ts
+          tests/nico-http.test.ts
+          tests/http.test.ts
+          tests/revenue-pilot-operator.test.ts
+          tests/revenue-pilot-kernel.test.ts
+          tests/reparodynamic-http-canary.test.ts
+
+      - name: Run strict typecheck
+        run: npm run typecheck
+
+      - name: Run complete repository verification
+        run: |
+          set -o pipefail
+          npm run verify 2>&1 | tee exact-tree-verify.log
+
+      - name: Run CodeQL analysis on the exact checked-out tree
+        id: codeql
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:javascript-typescript/telegram-nico-exact-tree
+
+      - name: Inspect exact diff and sensitive-output boundaries
+        run: |
+          set -euo pipefail
+          git diff --check
+          ! git grep -n 'beardedwarrior5161@gmail.com' HEAD -- src tests docs
+          ! git grep -n -E '(gmail|google).*(password|app password)' HEAD -- src docs
+          ! git grep -n -E 'console\.(log|error|warn).*(refreshToken|clientSecret|authorization)' HEAD -- 'src/gmail-*.ts' 'src/telegram-nico-*.ts'
+          git grep -n 'sara.reparodynamics@gmail.com' HEAD -- src docs >/dev/null
+          git grep -n 'reparodynamics@gmail.com' HEAD -- src docs >/dev/null
+          test "$(git grep -n 'handleTelegramNicoProductionRequest({' HEAD -- src/server.ts | wc -l)" -eq 1
+          test -f tests/telegram-nico-final-safety.test.ts
+          if [ "${{ steps.target.outputs.mode }}" = merge_pr ]; then
+            git fetch origin main
+            unexpected="$(git diff --name-only origin/main...HEAD | awk '!/^(src|tests|docs)\// { count += 1 } END { print count + 0 }')"
+            test "$unexpected" -eq 0
+            test "$(git diff --name-only origin/main...HEAD | wc -l)" -le 35
+          fi
+
+      - name: Reconfirm an unchanged pull-request head
+        if: steps.target.outputs.mode == 'merge_pr'
+        env:
+          PR_NUMBER: ${{ steps.target.outputs.pr }}
+          LOCKED_SHA: ${{ steps.target.outputs.sha }}
+        run: test "$(gh api repos/$REPOSITORY/pulls/$PR_NUMBER --jq .head.sha)" = "$LOCKED_SHA"
+
+      - name: Mark ready and merge only the exact verified candidate
+        if: steps.target.outputs.mode == 'merge_pr'
+        id: merge
+        env:
+          PR_NUMBER: ${{ steps.target.outputs.pr }}
+          LOCKED_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh pr ready "$PR_NUMBER" --repo "$REPOSITORY" || true
+          gh api --method PUT repos/$REPOSITORY/pulls/$PR_NUMBER/merge \
+            -f sha="$LOCKED_SHA" \
+            -f merge_method=merge \
+            -f commit_title="Finalize bounded Telegram NICO and Gmail delivery (#$PR_NUMBER)" \
+            -f commit_message='Fresh focused tests, complete repository verification, CodeQL analysis, and sensitive-output inspection passed on the exact candidate before merge.' \
+            > merge.json
+          jq -e '.merged == true' merge.json
+          merged_sha="$(jq -r .sha merge.json)"
+          test "${#merged_sha}" -eq 40
+          echo "merged_sha=$merged_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the final main commit
+        id: final
+        run: |
+          set -euo pipefail
+          final_sha="$(gh api repos/$REPOSITORY/branches/main --jq .commit.sha)"
+          test "${#final_sha}" -eq 40
+          if [ "${{ steps.target.outputs.mode }}" = merge_pr ]; then
+            test "$final_sha" = "${{ steps.merge.outputs.merged_sha }}"
+          else
+            test "$final_sha" = "${{ steps.target.outputs.sha }}"
+          fi
+          echo "sha=$final_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Record exact non-secret release evidence
+        env:
+          MODE: ${{ steps.target.outputs.mode }}
+          PR_NUMBER: ${{ steps.target.outputs.pr }}
+          VERIFIED_SHA: ${{ steps.target.outputs.sha }}
+          FINAL_SHA: ${{ steps.final.outputs.sha }}
+          HARDEN_RUN: ${{ steps.harden.outputs.run_id }}
+        run: |
+          jq -n \
+            --arg mode "$MODE" \
+            --arg pr "$PR_NUMBER" \
+            --arg verified "$VERIFIED_SHA" \
+            --arg final "$FINAL_SHA" \
+            --arg hardenRun "$HARDEN_RUN" \
+            '{mode:$mode, pullRequest:(if $pr == "" then null else ($pr|tonumber) end), verifiedCommit:$verified, finalMainCommit:$final, hardeningWorkflowRun:$hardenRun, focusedTests:"success", typecheck:"success", fullVerify:"success", codeql:"success", assessmentExecuted:false, emailSent:false}' \
+            > telegram-nico-final-release-evidence.json
+          if [ -n "$PR_NUMBER" ]; then
+            gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body "Exact candidate \`$VERIFIED_SHA\` passed focused tests, full repository verification, CodeQL, and final sensitive-output review. Main is now \`$FINAL_SHA\`. Production OAuth, the p-map assessment, and email delivery remain inactive pending deployment and exact-account consent."
+          fi
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-nico-final-release-evidence
+          path: |
+            pr59.json
+            followups.json
+            exact-tree-verify.log
+            merge.json
+            telegram-nico-final-release-evidence.json
+          if-no-files-found: warn
+          retention-days: 14
