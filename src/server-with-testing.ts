@@ -9,6 +9,7 @@ import { createSaraServer } from "./server.ts";
 
 const MAX_JSON_BYTES = 32 * 1024;
 const TESTING_ROOT = "/api/revenue-pilot/testing";
+const SAFE_ROUTE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 export type RevenuePilotTestingServerOptions = Parameters<typeof createSaraServer>[1] & {
   revenuePilotTesting?: {
@@ -54,6 +55,17 @@ async function readJsonObject(request: IncomingMessage): Promise<Record<string, 
   return parsed as Record<string, unknown>;
 }
 
+function testingJobId(pathname: string): string | null {
+  const match = pathname.match(new RegExp(`^${TESTING_ROOT}/jobs/([^/]+)$`, "u"));
+  if (!match) return null;
+  try {
+    const decoded = decodeURIComponent(match[1]);
+    return SAFE_ROUTE_ID.test(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
 async function handleTestingRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -82,6 +94,20 @@ async function handleTestingRequest(
     }
     return;
   }
+  if (pathname === `${TESTING_ROOT}/jobs` && request.method === "GET") {
+    writeJson(response, 200, await runtime.listJobs());
+    return;
+  }
+  const jobId = testingJobId(pathname);
+  if (jobId && request.method === "GET") {
+    const job = await runtime.getJob(jobId);
+    if (!job) {
+      writeJson(response, 404, { error: "Testing job not found." });
+      return;
+    }
+    writeJson(response, 200, job);
+    return;
+  }
   writeJson(response, 404, { error: "Testing route not found." });
 }
 
@@ -90,7 +116,9 @@ export function createSaraServerWithTesting(
   options: RevenuePilotTestingServerOptions,
 ): ReturnType<typeof createSaraServer> {
   const { revenuePilotTesting, ...baseOptions } = options;
-  const runtime = revenuePilotTesting ? new RevenuePilotTestingRuntime(kernel) : null;
+  const runtime = revenuePilotTesting
+    ? new RevenuePilotTestingRuntime(kernel, baseOptions.stateDirectory)
+    : null;
   const server = createSaraServer(kernel, baseOptions);
   const delegates = server.listeners("request") as RequestListener[];
   if (delegates.length !== 1) {
@@ -119,7 +147,7 @@ export function createSaraServerWithTesting(
       });
       return;
     }
-    delegate(request, response);
+    delegate.call(server, request, response);
   });
   return server;
 }
