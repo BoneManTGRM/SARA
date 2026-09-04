@@ -19,6 +19,12 @@ import { listSaraTools } from "./tool-registry.ts";
 import type { NicoArtifactFormat, NicoArtifactIdentity, NicoOperator } from "./nico-operator.ts";
 import type { CandidateProposal, MutationStage } from "./types.ts";
 import { compileAuthorizedAutomatedReadinessDelivery } from "./authorized-readiness-delivery.ts";
+import type { WorkerModelClient } from "./model-router.ts";
+import type { ReparodynamicCodingMode } from "./coding-repair-types.ts";
+import { createReparodynamicCandidateGenerator } from "./reparodynamic-candidate-generator.ts";
+import { createLunaCodingRepairModel } from "./luna-coding-repair-model.ts";
+import { verifyGenomeLabProgramCandidate } from "./genome-lab-verifier.ts";
+import { persistCodingRepairReceipt, persistCodingRepairRun } from "./coding-repair-receipt-store.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -43,6 +49,11 @@ export type ServerOptions = {
   };
   publicBaseUrl?: string;
   nicoOperator?: NicoOperator;
+  reparodynamicCoding?: {
+    mode: ReparodynamicCodingMode;
+    modelClient: WorkerModelClient;
+    stateDirectory: string;
+  };
 };
 
 const publicCommerceAttempts = new Map<string, { count: number; resetAt: number }>();
@@ -502,23 +513,52 @@ async function handleSelfBuild(
   kernel: SaraKernel,
   owner: OwnerSession,
   jobId: string,
+  options: ServerOptions,
 ): Promise<void> {
   const body = await readJson(request);
   const proposal = body.proposal as CandidateProposal;
   if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) {
     throw new Error("proposal must be a skill or program candidate object.");
   }
+  const baseGenerator = {
+    id: "owner-supplied-zero-cost-proposal",
+    external: false,
+    maximumCostUsd: 0,
+    async generate() {
+      return structuredClone(proposal);
+    },
+  };
+  const runId = randomUUID();
+  const generator = options.reparodynamicCoding && proposal.candidateKind === "typescript_program"
+    ? createReparodynamicCandidateGenerator({
+      base: baseGenerator,
+      mode: options.reparodynamicCoding.mode,
+      model: (context) => createLunaCodingRepairModel({
+        client: options.reparodynamicCoding!.modelClient,
+        context,
+      }),
+      verify: (candidate, context) => verifyGenomeLabProgramCandidate({
+        candidate,
+        objective: context.objective,
+        acceptanceCriteria: context.acceptanceCriteria,
+        constitutionDigest: context.constitutionDigest,
+      }),
+      onReceipt: (receipt) => persistCodingRepairReceipt({
+        stateDirectory: options.reparodynamicCoding!.stateDirectory,
+        runId,
+        receipt,
+      }),
+      onRun: (run) => persistCodingRepairRun({
+        stateDirectory: options.reparodynamicCoding!.stateDirectory,
+        runId,
+        run,
+      }),
+    })
+    : baseGenerator;
   json(
     response,
     201,
-    await kernel.runSelfBuildCycle(owner, jobId, {
-      id: "owner-supplied-zero-cost-proposal",
-      external: false,
-      maximumCostUsd: 0,
-      async generate() {
-        return structuredClone(proposal);
-      },
-    }),
+    await kernel.runSelfBuildCycle(owner, jobId, generator),
   );
 }
 
@@ -786,6 +826,7 @@ async function handleOwnerDevelopmentRequest(
   url: URL,
   kernel: SaraKernel,
   owner: OwnerSession,
+  options: ServerOptions,
 ): Promise<boolean> {
   const handoffMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/handoff$/);
   if (request.method === "GET" && handoffMatch) {
@@ -799,7 +840,7 @@ async function handleOwnerDevelopmentRequest(
   }
   const selfBuildMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/self-build$/);
   if (request.method === "POST" && selfBuildMatch) {
-    await handleSelfBuild(request, response, kernel, owner, decodeURIComponent(selfBuildMatch[1]));
+    await handleSelfBuild(request, response, kernel, owner, decodeURIComponent(selfBuildMatch[1]), options);
     return true;
   }
   const promoteMatch = url.pathname.match(/^\/api\/mutations\/([^/]+)\/promote$/);
@@ -948,7 +989,7 @@ async function handleAuthenticatedRequest(
   if (await handleOwnerNicoOperation(request, response, url, kernel, owner, options)) return;
   if (await handleOwnerReportRead(request, response, url, kernel, options)) return;
   if (await handleOwnerRevenueWrite(request, response, url, kernel, owner, options)) return;
-  if (await handleOwnerDevelopmentRequest(request, response, url, kernel, owner)) return;
+  if (await handleOwnerDevelopmentRequest(request, response, url, kernel, owner, options)) return;
   json(response, 404, { error: "Not found." });
 }
 

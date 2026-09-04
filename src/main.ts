@@ -10,6 +10,7 @@ import { createSaraServer } from "./server.ts";
 import { compileCommercialTerms, compilePreviousCommercialTermsDigest } from "./commercial-terms.ts";
 import { NicoOperatorClient } from "./nico-operator.ts";
 import { activateApprovedAutonomousPaidMandate } from "./autonomous-paid-mandate-bootstrap.ts";
+import { parseReparodynamicCodingMode } from "./reparodynamic-candidate-generator.ts";
 
 const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? ".sara-state");
 const host = process.env.SARA_HOST ?? "127.0.0.1";
@@ -33,6 +34,7 @@ const nicoBaseUrl = process.env.SARA_NICO_BASE_URL?.trim();
 const nicoOperatorPassword = process.env.SARA_NICO_OPERATOR_PASSWORD?.trim();
 const ownerToken = process.env.SARA_OWNER_TOKEN?.trim();
 const approvedAutonomousPaidMandateDigest = process.env.SARA_AUTONOMOUS_PAID_MANDATE_APPROVED_SHA256?.trim();
+const reparodynamicCodingMode = parseReparodynamicCodingMode(process.env.SARA_REPARODYNAMIC_CODING_MODE);
 if (!ownerTokenSha256 || !/^[a-f0-9]{64}$/i.test(ownerTokenSha256)) {
   throw new Error("Set SARA_OWNER_TOKEN_SHA256 to a SHA-256 digest before starting the owner dashboard.");
 }
@@ -117,8 +119,12 @@ console.log(`SARA revenue readiness proof ${JSON.stringify({
   commercialTermsVersion: compiledTerms?.version ?? null,
   commercialTermsDigest: compiledTerms?.digest ?? null,
   commercialTermsApproval: approvedTermsDigest === compiledTerms?.digest ? "exact" : termsApproved ? "v1_to_v2_migration" : "missing",
+  reparodynamicCodingMode,
 })}`);
 const client = apiKey ? new OpenAIResponsesClient({ apiKey }) : null;
+if (reparodynamicCodingMode !== "off" && !client) {
+  throw new Error("Reparodynamic coding requires OPENAI_API_KEY when its mode is shadow or canary.");
+}
 const ownerAssistant = client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
   ? new OwnerAssistant({ modelClient: client, stateDirectory, monthlyBudgetUsd: telegramMonthlyBudgetUsd })
   : null;
@@ -150,6 +156,13 @@ const server = createSaraServer(kernel, {
   ...(ownerAssistant ? { ownerAssistant } : {}),
   ...(commerce ? { commerce } : {}),
   ...(nicoOperator ? { nicoOperator } : {}),
+  ...(client && reparodynamicCodingMode !== "off" ? {
+    reparodynamicCoding: {
+      mode: reparodynamicCodingMode,
+      modelClient: client,
+      stateDirectory,
+    },
+  } : {}),
   ...(client ? {
     runtimeStatus: async () => ({
       worker: operator ? await operator.status() : {
