@@ -109,6 +109,10 @@ export function buildCodingRepairPerformanceGauge(input: {
     receipt.outcome === "duplicate_rejected" && receipt.reasonCode === "semantic_tactic_repeat"
   )).length;
   const modelCalls = input.receipts.filter((receipt) => receipt.strategy !== "stop").length;
+  const accountedCostUsd = rounded(input.receipts.reduce(
+    (total, receipt) => total + receipt.accountedCostUsd,
+    0,
+  ));
   const limitsDigest = sha256(canonicalJson({
     maximumCycles: input.limits.maximumCycles,
     surgicalFiles: input.limits.surgicalFiles,
@@ -126,6 +130,7 @@ export function buildCodingRepairPerformanceGauge(input: {
     semanticRepeatRejections,
     verifierExecutionsAvoided: semanticRepeatRejections,
     modelCalls,
+    accountedCostUsd,
     completionGain: Number(input.finalVerification.passed) - Number(input.baselineVerification.passed),
     scoreGain: rounded(input.finalVerification.score - input.baselineVerification.score),
     behavioralProgress: buildBehavioralProgress(input.baselineVerification, input.finalVerification),
