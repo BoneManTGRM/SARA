@@ -1,9 +1,15 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { digestCodingRepairProposal } from "./coding-repair-artifacts.ts";
 import { runCodingRepairController, type CodingRepairModel } from "./coding-repair-controller.ts";
+import {
+  boundCodingRepairAttemptLessons,
+  buildCodingRepairAttemptLesson,
+  digestCodingRepairAttemptLessons,
+} from "./coding-repair-lessons.ts";
 import { INITIAL_CODING_REPAIR_LIMITS, repairYieldPerEnergy } from "./coding-repair-policy.ts";
 import { validateCodingRepairProposal } from "./coding-repair-prompt.ts";
 import type {
+  CodingRepairAttemptLesson,
   CodingRepairLimits,
   CodingRepairProposal,
   CodingRepairReceipt,
@@ -40,7 +46,9 @@ function assertNoAuthorityExpansion(limits: CodingRepairLimits): void {
     }
   }
   for (const path of ceiling.protectedPaths) {
-    if (!limits.protectedPaths.includes(path)) throw new Error("Matched benchmark cannot remove a protected path.");
+    if (!limits.protectedPaths.includes(path)) {
+      throw new Error("Matched benchmark cannot remove a protected path.");
+    }
   }
 }
 
@@ -112,10 +120,12 @@ function arm(input: {
   outputTokens: number;
   modelCalls: number;
   receipts: MatchedReceipt[];
+  attemptLessons: readonly CodingRepairAttemptLesson[];
 }) {
   const milliseconds = rounded(input.elapsedMilliseconds);
   const cost = rounded(input.accountedCostUsd);
   const completion = Number(input.verification.passed);
+  const attemptLessons = boundCodingRepairAttemptLessons(input.attemptLessons);
   return {
     verifiedComplete: input.verification.passed,
     score: input.verification.score,
@@ -131,9 +141,12 @@ function arm(input: {
     cycles: input.receipts.length,
     rollbacks: input.receipts.filter((receipt) => receipt.outcome === "rolled_back").length,
     acceptedImprovements: input.receipts.filter((receipt) => receipt.outcome === "accepted_improvement").length,
+    duplicateRejections: input.receipts.filter((receipt) => receipt.outcome === "duplicate_rejected").length,
     changedLines: input.receipts.reduce((sum, receipt) => sum + receipt.changedLines, 0),
     ryeTotal: rounded(input.receipts.reduce((sum, receipt) => sum + receipt.rye, 0)),
     receipts: structuredClone(input.receipts),
+    attemptLessons,
+    attemptLessonsDigest: digestCodingRepairAttemptLessons(attemptLessons),
     verifiedCompletionsPerActiveSecond: milliseconds > 0 ? rounded(completion * 1_000 / milliseconds) : 0,
     verifiedCompletionsPerUsd: cost > 0 ? rounded(completion / cost) : 0,
   };
@@ -167,11 +180,16 @@ export async function runMatchedCodingRepairBenchmark(input: {
   }
 
   const limits = input.limits ?? INITIAL_CODING_REPAIR_LIMITS;
-  const physicalMaximumSpendUsd = input.physicalMaximumSpendUsd ?? INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd;
+  const physicalMaximumSpendUsd = input.physicalMaximumSpendUsd
+    ?? INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd;
   assertNoAuthorityExpansion(limits);
   assertPhysicalSpendLimit(physicalMaximumSpendUsd);
 
   const normalizedLimits = { ...limits, protectedPaths: [...limits.protectedPaths] };
+  const reasoningSchedule = Array.from(
+    { length: limits.maximumCycles },
+    () => "medium" as const,
+  );
   const authority = {
     maximumCycles: limits.maximumCycles,
     maximumModelSpendUsd: limits.maximumModelSpendUsd,
@@ -187,7 +205,7 @@ export async function runMatchedCodingRepairBenchmark(input: {
     promotion: false as const,
   };
   const contract = {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     caseId: input.caseId,
     sourceCommit: input.sourceCommit,
     modelRouteKey: input.modelRouteKey,
@@ -198,11 +216,19 @@ export async function runMatchedCodingRepairBenchmark(input: {
     memoryContextDigest: input.memoryContextDigest,
     baselineDigest: sha256(canonicalJson(input.baseline)),
     controlPolicy: "bounded_latest_state_luna_retry" as const,
-    canaryPolicy: "existing_reparodynamic_controller" as const,
+    canaryPolicy: "bounded_reparodynamic_rollback_learning_v2" as const,
     sharedFirstProposal: true as const,
     armLimits: {
       control: structuredClone(normalizedLimits),
       canary: structuredClone(normalizedLimits),
+    },
+    reasoningSchedule: {
+      control: [...reasoningSchedule],
+      canary: [...reasoningSchedule],
+    },
+    learning: {
+      control: "record_only_not_fed_to_model" as const,
+      canary: "bounded_last_two_lessons_fed_to_model" as const,
     },
     physicalMaximumSpendUsd,
     physicalBudgetAllocation: "one_shared_first_call_then_equal_continuation_reserves" as const,
@@ -233,7 +259,9 @@ export async function runMatchedCodingRepairBenchmark(input: {
   ): Promise<{ response: ModelResponse; elapsedMilliseconds: number }> => {
     const physicalRemainingUsd = Math.max(0, physicalMaximumSpendUsd - physicalSpendUsd);
     const maximumCostUsd = Math.min(request.remainingCostUsd, physicalAllowanceUsd, physicalRemainingUsd);
-    if (maximumCostUsd < 0.01) throw new Error(`${label} has insufficient matched physical spend remaining.`);
+    if (maximumCostUsd < 0.01) {
+      throw new Error(`${label} has insufficient matched physical spend remaining.`);
+    }
     const started = performance.now();
     const response = await input.model.propose({ ...request, remainingCostUsd: maximumCostUsd });
     const elapsedMilliseconds = performance.now() - started;
@@ -252,6 +280,7 @@ export async function runMatchedCodingRepairBenchmark(input: {
   let controlOutputTokens = 0;
   let controlModelCalls = 0;
   const controlReceipts: ControlReceipt[] = [];
+  let controlAttemptLessons: CodingRepairAttemptLesson[] = [];
 
   for (let cycle = 1; cycle <= limits.maximumCycles && !controlVerification.passed; cycle += 1) {
     const target = controlVerification.failures[0];
@@ -265,6 +294,7 @@ export async function runMatchedCodingRepairBenchmark(input: {
       strategy: "surgical",
       cycle,
       remainingCostUsd: logicalRemainingCostUsd,
+      attemptLessons: [],
     };
     let response: ModelResponse;
     if (cycle === 1) {
@@ -292,14 +322,22 @@ export async function runMatchedCodingRepairBenchmark(input: {
     if (applied.changedLines > limits.surgicalChangedLines) {
       throw new Error("Matched control proposal exceeds its changed-line limit.");
     }
+    const beforeVerification = controlVerification;
     const verificationStarted = performance.now();
     const nextVerification = await input.verify(applied.candidate);
     const verificationMilliseconds = performance.now() - verificationStarted;
+    const rye = repairYieldPerEnergy({
+      verificationGain: nextVerification.score - beforeVerification.score,
+      costUsd: response.accountedCostUsd,
+      changedLines: applied.changedLines,
+      verificationMilliseconds,
+    });
+    const proposalDigest = digestCodingRepairProposal(response.proposal);
     const receipt: ControlReceipt = {
       cycle,
-      beforeArtifactDigest: controlVerification.artifactDigest,
+      beforeArtifactDigest: beforeVerification.artifactDigest,
       failureFingerprint: target.fingerprint,
-      proposalDigest: digestCodingRepairProposal(response.proposal),
+      proposalDigest,
       afterArtifactDigest: nextVerification.artifactDigest,
       strategy: "luna_surgical",
       changedFiles: response.proposal.changes.length,
@@ -308,16 +346,31 @@ export async function runMatchedCodingRepairBenchmark(input: {
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       accountedCostUsd: response.accountedCostUsd,
-      rye: repairYieldPerEnergy({
-        verificationGain: nextVerification.score - controlVerification.score,
-        costUsd: response.accountedCostUsd,
-        changedLines: applied.changedLines,
-        verificationMilliseconds,
-      }),
+      rye,
       outcome: nextVerification.passed ? "verified_complete" : "advanced_latest_state",
       reasonCode: nextVerification.passed ? "verified_clean" : "latest_state_retry",
     };
     controlReceipts.push(receipt);
+    if (!nextVerification.passed) {
+      controlAttemptLessons = boundCodingRepairAttemptLessons([
+        ...controlAttemptLessons,
+        buildCodingRepairAttemptLesson({
+          cycle,
+          requestedStrategy: "surgical",
+          proposalDigest,
+          championArtifactDigest: beforeVerification.artifactDigest,
+          proposedArtifactDigest: nextVerification.artifactDigest,
+          changedPaths: response.proposal.changes.map((change) => change.path),
+          changedFiles: response.proposal.changes.length,
+          changedLines: applied.changedLines,
+          before: beforeVerification,
+          after: nextVerification,
+          outcome: "advanced_latest_state",
+          reasonCode: receipt.reasonCode,
+          rye,
+        }),
+      ]);
+    }
     controlCandidate = applied.candidate;
     controlVerification = nextVerification;
     controlAccountedCostUsd += response.accountedCostUsd;
@@ -347,7 +400,11 @@ export async function runMatchedCodingRepairBenchmark(input: {
           return replay;
         }
         const remainingContinuationUsd = Math.max(0, continuationPhysicalLimitPerArm - canaryContinuationSpendUsd);
-        const physical = await callPhysicalModel(request, remainingContinuationUsd, "Matched Reparodynamic Luna continuation");
+        const physical = await callPhysicalModel(
+          request,
+          remainingContinuationUsd,
+          "Matched Reparodynamic Luna continuation",
+        );
         canaryContinuationSpendUsd += physical.response.accountedCostUsd;
         return physical.response;
       },
@@ -357,7 +414,9 @@ export async function runMatchedCodingRepairBenchmark(input: {
     0,
     performance.now() - canaryStarted + sharedFirstProposalMilliseconds - replayMilliseconds,
   );
-  if (!replayedFirstProposal) throw new Error("Matched canary did not consume the shared first Luna proposal.");
+  if (!replayedFirstProposal) {
+    throw new Error("Matched canary did not consume the shared first Luna proposal.");
+  }
 
   const controlAuditStarted = performance.now();
   const controlPost = await input.verify(structuredClone(controlCandidate));
@@ -407,6 +466,7 @@ export async function runMatchedCodingRepairBenchmark(input: {
     outputTokens: controlOutputTokens,
     modelCalls: controlModelCalls,
     receipts: controlReceipts,
+    attemptLessons: controlAttemptLessons,
   });
   const canaryModelReceipts = canaryRun.receipts.filter((receipt) => receipt.strategy !== "stop");
   const canary = arm({
@@ -418,6 +478,7 @@ export async function runMatchedCodingRepairBenchmark(input: {
     outputTokens: canaryModelReceipts.reduce((sum, receipt) => sum + receipt.outputTokens, 0),
     modelCalls: canaryModelReceipts.length,
     receipts: canaryRun.receipts,
+    attemptLessons: canaryRun.attemptLessons,
   });
   const deltas = {
     verifiedCompletion: Number(canary.verifiedComplete) - Number(control.verifiedComplete),
@@ -431,7 +492,14 @@ export async function runMatchedCodingRepairBenchmark(input: {
   };
   const valid = invalidReasons.length === 0;
   const timeAndCostComparable = valid && control.verifiedComplete && canary.verifiedComplete;
-  const receiptsDigest = sha256(canonicalJson({ control: control.receipts, canary: canary.receipts }));
+  const receiptsDigest = sha256(canonicalJson({
+    control: control.receipts,
+    canary: canary.receipts,
+  }));
+  const learningEvidenceDigest = sha256(canonicalJson({
+    control: control.attemptLessons,
+    canary: canary.attemptLessons,
+  }));
   const baselineVerificationDigest = digestVerification(controlBaselineVerification);
   const evidence = {
     contractDigest,
@@ -445,10 +513,11 @@ export async function runMatchedCodingRepairBenchmark(input: {
     timeAndCostComparable,
     invalidReasons,
     receiptsDigest,
+    learningEvidenceDigest,
     auditVerificationMilliseconds,
   };
   return {
-    schemaVersion: 1 as const,
+    schemaVersion: 2 as const,
     evidenceLevel: "LAB_SINGLE_MATCHED_TRACE" as const,
     caseId: input.caseId,
     sourceCommit: input.sourceCommit,
@@ -465,7 +534,10 @@ export async function runMatchedCodingRepairBenchmark(input: {
     physicalSpendUsd: evidence.physicalSpendUsd,
     physicalModelCalls,
     receipts: structuredClone(canaryRun.receipts),
+    attemptLessons: structuredClone(canaryRun.attemptLessons),
+    attemptLessonsDigest: canaryRun.attemptLessonsDigest,
     receiptsDigest,
+    learningEvidenceDigest,
     auditVerificationMilliseconds,
     timeAndCostComparable,
     deltas,

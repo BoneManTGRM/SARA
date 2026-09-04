@@ -1,9 +1,15 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { assertReceiptChain, digestCodingRepairProposal } from "./coding-repair-artifacts.ts";
+import {
+  boundCodingRepairAttemptLessons,
+  buildCodingRepairAttemptLesson,
+  digestCodingRepairAttemptLessons,
+  passingVerificationChecks,
+} from "./coding-repair-lessons.ts";
 import { chooseCodingRepairStrategy, INITIAL_CODING_REPAIR_LIMITS, repairYieldPerEnergy } from "./coding-repair-policy.ts";
 import { validateCodingRepairProposal } from "./coding-repair-prompt.ts";
 import type {
-  CodingFailureKind,
+  CodingRepairAttemptLesson,
   CodingRepairLimits,
   CodingRepairProposal,
   CodingRepairReceipt,
@@ -19,22 +25,13 @@ export type CodingRepairModel = {
     strategy: "surgical" | "deep";
     cycle: number;
     remainingCostUsd: number;
+    attemptLessons?: readonly CodingRepairAttemptLesson[];
   }): Promise<{
     proposal: CodingRepairProposal;
     inputTokens: number;
     outputTokens: number;
     accountedCostUsd: number;
   }>;
-};
-
-type VerificationCheck = ProgramVerificationResult["completedChecks"][number];
-
-const FAILURE_KINDS_BY_CHECK: Record<VerificationCheck, readonly CodingFailureKind[]> = {
-  source_policy: ["policy", "security"],
-  syntax: ["syntax"],
-  typecheck: ["type"],
-  behavior_tests: ["test", "behavior"],
-  artifact_integrity: ["integrity"],
 };
 
 function changedLineCount(before: string, after: string): number {
@@ -61,21 +58,49 @@ function applyProposal(candidate: ProgramCandidateProposal, proposal: CodingRepa
   return { candidate: { ...candidate, files }, changedLines };
 }
 
-function checkPassed(verification: ProgramVerificationResult, check: VerificationCheck): boolean {
-  return verification.completedChecks.includes(check) && !verification.failures.some((failure) => (
-    FAILURE_KINDS_BY_CHECK[check].includes(failure.kind)
-  ));
-}
-
 function hasRegression(before: ProgramVerificationResult, after: ProgramVerificationResult): boolean {
-  const previouslyPassingChecks = before.completedChecks.filter((check) => checkPassed(before, check));
-  if (previouslyPassingChecks.some((check) => !checkPassed(after, check))) return true;
+  const beforePassing = passingVerificationChecks(before);
+  const afterPassing = new Set(passingVerificationChecks(after));
+  if (beforePassing.some((check) => !afterPassing.has(check))) return true;
   return after.failures.some((failure) => (
     failure.severity === "critical" ||
     failure.kind === "security" ||
     failure.kind === "timeout" ||
     failure.kind === "unknown"
   ));
+}
+
+function appendAttemptLesson(
+  lessons: readonly CodingRepairAttemptLesson[],
+  lesson: CodingRepairAttemptLesson,
+): CodingRepairAttemptLesson[] {
+  return boundCodingRepairAttemptLessons([...lessons, lesson]);
+}
+
+function runResult(input: {
+  baseline: ProgramCandidateProposal;
+  baselineVerification: ProgramVerificationResult;
+  champion: ProgramCandidateProposal;
+  state: CodingRepairRun["state"];
+  verification: ProgramVerificationResult;
+  receipts: CodingRepairReceipt[];
+  attemptLessons: CodingRepairAttemptLesson[];
+  accountedCostUsd: number;
+  runStarted: number;
+}): CodingRepairRun {
+  const attemptLessons = boundCodingRepairAttemptLessons(input.attemptLessons);
+  return {
+    baseline: input.baseline,
+    baselineVerification: input.baselineVerification,
+    champion: input.champion,
+    state: input.state,
+    verification: input.verification,
+    receipts: input.receipts,
+    attemptLessons,
+    attemptLessonsDigest: digestCodingRepairAttemptLessons(attemptLessons),
+    accountedCostUsd: input.accountedCostUsd,
+    elapsedMilliseconds: performance.now() - input.runStarted,
+  };
 }
 
 export async function runCodingRepairController(input: {
@@ -92,25 +117,37 @@ export async function runCodingRepairController(input: {
   const baselineVerification = structuredClone(verification);
   let state: CodingRepairRun["state"] = verification.passed ? "VERIFIED_CANDIDATE" : "BASELINE";
   const receipts: CodingRepairReceipt[] = [];
+  let attemptLessons: CodingRepairAttemptLesson[] = [];
   const recurrence = new Map<string, number>();
+  const attemptedProposalKeys = new Set<string>();
   let accountedCostUsd = 0;
-  if (verification.passed) return {
-    baseline: input.baseline,
-    baselineVerification,
-    champion,
-    state,
-    verification,
-    receipts,
-    accountedCostUsd,
-    elapsedMilliseconds: performance.now() - runStarted,
-  };
+
+  if (verification.passed) {
+    return runResult({
+      baseline: input.baseline,
+      baselineVerification,
+      champion,
+      state,
+      verification,
+      receipts,
+      attemptLessons,
+      accountedCostUsd,
+      runStarted,
+    });
+  }
 
   for (let cycle = 1; cycle <= limits.maximumCycles; cycle += 1) {
     const target = verification.failures[0];
     if (!target) break;
     const seen = (recurrence.get(target.fingerprint) ?? 0) + 1;
     recurrence.set(target.fingerprint, seen);
-    const decision = chooseCodingRepairStrategy({ failures: verification.failures, cycle: cycle - 1, spentUsd: accountedCostUsd, recurrence: seen, limits });
+    const decision = chooseCodingRepairStrategy({
+      failures: verification.failures,
+      cycle: cycle - 1,
+      spentUsd: accountedCostUsd,
+      recurrence: seen,
+      limits,
+    });
     if (decision.strategy === "stop") {
       const receipt: CodingRepairReceipt = {
         cycle,
@@ -134,9 +171,21 @@ export async function runCodingRepairController(input: {
       state = "STOPPED";
       break;
     }
+
     const modelStrategy = decision.strategy === "luna_deep" ? "deep" : "surgical";
-    const response = await input.model.propose({ candidate: structuredClone(champion), verification, strategy: modelStrategy, cycle, remainingCostUsd: decision.remainingCostUsd });
-    if (!Number.isFinite(response.accountedCostUsd) || response.accountedCostUsd < 0 || response.accountedCostUsd > decision.remainingCostUsd) {
+    const response = await input.model.propose({
+      candidate: structuredClone(champion),
+      verification: structuredClone(verification),
+      strategy: modelStrategy,
+      cycle,
+      remainingCostUsd: decision.remainingCostUsd,
+      attemptLessons: structuredClone(attemptLessons),
+    });
+    if (
+      !Number.isFinite(response.accountedCostUsd) ||
+      response.accountedCostUsd < 0 ||
+      response.accountedCostUsd > decision.remainingCostUsd
+    ) {
       throw new Error("Coding repair model exceeded or malformed its accounted cost.");
     }
     accountedCostUsd += response.accountedCostUsd;
@@ -150,22 +199,77 @@ export async function runCodingRepairController(input: {
     });
     const applied = applyProposal(champion, response.proposal);
     const lineLimit = modelStrategy === "surgical" ? limits.surgicalChangedLines : limits.deepChangedLines;
-    if (applied.changedLines > lineLimit) throw new Error("Coding repair proposal exceeds its changed-line limit.");
+    if (applied.changedLines > lineLimit) {
+      throw new Error("Coding repair proposal exceeds its changed-line limit.");
+    }
+
+    const proposalDigest = digestCodingRepairProposal(response.proposal);
+    const proposalKey = sha256(canonicalJson({
+      championArtifactDigest: verification.artifactDigest,
+      failureFingerprint: target.fingerprint,
+      proposalDigest,
+    }));
+    if (attemptedProposalKeys.has(proposalKey)) {
+      const receipt: CodingRepairReceipt = {
+        cycle,
+        beforeArtifactDigest: verification.artifactDigest,
+        failureFingerprint: target.fingerprint,
+        proposalDigest,
+        afterArtifactDigest: null,
+        strategy: decision.strategy,
+        changedFiles: response.proposal.changes.length,
+        changedLines: applied.changedLines,
+        verifierEvidenceDigests: verification.evidenceDigests,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        accountedCostUsd: response.accountedCostUsd,
+        rye: 0,
+        outcome: "duplicate_rejected",
+        reasonCode: "duplicate_proposal",
+      };
+      receipts.push(receipt);
+      attemptLessons = appendAttemptLesson(attemptLessons, buildCodingRepairAttemptLesson({
+        cycle,
+        requestedStrategy: modelStrategy,
+        proposalDigest,
+        championArtifactDigest: verification.artifactDigest,
+        proposedArtifactDigest: null,
+        changedPaths: response.proposal.changes.map((change) => change.path),
+        changedFiles: response.proposal.changes.length,
+        changedLines: applied.changedLines,
+        before: verification,
+        after: verification,
+        outcome: "duplicate_rejected",
+        reasonCode: receipt.reasonCode,
+        rye: 0,
+      }));
+      await input.onReceipt?.(structuredClone(receipt));
+      continue;
+    }
+    attemptedProposalKeys.add(proposalKey);
+
+    const beforeVerification = verification;
     const started = performance.now();
     const nextVerification = await input.verify(applied.candidate);
     const verificationMilliseconds = performance.now() - started;
-    const improved = nextVerification.score > verification.score && !hasRegression(verification, nextVerification);
+    const improved = nextVerification.score > beforeVerification.score && !hasRegression(beforeVerification, nextVerification);
     const outcome: CodingRepairReceipt["outcome"] = nextVerification.passed
       ? "verified_complete"
       : improved
         ? "accepted_improvement"
         : "rolled_back";
     const accepted = improved || nextVerification.passed;
+    const rye = repairYieldPerEnergy({
+      verificationGain: nextVerification.score - beforeVerification.score,
+      costUsd: response.accountedCostUsd,
+      changedLines: applied.changedLines,
+      verificationMilliseconds,
+    });
     const receipt: CodingRepairReceipt = {
       cycle,
-      beforeArtifactDigest: verification.artifactDigest,
+      beforeArtifactDigest: beforeVerification.artifactDigest,
       failureFingerprint: target.fingerprint,
-      proposalDigest: digestCodingRepairProposal(response.proposal),
+      proposalDigest,
       afterArtifactDigest: accepted ? nextVerification.artifactDigest : null,
       strategy: decision.strategy,
       changedFiles: response.proposal.changes.length,
@@ -174,11 +278,30 @@ export async function runCodingRepairController(input: {
       inputTokens: response.inputTokens,
       outputTokens: response.outputTokens,
       accountedCostUsd: response.accountedCostUsd,
-      rye: repairYieldPerEnergy({ verificationGain: nextVerification.score - verification.score, costUsd: response.accountedCostUsd, changedLines: applied.changedLines, verificationMilliseconds }),
+      rye,
       outcome,
-      reasonCode: accepted ? (nextVerification.passed ? "verified_clean" : "monotonic_improvement") : "regression_or_no_progress",
+      reasonCode: accepted
+        ? (nextVerification.passed ? "verified_clean" : "monotonic_improvement")
+        : "regression_or_no_progress",
     };
     receipts.push(receipt);
+    if (!nextVerification.passed) {
+      attemptLessons = appendAttemptLesson(attemptLessons, buildCodingRepairAttemptLesson({
+        cycle,
+        requestedStrategy: modelStrategy,
+        proposalDigest,
+        championArtifactDigest: beforeVerification.artifactDigest,
+        proposedArtifactDigest: nextVerification.artifactDigest,
+        changedPaths: response.proposal.changes.map((change) => change.path),
+        changedFiles: response.proposal.changes.length,
+        changedLines: applied.changedLines,
+        before: beforeVerification,
+        after: nextVerification,
+        outcome: outcome === "accepted_improvement" ? "accepted_improvement" : "rolled_back",
+        reasonCode: receipt.reasonCode,
+        rye,
+      }));
+    }
     await input.onReceipt?.(structuredClone(receipt));
     if (accepted) {
       champion = applied.candidate;
@@ -187,16 +310,18 @@ export async function runCodingRepairController(input: {
     }
     if (nextVerification.passed) break;
   }
+
   if (state !== "VERIFIED_CANDIDATE" && receipts.length >= limits.maximumCycles) state = "STOPPED";
   assertReceiptChain(receipts);
-  return {
+  return runResult({
     baseline: input.baseline,
     baselineVerification,
     champion,
     state,
     verification,
     receipts,
+    attemptLessons,
     accountedCostUsd,
-    elapsedMilliseconds: performance.now() - runStarted,
-  };
+    runStarted,
+  });
 }

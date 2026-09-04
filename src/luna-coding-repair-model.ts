@@ -34,7 +34,9 @@ export function createLunaCodingRepairModel(input: {
         previouslyPassingChecks: request.verification.completedChecks.filter((check) => {
           if (check === "syntax") return !request.verification.failures.some((failure) => failure.kind === "syntax");
           if (check === "typecheck") return !request.verification.failures.some((failure) => failure.kind === "type");
-          if (check === "behavior_tests") return !request.verification.failures.some((failure) => failure.kind === "test" || failure.kind === "behavior");
+          if (check === "behavior_tests") {
+            return !request.verification.failures.some((failure) => failure.kind === "test" || failure.kind === "behavior");
+          }
           return true;
         }),
         remainingCycles: INITIAL_CODING_REPAIR_LIMITS.maximumCycles - request.cycle + 1,
@@ -43,6 +45,7 @@ export function createLunaCodingRepairModel(input: {
         constitutionDigest: input.context.constitutionDigest,
         limits: INITIAL_CODING_REPAIR_LIMITS,
         strategy: request.strategy,
+        attemptLessons: request.attemptLessons ?? [],
       });
       const execution = await executeWorkerModelTask(
         planWorkerModelTask({

@@ -25,20 +25,48 @@ export function chooseCodingRepairStrategy(input: {
   const remainingCycles = Math.max(0, limits.maximumCycles - input.cycle);
   const remainingCostUsd = Math.max(0, limits.maximumModelSpendUsd - input.spentUsd);
   const files = new Set(input.failures.map((failure) => failure.file).filter(Boolean));
+  const sourceFiles = new Set([...files].filter((path) => path.startsWith("src/")));
   const critical = input.failures.some((failure) => failure.severity === "critical" || failure.kind === "security");
-  const protectedFailure = [...files].some((path) => limits.protectedPaths.some((prefix) => path === prefix || path.startsWith(prefix)));
+  const protectedFailure = [...files].some((path) => (
+    limits.protectedPaths.some((prefix) => path === prefix || path.startsWith(prefix))
+  ));
   const locality = bounded(input.failures.length ? 1 / Math.max(input.failures.length, files.size || 1) : 1);
-  const risk = bounded((critical ? 0.6 : 0) + (protectedFailure ? 0.6 : 0) + (files.size > 2 ? 0.25 : 0));
+  const risk = bounded((critical ? 0.6 : 0) + (protectedFailure ? 0.6 : 0) + (sourceFiles.size > 1 ? 0.25 : 0));
+  const explicitNonlocalFailure = input.failures.some((failure) => (
+    /(?:CROSS[_ -]?MODULE|MULTI[_ -]?FILE|INTEGRATION)/u.test(failure.code.toUpperCase())
+  ));
+  const visibleNonlocalEvidence = sourceFiles.size > 1 || locality < 0.4 || explicitNonlocalFailure;
 
-  if (!input.failures.length) return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "clean" };
-  if (!remainingCycles) return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "cycle_limit" };
-  if (remainingCostUsd < 0.01) return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "cost_limit" };
-  if (protectedFailure || critical) return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "protected_or_critical" };
-  if (input.recurrence >= 3) return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "reparodynamic_debt" };
-  if (input.recurrence >= 2 || files.size > limits.surgicalFiles || locality < 0.4) {
-    return { strategy: "luna_deep", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "local_repair_exhausted" };
+  if (!input.failures.length) {
+    return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "clean" };
   }
-  return { strategy: "luna_surgical", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "localized_failure" };
+  if (!remainingCycles) {
+    return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "cycle_limit" };
+  }
+  if (remainingCostUsd < 0.01) {
+    return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "cost_limit" };
+  }
+  if (protectedFailure || critical) {
+    return { strategy: "stop", locality, risk, remainingCycles, remainingCostUsd, reasonCode: "protected_or_critical" };
+  }
+  if (visibleNonlocalEvidence) {
+    return {
+      strategy: "luna_deep",
+      locality,
+      risk,
+      remainingCycles,
+      remainingCostUsd,
+      reasonCode: "visible_nonlocal_evidence",
+    };
+  }
+  return {
+    strategy: "luna_surgical",
+    locality,
+    risk,
+    remainingCycles,
+    remainingCostUsd,
+    reasonCode: input.recurrence > 1 ? "localized_failure_with_negative_evidence" : "localized_failure",
+  };
 }
 
 export function repairYieldPerEnergy(input: {

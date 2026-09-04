@@ -1,5 +1,16 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
-import type { CodingFailureSignal, CodingRepairLimits, CodingRepairProposal } from "./coding-repair-types.ts";
+import {
+  boundCodingRepairAttemptLessons,
+  deriveCodingRepairHypotheses,
+  digestCodingRepairAttemptLessons,
+  digestCodingRepairHypotheses,
+} from "./coding-repair-lessons.ts";
+import type {
+  CodingFailureSignal,
+  CodingRepairAttemptLesson,
+  CodingRepairLimits,
+  CodingRepairProposal,
+} from "./coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "./types.ts";
 
 export const CODING_REPAIR_OUTPUT_CONTRACT = "OUTPUT CONTRACT: SARA_CODING_REPAIR_V1";
@@ -17,31 +28,67 @@ export function buildCodingRepairPrompt(input: {
   constitutionDigest: string;
   limits: CodingRepairLimits;
   strategy: "surgical" | "deep";
+  attemptLessons?: readonly CodingRepairAttemptLesson[];
 }): string {
   const maximumFiles = input.strategy === "surgical" ? input.limits.surgicalFiles : input.limits.deepFiles;
-  const maximumChangedLines = input.strategy === "surgical" ? input.limits.surgicalChangedLines : input.limits.deepChangedLines;
+  const maximumChangedLines = input.strategy === "surgical"
+    ? input.limits.surgicalChangedLines
+    : input.limits.deepChangedLines;
+  const previousAttemptLessons = boundCodingRepairAttemptLessons(input.attemptLessons ?? []);
+  const repairHypotheses = deriveCodingRepairHypotheses({
+    acceptanceCriteria: input.acceptanceCriteria,
+    failures: input.failures,
+    attemptLessons: previousAttemptLessons,
+  });
+  const rejectedProposalDigests = [...new Set(
+    previousAttemptLessons
+      .filter((lesson) => lesson.outcome === "rolled_back" || lesson.outcome === "duplicate_rejected")
+      .map((lesson) => lesson.proposalDigest),
+  )];
+  const unresolvedFailureFingerprints = [...new Set(
+    input.failures.map((failure) => failure.fingerprint),
+  )].sort().slice(0, 8);
+
   return [
     CODING_REPAIR_OUTPUT_CONTRACT,
-    "Return one JSON object only. The strategy field must exactly equal requiredStrategy. Propose a bounded replacement for listed candidate files; do not claim verification.",
+    "Return one JSON object only. Propose a bounded replacement for listed candidate files; do not claim verification.",
     canonicalJson({
       objective: input.objective,
       acceptanceCriteria: input.acceptanceCriteria,
       currentArtifactDigest: input.artifactDigest,
-      requiredStrategy: input.strategy,
+      preservedChampionDigest: input.artifactDigest,
       failures: input.failures,
+      unresolvedFailureFingerprints,
       files: input.candidate.files.map((file) => ({
         path: file.path,
         contentDigest: sha256(file.content),
         ...(file.path.startsWith("tests/") ? { immutableTest: true } : { content: file.content }),
       })),
       previouslyPassingChecks: input.previouslyPassingChecks,
+      requiredStrategy: input.strategy,
       maximumFiles,
       maximumChangedLines,
       remainingCycles: input.remainingCycles,
       remainingCostUsd: input.remainingCostUsd,
+      previousAttemptLessons,
+      previousAttemptLessonsDigest: digestCodingRepairAttemptLessons(previousAttemptLessons),
+      rejectedProposalDigests,
+      repairHypotheses,
+      repairHypothesesDigest: digestCodingRepairHypotheses(repairHypotheses),
+      smallestSafeChange: "Prefer the smallest source-only replacement that addresses unresolved visible evidence.",
+      rejectedPatternRule: "Do not repeat a rejected proposal for the same champion and failure fingerprint. A later proposal must materially differ and address unresolved visible evidence.",
       verifiedLessons: input.verifiedLessons,
       constitutionDigest: input.constitutionDigest,
-      forbidden: ["package installs", "shell commands", "network operations", "deployment", "authority requests", "unknown files"],
+      forbidden: [
+        "package installs",
+        "shell commands",
+        "network operations",
+        "deployment",
+        "authority requests",
+        "unknown files",
+        "protected-test edits",
+        "hidden-test inference claims",
+      ],
     }),
   ].join("\n");
 }
@@ -60,16 +107,22 @@ export function validateCodingRepairProposal(input: {
   if (!failureFingerprints.has(proposal.failureFingerprint)) throw new Error("Coding repair proposal targets an unknown failure.");
   if (proposal.strategy !== expectedStrategy) throw new Error("Coding repair proposal attempted a strategy escalation.");
   const maximumFiles = expectedStrategy === "surgical" ? limits.surgicalFiles : limits.deepFiles;
-  if (!proposal.changes.length || proposal.changes.length > maximumFiles) throw new Error("Coding repair proposal exceeds its file limit.");
+  if (!proposal.changes.length || proposal.changes.length > maximumFiles) {
+    throw new Error("Coding repair proposal exceeds its file limit.");
+  }
   const files = new Map(candidate.files.map((file) => [file.path, file.content]));
   const seen = new Set<string>();
   for (const change of proposal.changes) {
     const current = files.get(change.path);
-    if (current === undefined || seen.has(change.path)) throw new Error("Coding repair proposal contains an unknown or duplicate file.");
+    if (current === undefined || seen.has(change.path)) {
+      throw new Error("Coding repair proposal contains an unknown or duplicate file.");
+    }
     if (limits.protectedPaths.some((prefix) => change.path === prefix || change.path.startsWith(prefix))) {
       throw new Error("Coding repair proposal targets a protected path.");
     }
-    if (sha256(current) !== change.expectedContentDigest) throw new Error("Coding repair proposal contains a stale file digest.");
+    if (sha256(current) !== change.expectedContentDigest) {
+      throw new Error("Coding repair proposal contains a stale file digest.");
+    }
     if (!change.replacementText.trim()) throw new Error("Coding repair replacement cannot be empty.");
     seen.add(change.path);
   }
