@@ -172,7 +172,6 @@ export async function verifyGenomeLabProgramCandidate(input: {
     const failure = signal({
       kind: "behavior",
       code: "GENOME_LAB_RUNTIME_FAILURE",
-      file: input.candidate.files.find((file) => file.path.startsWith("tests/"))?.path ?? "",
       note: "The isolated Genome Lab behavioral verification failed.",
       severity: "high",
     });

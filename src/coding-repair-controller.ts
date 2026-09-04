@@ -3,6 +3,7 @@ import { assertReceiptChain, digestCodingRepairProposal } from "./coding-repair-
 import { chooseCodingRepairStrategy, INITIAL_CODING_REPAIR_LIMITS, repairYieldPerEnergy } from "./coding-repair-policy.ts";
 import { validateCodingRepairProposal } from "./coding-repair-prompt.ts";
 import type {
+  CodingFailureKind,
   CodingRepairLimits,
   CodingRepairProposal,
   CodingRepairReceipt,
@@ -24,6 +25,16 @@ export type CodingRepairModel = {
     outputTokens: number;
     accountedCostUsd: number;
   }>;
+};
+
+type VerificationCheck = ProgramVerificationResult["completedChecks"][number];
+
+const FAILURE_KINDS_BY_CHECK: Record<VerificationCheck, readonly CodingFailureKind[]> = {
+  source_policy: ["policy", "security"],
+  syntax: ["syntax"],
+  typecheck: ["type"],
+  behavior_tests: ["test", "behavior"],
+  artifact_integrity: ["integrity"],
 };
 
 function changedLineCount(before: string, after: string): number {
@@ -50,10 +61,21 @@ function applyProposal(candidate: ProgramCandidateProposal, proposal: CodingRepa
   return { candidate: { ...candidate, files }, changedLines };
 }
 
+function checkPassed(verification: ProgramVerificationResult, check: VerificationCheck): boolean {
+  return verification.completedChecks.includes(check) && !verification.failures.some((failure) => (
+    FAILURE_KINDS_BY_CHECK[check].includes(failure.kind)
+  ));
+}
+
 function hasRegression(before: ProgramVerificationResult, after: ProgramVerificationResult): boolean {
-  const previouslyPassingKinds = new Set(["syntax", "type", "policy", "security", "integrity", "test", "behavior"]);
-  for (const failure of before.failures) previouslyPassingKinds.delete(failure.kind);
-  return after.failures.some((failure) => previouslyPassingKinds.has(failure.kind));
+  const previouslyPassingChecks = before.completedChecks.filter((check) => checkPassed(before, check));
+  if (previouslyPassingChecks.some((check) => !checkPassed(after, check))) return true;
+  return after.failures.some((failure) => (
+    failure.severity === "critical" ||
+    failure.kind === "security" ||
+    failure.kind === "timeout" ||
+    failure.kind === "unknown"
+  ));
 }
 
 export async function runCodingRepairController(input: {

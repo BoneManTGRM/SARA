@@ -2,7 +2,12 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import { digestCodingRepairProposal } from "./coding-repair-artifacts.ts";
 import { runCodingRepairController, type CodingRepairModel } from "./coding-repair-controller.ts";
 import { INITIAL_CODING_REPAIR_LIMITS } from "./coding-repair-policy.ts";
-import type { CodingRepairLimits, CodingRepairProposal, ProgramVerificationResult } from "./coding-repair-types.ts";
+import type {
+  CodingRepairLimits,
+  CodingRepairProposal,
+  CodingRepairReceipt,
+  ProgramVerificationResult,
+} from "./coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "./types.ts";
 
 type ModelResponse = Awaited<ReturnType<CodingRepairModel["propose"]>>;
@@ -44,16 +49,26 @@ function rounded(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
 
+function digestVerification(verification: ProgramVerificationResult): string {
+  return sha256(canonicalJson({
+    passed: verification.passed,
+    score: verification.score,
+    artifactDigest: verification.artifactDigest,
+    failures: verification.failures,
+    completedChecks: verification.completedChecks,
+    evidenceDigests: verification.evidenceDigests,
+  }));
+}
+
 function arm(input: {
+  baselineVerification: ProgramVerificationResult;
   verification: ProgramVerificationResult;
   elapsedMilliseconds: number;
   accountedCostUsd: number;
   inputTokens: number;
   outputTokens: number;
   modelCalls: number;
-  cycles: number;
-  rollbacks: number;
-  changedLines: number;
+  receipts: CodingRepairReceipt[];
 }) {
   const milliseconds = rounded(input.elapsedMilliseconds);
   const cost = rounded(input.accountedCostUsd);
@@ -61,16 +76,20 @@ function arm(input: {
   return {
     verifiedComplete: input.verification.passed,
     score: input.verification.score,
+    verificationGain: rounded(input.verification.score - input.baselineVerification.score),
     artifactDigest: input.verification.artifactDigest,
+    verificationDigest: digestVerification(input.verification),
     evidenceDigest: sha256(canonicalJson(input.verification.evidenceDigests)),
     activeExecutionMilliseconds: milliseconds,
     accountedCostUsd: cost,
     inputTokens: input.inputTokens,
     outputTokens: input.outputTokens,
     modelCalls: input.modelCalls,
-    cycles: input.cycles,
-    rollbacks: input.rollbacks,
-    changedLines: input.changedLines,
+    cycles: input.receipts.length,
+    rollbacks: input.receipts.filter((receipt) => receipt.outcome === "rolled_back").length,
+    acceptedImprovements: input.receipts.filter((receipt) => receipt.outcome === "accepted_improvement").length,
+    changedLines: input.receipts.reduce((sum, receipt) => sum + receipt.changedLines, 0),
+    ryeTotal: rounded(input.receipts.reduce((sum, receipt) => sum + receipt.rye, 0)),
     verifiedCompletionsPerActiveSecond: milliseconds > 0 ? rounded(completion * 1_000 / milliseconds) : 0,
     verifiedCompletionsPerUsd: cost > 0 ? rounded(completion / cost) : 0,
   };
@@ -97,87 +116,127 @@ export async function runMatchedCodingRepairBenchmark(input: {
   if (!input.modelRouteKey.trim() || !input.objective.trim() || !input.acceptanceCriteria.length) {
     throw new Error("Matched benchmark model, objective, and acceptance criteria are required.");
   }
+  const environmentEntries = Object.entries(input.environment).sort(([left], [right]) => left.localeCompare(right));
+  if (!environmentEntries.length || environmentEntries.some(([key, value]) => !key.trim() || !value.trim())) {
+    throw new Error("Matched benchmark environment must be explicit and non-empty.");
+  }
   const limits = input.limits ?? INITIAL_CODING_REPAIR_LIMITS;
   assertNoAuthorityExpansion(limits);
-  const contractDigest = sha256(canonicalJson({
-    schemaVersion: 1,
+  const authority = {
+    maximumCycles: limits.maximumCycles,
+    maximumModelSpendUsd: limits.maximumModelSpendUsd,
+    surgicalFiles: limits.surgicalFiles,
+    surgicalChangedLines: limits.surgicalChangedLines,
+    deepFiles: limits.deepFiles,
+    deepChangedLines: limits.deepChangedLines,
+    protectedPathsDigest: sha256(canonicalJson([...limits.protectedPaths].sort())),
+    repositoryMutation: false as const,
+    merge: false as const,
+    deploy: false as const,
+    promotion: false as const,
+  };
+  const contract = {
+    schemaVersion: 1 as const,
     caseId: input.caseId,
     sourceCommit: input.sourceCommit,
     modelRouteKey: input.modelRouteKey,
-    environment: input.environment,
+    environment: Object.fromEntries(environmentEntries),
     objectiveDigest: sha256(input.objective),
     acceptanceCriteriaDigest: sha256(canonicalJson(input.acceptanceCriteria)),
     constitutionDigest: input.constitutionDigest,
     memoryContextDigest: input.memoryContextDigest,
     baselineDigest: sha256(canonicalJson(input.baseline)),
-    limits,
-    control: "same_first_luna_proposal_then_stop",
-    canary: "same_first_luna_proposal_then_bounded_verify_repair_retain",
-  }));
+    limits: { ...limits, protectedPaths: [...limits.protectedPaths] },
+    controlPolicy: "same_first_luna_proposal_then_stop" as const,
+    canaryPolicy: "same_first_luna_proposal_then_bounded_verify_repair_retain" as const,
+    costAccounting: "shared_prefix_physical_spend_equals_canary_run_do_not_sum_arm_costs" as const,
+    measurement: {
+      verifiedCompletion: "independent_post_verification_pass" as const,
+      activeExecutionMilliseconds: "monotonic_wall_clock_from_initial_verification_through_policy_stop" as const,
+      accountedCostUsd: "provider_usage_accounting_bound_to_receipts" as const,
+      directTimeAndCostComparison: "only_when_both_arms_are_verified_complete" as const,
+    },
+    authority,
+  };
+  const contractDigest = sha256(canonicalJson(contract));
 
-  const models: Array<{ response: ModelResponse; milliseconds: number }> = [];
-  const verifications: Array<{ result: ProgramVerificationResult; milliseconds: number }> = [];
+  const models: ModelResponse[] = [];
+  const verifications: ProgramVerificationResult[] = [];
+  let firstReceiptElapsedMilliseconds: number | undefined;
+  const activeRunStarted = performance.now();
   const run = await runCodingRepairController({
     baseline: input.baseline,
     limits,
     verify: async (candidate) => {
-      const started = performance.now();
       const result = await input.verify(candidate);
-      verifications.push({ result: structuredClone(result), milliseconds: performance.now() - started });
+      verifications.push(structuredClone(result));
       return result;
     },
     model: {
       propose: async (request) => {
-        const started = performance.now();
         const response = await input.model.propose(request);
-        models.push({ response: structuredClone(response), milliseconds: performance.now() - started });
+        models.push(structuredClone(response));
         return response;
       },
     },
+    onReceipt: () => {
+      firstReceiptElapsedMilliseconds ??= performance.now() - activeRunStarted;
+    },
   });
+  const canaryActiveExecutionMilliseconds = performance.now() - activeRunStarted;
 
   const firstModel = models[0];
   const firstReceipt = run.receipts[0];
   const firstVerification = verifications[1];
-  if (!firstModel || !firstReceipt || !firstVerification || firstReceipt.outcome === "stopped") {
+  if (!firstModel || !firstReceipt || !firstVerification || firstReceiptElapsedMilliseconds === undefined || firstReceipt.outcome === "stopped") {
     throw new Error("Matched benchmark did not produce a first Luna repair trace.");
   }
-  const controlPost = await input.verify(applyProposal(input.baseline, firstModel.response.proposal));
+
+  const auditStarted = performance.now();
+  const controlPost = await input.verify(applyProposal(input.baseline, firstModel.proposal));
   const canaryPost = await input.verify(run.champion);
+  const auditVerificationMilliseconds = rounded(performance.now() - auditStarted);
   const invalidReasons: string[] = [];
-  if (
-    controlPost.artifactDigest !== firstVerification.result.artifactDigest ||
-    controlPost.passed !== firstVerification.result.passed
-  ) invalidReasons.push("control_post_verification_changed");
-  if (canaryPost.artifactDigest !== run.verification.artifactDigest || canaryPost.passed !== run.verification.passed) {
+  if (digestVerification(controlPost) !== digestVerification(firstVerification)) {
+    invalidReasons.push("control_post_verification_changed");
+  }
+  if (digestVerification(canaryPost) !== digestVerification(run.verification)) {
     invalidReasons.push("canary_post_verification_changed");
   }
+  const sharedFirstProposalDigest = digestCodingRepairProposal(firstModel.proposal);
+  if (firstReceipt.proposalDigest !== sharedFirstProposalDigest) invalidReasons.push("shared_first_proposal_digest_mismatch");
+  const modelReceipts = run.receipts.filter((receipt) => receipt.strategy !== "stop");
+  if (modelReceipts.length !== models.length) invalidReasons.push("model_receipt_count_mismatch");
+  const receiptCostUsd = modelReceipts.reduce((sum, receipt) => sum + receipt.accountedCostUsd, 0);
+  if (Math.abs(receiptCostUsd - run.accountedCostUsd) > 1e-9) invalidReasons.push("receipt_cost_mismatch");
+  if (run.receipts.length > limits.maximumCycles) invalidReasons.push("cycle_ceiling_exceeded");
   if (run.accountedCostUsd > limits.maximumModelSpendUsd) invalidReasons.push("cost_ceiling_exceeded");
 
+  const controlReceipts = [structuredClone(firstReceipt)];
+  const canaryReceipts = structuredClone(run.receipts);
   const control = arm({
+    baselineVerification: run.baselineVerification,
     verification: controlPost,
-    elapsedMilliseconds: verifications[0].milliseconds + firstModel.milliseconds + firstVerification.milliseconds,
-    accountedCostUsd: firstModel.response.accountedCostUsd,
-    inputTokens: firstModel.response.inputTokens,
-    outputTokens: firstModel.response.outputTokens,
+    elapsedMilliseconds: firstReceiptElapsedMilliseconds,
+    accountedCostUsd: firstModel.accountedCostUsd,
+    inputTokens: firstModel.inputTokens,
+    outputTokens: firstModel.outputTokens,
     modelCalls: 1,
-    cycles: 1,
-    rollbacks: Number(firstReceipt.outcome === "rolled_back"),
-    changedLines: firstReceipt.changedLines,
+    receipts: controlReceipts,
   });
   const canary = arm({
+    baselineVerification: run.baselineVerification,
     verification: canaryPost,
-    elapsedMilliseconds: run.elapsedMilliseconds,
+    elapsedMilliseconds: canaryActiveExecutionMilliseconds,
     accountedCostUsd: run.accountedCostUsd,
-    inputTokens: run.receipts.reduce((sum, receipt) => sum + receipt.inputTokens, 0),
-    outputTokens: run.receipts.reduce((sum, receipt) => sum + receipt.outputTokens, 0),
+    inputTokens: modelReceipts.reduce((sum, receipt) => sum + receipt.inputTokens, 0),
+    outputTokens: modelReceipts.reduce((sum, receipt) => sum + receipt.outputTokens, 0),
     modelCalls: models.length,
-    cycles: run.receipts.length,
-    rollbacks: run.receipts.filter((receipt) => receipt.outcome === "rolled_back").length,
-    changedLines: run.receipts.reduce((sum, receipt) => sum + receipt.changedLines, 0),
+    receipts: canaryReceipts,
   });
   const deltas = {
     verifiedCompletion: Number(canary.verifiedComplete) - Number(control.verifiedComplete),
+    verificationScore: rounded(canary.score - control.score),
     activeExecutionMilliseconds: rounded(canary.activeExecutionMilliseconds - control.activeExecutionMilliseconds),
     accountedCostUsd: rounded(canary.accountedCostUsd - control.accountedCostUsd),
     verifiedCompletionsPerActiveSecond: rounded(
@@ -185,16 +244,23 @@ export async function runMatchedCodingRepairBenchmark(input: {
     ),
     verifiedCompletionsPerUsd: rounded(canary.verifiedCompletionsPerUsd - control.verifiedCompletionsPerUsd),
   };
-  const sharedFirstProposalDigest = digestCodingRepairProposal(firstModel.response.proposal);
+  const timeAndCostComparable = control.verifiedComplete && canary.verifiedComplete;
+  const physicalSpendUsd = rounded(run.accountedCostUsd);
+  const receiptsDigest = sha256(canonicalJson(canaryReceipts));
+  const baselineVerificationDigest = digestVerification(run.baselineVerification);
   const evidence = {
     contractDigest,
     sharedFirstProposalDigest,
+    baselineVerificationDigest,
     control,
     canary,
-    physicalSpendUsd: rounded(run.accountedCostUsd),
+    physicalSpendUsd,
     deltas,
+    timeAndCostComparable,
     invalidReasons,
-    receiptsDigest: sha256(canonicalJson(run.receipts)),
+    receipts: canaryReceipts,
+    receiptsDigest,
+    auditVerificationMilliseconds,
   };
   return {
     schemaVersion: 1 as const,
@@ -202,30 +268,29 @@ export async function runMatchedCodingRepairBenchmark(input: {
     caseId: input.caseId,
     sourceCommit: input.sourceCommit,
     modelRouteKey: input.modelRouteKey,
+    contract,
     contractDigest,
     sharedFirstProposalDigest,
+    baselineVerificationDigest,
     pairDigest: sha256(canonicalJson(evidence)),
     valid: invalidReasons.length === 0,
     invalidReasons,
     control,
     canary,
-    physicalSpendUsd: evidence.physicalSpendUsd,
+    physicalSpendUsd,
+    receipts: canaryReceipts,
+    receiptsDigest,
+    auditVerificationMilliseconds,
+    timeAndCostComparable,
     deltas,
     conclusion: {
       verifiedCompletionImproved: deltas.verifiedCompletion > 0,
-      executionTimeReduced: deltas.activeExecutionMilliseconds < 0,
-      costReduced: deltas.accountedCostUsd < 0,
+      executionTimeReduced: timeAndCostComparable ? deltas.activeExecutionMilliseconds < 0 : null,
+      costReduced: timeAndCostComparable ? deltas.accountedCostUsd < 0 : null,
       verifiedVelocityImproved: deltas.verifiedCompletionsPerActiveSecond > 0,
       verifiedCostEfficiencyImproved: deltas.verifiedCompletionsPerUsd > 0,
     },
     generalClaimSupported: false as const,
-    authority: {
-      maximumCycles: limits.maximumCycles,
-      maximumModelSpendUsd: limits.maximumModelSpendUsd,
-      repositoryMutation: false as const,
-      merge: false as const,
-      deploy: false as const,
-      promotion: false as const,
-    },
+    authority,
   };
 }
