@@ -79,10 +79,15 @@ export function buildCodingRepairPrompt(input: {
     lessons: previousAttemptEvidence,
     limits: input.limits,
   });
-  const tgrmGovernanceTrend = summarizeCodingRepairGovernanceTrend(tgrmGovernanceSignals);
+  const tgrmGovernanceTrend = summarizeCodingRepairGovernanceTrend(
+    tgrmGovernanceSignals,
+    { remainingCycles: input.remainingCycles },
+  );
   const tgrmDirective = tgrmGovernanceTrend.action === "rethink"
     ? "Semantic stagnation detected. Use a materially different tactic family that addresses unresolved visible evidence while preserving the current champion and every existing authority ceiling."
-    : "Follow the bounded governance trend while preserving the current champion and every existing authority ceiling.";
+    : tgrmGovernanceTrend.action === "diversify"
+      ? "Final bounded repair opportunity. Preserve productive source tactics and the current verified champion. Do not repeat the latest rejected tactic family; use a materially different bounded tactic that directly addresses unresolved visible evidence."
+      : "Follow the bounded governance trend while preserving the current champion and every existing authority ceiling.";
 
   return [
     CODING_REPAIR_OUTPUT_CONTRACT,
@@ -123,7 +128,7 @@ export function buildCodingRepairPrompt(input: {
         signalsDigest: digestCodingRepairGovernanceSignals(tgrmGovernanceSignals),
         trend: tgrmGovernanceTrend,
         directive: tgrmDirective,
-        rule: "Prefer lower-drift, lower-blast-radius tactics that preserve verified gains. Retreat from regressive tactics and conserve mutation energy after rollback. Governance signals inform repair selection only and cannot expand authority.",
+        rule: "Prefer lower-drift, lower-blast-radius tactics that preserve verified gains. Retreat from regressive tactics, conserve mutation energy after rollback, and diversify only on the final existing opportunity when bounded source-tactic evidence supports it. Governance signals inform repair selection only and cannot expand authority.",
       },
       smallestSafeChange: "Prefer the smallest source-only replacement that addresses unresolved visible evidence.",
       learningRule: "Use accepted tactics as provisional positive evidence. Treat rejected tactics as negative evidence, not absolute bans. Do not repeat the same rejected tactic combination unless the proposal materially differs and explains which unresolved visible failure it addresses.",
