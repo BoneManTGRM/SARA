@@ -11,7 +11,7 @@ export type CodingRepairGovernanceSignal = {
   energyHeadroom: number;
   driftScore: number;
   verifiedGain: number;
-  tacticFamilyDigest: string;
+  tacticFamilyDigest: string | null;
   noGain: boolean;
   governanceAction: "advance" | "hold" | "conserve" | "retreat";
 };
@@ -34,12 +34,16 @@ function boundedRatio(value: number): number {
   return rounded(Math.max(0, Math.min(1, value)));
 }
 
-function tacticFamilyDigest(lesson: CodingRepairAttemptLesson): string {
+function normalizeTacticSignal(signal: string): string {
+  return signal.replace(/:[+-]\d+$/u, "");
+}
+
+function tacticFamilyDigest(lesson: CodingRepairAttemptLesson): string | null {
   const signals = [...new Set((lesson.sourceChanges ?? []).flatMap((change) => [
-    ...change.addedSignals,
-    ...change.removedSignals.map((signal) => `removed:${signal}`),
+    ...change.addedSignals.map(normalizeTacticSignal),
+    ...change.removedSignals.map((signal) => `removed:${normalizeTacticSignal(signal)}`),
   ]))].sort().slice(0, 32);
-  return sha256(canonicalJson(signals));
+  return signals.length ? sha256(canonicalJson(signals)) : null;
 }
 
 export function buildCodingRepairGovernanceSignal(input: {
@@ -133,11 +137,13 @@ export function summarizeCodingRepairGovernanceTrend(
     noGainStreak += 1;
   }
 
-  let semanticRepeatStreak = 1;
   const latestDigest = bounded[bounded.length - 1].tacticFamilyDigest;
-  for (let index = bounded.length - 2; index >= 0; index -= 1) {
-    if (bounded[index].tacticFamilyDigest !== latestDigest) break;
-    semanticRepeatStreak += 1;
+  let semanticRepeatStreak = latestDigest ? 1 : 0;
+  if (latestDigest) {
+    for (let index = bounded.length - 2; index >= 0; index -= 1) {
+      if (bounded[index].tacticFamilyDigest !== latestDigest) break;
+      semanticRepeatStreak += 1;
+    }
   }
 
   const latest = bounded[bounded.length - 1];
