@@ -1,11 +1,54 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { bindCodingRepairBenchmarkAuthority } from "./coding-repair-evidence.ts";
+import { digestCodingRepairAttemptLessons } from "./coding-repair-lessons.ts";
 import { runMatchedCodingRepairBenchmarkV3 } from "./coding-repair-matched-benchmark-v3.ts";
+import { INITIAL_CODING_REPAIR_LIMITS } from "./coding-repair-policy.ts";
+import {
+  buildCodingRepairGovernanceSignals,
+  digestCodingRepairGovernanceSignals,
+  summarizeCodingRepairGovernanceTrend,
+} from "./coding-repair-tgrm-governance.ts";
+import type { CodingRepairAttemptLesson } from "./coding-repair-types.ts";
 
 export async function runMatchedCodingRepairBenchmarkV5(
   input: Parameters<typeof runMatchedCodingRepairBenchmarkV3>[0],
 ) {
-  const base = await runMatchedCodingRepairBenchmarkV3(input);
+  const limits = input.limits ?? INITIAL_CODING_REPAIR_LIMITS;
+  const buildHorizonDecision = (cycle: number, lessons: readonly CodingRepairAttemptLesson[]) => {
+    const inputLessons = structuredClone(lessons.slice(-2));
+    const remainingCyclesAtFinalCall = limits.maximumCycles - cycle + 1;
+    const signals = buildCodingRepairGovernanceSignals({
+      lessons: inputLessons,
+      limits,
+    });
+    return {
+      schemaVersion: 1 as const,
+      finalModelCycle: cycle,
+      remainingCyclesAtFinalCall,
+      inputLessonsDigest: digestCodingRepairAttemptLessons(inputLessons),
+      signalsDigest: digestCodingRepairGovernanceSignals(signals),
+      trend: summarizeCodingRepairGovernanceTrend(signals, {
+        remainingCycles: remainingCyclesAtFinalCall,
+      }),
+    };
+  };
+
+  let lastCanaryHorizonDecision: ReturnType<typeof buildHorizonDecision> | undefined;
+  const base = await runMatchedCodingRepairBenchmarkV3({
+    ...input,
+    model: {
+      propose: async (request) => {
+        if ((request.attemptLessons?.length ?? 0) > 0) {
+          lastCanaryHorizonDecision = buildHorizonDecision(
+            request.cycle,
+            request.attemptLessons ?? [],
+          );
+        }
+        return input.model.propose(request);
+      },
+    },
+  });
+  const horizonDecision = lastCanaryHorizonDecision ?? buildHorizonDecision(1, []);
   const horizonGovernance = {
     horizonSource: "controller_owned_remaining_cycles_within_existing_three_cycle_ceiling" as const,
     finalOpportunity: "remaining_cycles_equals_one" as const,
@@ -42,6 +85,7 @@ export async function runMatchedCodingRepairBenchmarkV5(
     invalidReasons: base.invalidReasons,
     receiptsDigest: base.receiptsDigest,
     learningEvidenceDigest: base.learningEvidenceDigest,
+    horizonDecision,
     auditVerificationMilliseconds: base.auditVerificationMilliseconds,
   };
   const result = {
@@ -49,6 +93,7 @@ export async function runMatchedCodingRepairBenchmarkV5(
     schemaVersion: 5 as const,
     contract,
     contractDigest,
+    horizonDecision,
     pairDigest: sha256(canonicalJson(evidence)),
   };
   return bindCodingRepairBenchmarkAuthority(result);
