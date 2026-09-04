@@ -173,6 +173,37 @@ describe("TGRM V5 causal semantic novelty gate", () => {
     assert.match(prompt, /pre-verification/u);
   });
 
+  it("does not block a shared tactic used against a different unresolved failure class", () => {
+    const first = lesson({ cycle: 1, proposal: "round-value", addedSignals: ["call:Math.round:+1"] });
+    const second = lesson({ cycle: 2, proposal: "round-other", addedSignals: ["call:Math.round:+1"] });
+    second.changedPaths = ["src/other.ts"];
+    second.beforeFailureFingerprints = [digest("other-failure")];
+    second.afterFailureFingerprints = [digest("other-failure")];
+    second.beforeFailures = [{
+      kind: "behavior",
+      code: "OTHER_WRONG",
+      file: "src/other.ts",
+      line: 1,
+      severity: "medium",
+    }];
+    second.afterFailures = structuredClone(second.beforeFailures);
+    second.sourceChanges = (second.sourceChanges ?? []).map((change) => ({
+      ...change,
+      path: "src/other.ts",
+    }));
+
+    const trend = summarizeCodingRepairGovernanceTrend(buildCodingRepairGovernanceSignals({
+      lessons: [first, second],
+      limits: INITIAL_CODING_REPAIR_LIMITS,
+    }));
+
+    assert.equal(trend.noGainStreak, 2);
+    assert.equal(trend.semanticRepeatStreak, 1);
+    assert.equal(trend.action, "conserve");
+    assert.equal(trend.allowSameTacticFamily, true);
+    assert.deepEqual(trend.blockedTacticSignals, []);
+  });
+
   it("rejects a cosmetically different but semantically stagnant final proposal before another verifier run", async () => {
     let verifierCalls = 0;
     const model = modelFor([
