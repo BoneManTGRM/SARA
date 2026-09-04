@@ -10,6 +10,7 @@ import {
 import {
   buildCodingRepairGovernanceSignals,
   digestCodingRepairGovernanceSignals,
+  summarizeCodingRepairGovernanceTrend,
 } from "./coding-repair-tgrm-governance.ts";
 import type {
   CodingFailureSignal,
@@ -78,6 +79,10 @@ export function buildCodingRepairPrompt(input: {
     lessons: previousAttemptEvidence,
     limits: input.limits,
   });
+  const tgrmGovernanceTrend = summarizeCodingRepairGovernanceTrend(tgrmGovernanceSignals);
+  const tgrmDirective = tgrmGovernanceTrend.action === "rethink"
+    ? "Semantic stagnation detected. Use a materially different tactic family that addresses unresolved visible evidence while preserving the current champion and every existing authority ceiling."
+    : "Follow the bounded governance trend while preserving the current champion and every existing authority ceiling.";
 
   return [
     CODING_REPAIR_OUTPUT_CONTRACT,
@@ -116,6 +121,8 @@ export function buildCodingRepairPrompt(input: {
         energyDefinition: "Blast radius is normalized against the existing controller-owned file and changed-line ceilings; it never raises those ceilings.",
         signals: tgrmGovernanceSignals,
         signalsDigest: digestCodingRepairGovernanceSignals(tgrmGovernanceSignals),
+        trend: tgrmGovernanceTrend,
+        directive: tgrmDirective,
         rule: "Prefer lower-drift, lower-blast-radius tactics that preserve verified gains. Retreat from regressive tactics and conserve mutation energy after rollback. Governance signals inform repair selection only and cannot expand authority.",
       },
       smallestSafeChange: "Prefer the smallest source-only replacement that addresses unresolved visible evidence.",
