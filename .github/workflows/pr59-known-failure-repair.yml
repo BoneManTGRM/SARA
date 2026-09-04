@@ -1,0 +1,204 @@
+name: PR59 known failure repair
+
+on:
+  push:
+    branches:
+      - automation/export-pr59-44788ca
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out exact PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/telegram-nico-gmail-delivery
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assert unchanged repair target
+        env:
+          EXPECTED_HEAD: 44788ca2bec9556f038c992d30f3cfe80e9ae24e
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD"
+          test "$(git ls-remote origin refs/heads/feature/telegram-nico-gmail-delivery | cut -f1)" = "$EXPECTED_HEAD"
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Apply bounded verified repairs
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import re
+          import subprocess
+          from pathlib import Path
+
+          def read(path: str) -> str:
+              return Path(path).read_text(encoding="utf-8")
+
+          def write(path: str, text: str) -> None:
+              Path(path).write_text(text, encoding="utf-8")
+
+          # 1. Preserve a specific branch/path rejection at the exact-target boundary.
+          target_path = "src/github-exact-target-verifier.ts"
+          target = read(target_path)
+          old = '''  const parts = url.pathname.split("/").filter(Boolean);
+          if (parts.length !== 2 || !OWNER_OR_REPOSITORY.test(parts[0]!) || !OWNER_OR_REPOSITORY.test(parts[1]!) || parts[1]!.endsWith(".git")) {
+            throw new Error("Repository requests must identify only one GitHub owner/repository target.");
+          }
+          '''
+          new = '''  const parts = url.pathname.split("/").filter(Boolean);
+          if (parts.length > 2) {
+            throw new Error("Use the canonical GitHub repository URL without a branch, tag, path, query, or fragment.");
+          }
+          if (parts.length !== 2 || !OWNER_OR_REPOSITORY.test(parts[0]!) || !OWNER_OR_REPOSITORY.test(parts[1]!) || parts[1]!.endsWith(".git")) {
+            throw new Error("Repository requests must identify only one GitHub owner/repository target.");
+          }
+          '''
+          if old not in target:
+              raise SystemExit("exact-target repair pattern was not found")
+          target = target.replace(old, new, 1)
+          write(target_path, target)
+
+          # 2. Remove the one verified extra closing parenthesis by accepting only a
+          # candidate that parses as TypeScript.
+          verifier_test_path = "tests/nico-automated-package-verifier.test.ts"
+          verifier_test = read(verifier_test_path)
+          lines = verifier_test.splitlines(keepends=True)
+          line_index = 73
+          if len(lines) <= line_index:
+              raise SystemExit("verifier test is shorter than the verified syntax location")
+          original_line = lines[line_index]
+          candidates: list[str] = []
+          for index, character in enumerate(original_line):
+              if character != ")":
+                  continue
+              trial_lines = list(lines)
+              trial_lines[line_index] = original_line[:index] + original_line[index + 1:]
+              trial = "".join(trial_lines)
+              temporary = Path("/tmp/nico-automated-package-verifier-candidate.test.ts")
+              temporary.write_text(trial, encoding="utf-8")
+              result = subprocess.run(
+                  ["npx", "--no-install", "esbuild", str(temporary), "--platform=node", "--format=esm", "--outfile=/tmp/nico-verifier-candidate.js"],
+                  stdout=subprocess.DEVNULL,
+                  stderr=subprocess.DEVNULL,
+                  check=False,
+              )
+              if result.returncode == 0:
+                  candidates.append(trial)
+          if len(candidates) != 1:
+              raise SystemExit(f"expected one syntax repair candidate, found {len(candidates)}")
+          write(verifier_test_path, candidates[0])
+
+          # 3. Make Gmail boundary test doubles validate exact hosts instead of
+          # substring matching, eliminating URL-confusion behavior and CodeQL alerts.
+          gmail_test_path = "tests/gmail-verified-report-sender.test.ts"
+          gmail_test = read(gmail_test_path)
+          hosts = (
+              "oauth2.googleapis.com",
+              "openidconnect.googleapis.com",
+              "gmail.googleapis.com",
+          )
+          replacements = 0
+          for host in hosts:
+              pattern = re.compile(rf'(?P<value>[A-Za-z_$][A-Za-z0-9_$]*)\.includes\(["\']{re.escape(host)}["\']\)')
+              gmail_test, count = pattern.subn(rf'new URL(\g<value>).hostname === "{host}"', gmail_test)
+              replacements += count
+          if replacements < 6:
+              raise SystemExit(f"expected at least six exact-host repairs, found {replacements}")
+          if any(f'.includes("{host}")' in gmail_test or f".includes('{host}')" in gmail_test for host in hosts):
+              raise SystemExit("an unsafe Google host substring check remains")
+          write(gmail_test_path, gmail_test)
+
+          # 4. Never derive a durable/cache identifier from OAuth credential values.
+          production_path = "src/telegram-nico-production.ts"
+          production = read(production_path)
+          constant_digest = hashlib.sha256(b"sara-gmail-oauth-runtime-schema-v1").hexdigest()
+          credential_names = ("SARA_GMAIL_OAUTH_CLIENT_ID", "SARA_GMAIL_OAUTH_REDIRECT_URI")
+
+          assignment_pattern = re.compile(
+              r'(?ms)^(?P<indent>[ \t]*)(?P<kind>const|let)\s+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?P<body>.*?);[ \t]*$'
+          )
+          rebuilt: list[str] = []
+          cursor = 0
+          changed = 0
+          for match in assignment_pattern.finditer(production):
+              body = match.group("body")
+              if "createHash" not in body or not any(name in body for name in credential_names):
+                  continue
+              rebuilt.append(production[cursor:match.start()])
+              rebuilt.append(f'{match.group("indent")}{match.group("kind")} {match.group("name")} = "{constant_digest}";')
+              cursor = match.end()
+              changed += 1
+          if changed:
+              rebuilt.append(production[cursor:])
+              production = "".join(rebuilt)
+
+          return_pattern = re.compile(r'(?ms)^(?P<indent>[ \t]*)return\s+(?P<body>createHash\(.*?\)\s*.*?\.digest\(["\']hex["\']\));[ \t]*$')
+          def replace_return(match: re.Match[str]) -> str:
+              nonlocal_changed[0] += 1
+              return f'{match.group("indent")}return "{constant_digest}";'
+          nonlocal_changed = [0]
+          def return_replacer(match: re.Match[str]) -> str:
+              body = match.group("body")
+              if not any(name in body for name in credential_names):
+                  return match.group(0)
+              nonlocal_changed[0] += 1
+              return f'{match.group("indent")}return "{constant_digest}";'
+          production = return_pattern.sub(return_replacer, production)
+          changed += nonlocal_changed[0]
+
+          if changed == 0:
+              raise SystemExit("OAuth credential-derived hash repair pattern was not found")
+          if re.search(r'createHash[\s\S]{0,800}(?:SARA_GMAIL_OAUTH_CLIENT_ID|SARA_GMAIL_OAUTH_REDIRECT_URI)', production):
+              raise SystemExit("OAuth configuration still flows into a fast hash")
+          if "createHash(" not in production:
+              production = re.sub(r'import\s*\{\s*createHash\s*\}\s*from\s*["\']node:crypto["\'];\s*', "", production)
+              production = re.sub(r'import\s*\{\s*createHash\s*,\s*', "import { ", production)
+              production = re.sub(r',\s*createHash\s*\}', " }", production)
+          write(production_path, production)
+
+          # 5. NICO production accepts only comprun_<32 lowercase hex> identities.
+          delivery_path = "src/telegram-nico-delivery.ts"
+          delivery = read(delivery_path)
+          function_pattern = re.compile(r'(?ms)(function\s+(?:deterministic)?NicoRunId\b.*?^\})')
+          match = function_pattern.search(delivery)
+          if match and "nico_" in match.group(1) and "comprun_" not in match.group(1):
+              fixed = match.group(1).replace("nico_", "comprun_")
+              delivery = delivery[:match.start()] + fixed + delivery[match.end():]
+          if "comprun_" not in delivery:
+              raise SystemExit("NICO run identity is not bound to the production comprun format")
+          write(delivery_path, delivery)
+          PY
+
+      - name: Focused red-to-green verification
+        run: |
+          node --import tsx --test \
+            tests/github-exact-target-verifier.test.ts \
+            tests/nico-automated-package-verifier.test.ts \
+            tests/gmail-verified-report-sender.test.ts \
+            tests/telegram-nico-production.test.ts
+          npm run typecheck
+          git diff --check
+
+      - name: Commit only verified repairs
+        run: |
+          git config user.name "Reparodynamics Release Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add \
+            src/github-exact-target-verifier.ts \
+            src/telegram-nico-delivery.ts \
+            src/telegram-nico-production.ts \
+            tests/nico-automated-package-verifier.test.ts \
+            tests/gmail-verified-report-sender.test.ts
+          git diff --cached --check
+          git commit -m "fix: close PR 59 verification and security defects"
+          test "$(git ls-remote origin refs/heads/feature/telegram-nico-gmail-delivery | cut -f1)" = "44788ca2bec9556f038c992d30f3cfe80e9ae24e"
+          git push origin HEAD:feature/telegram-nico-gmail-delivery
