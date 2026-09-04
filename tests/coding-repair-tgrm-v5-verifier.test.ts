@@ -4,11 +4,10 @@ import { INITIAL_CODING_REPAIR_LIMITS } from "../src/coding-repair-policy.ts";
 import { verifyGenomeLabProgramCandidate } from "../src/genome-lab-verifier.ts";
 import type { ProgramCandidateProposal } from "../src/types.ts";
 
-const objective = "Parse an HTTP Retry-After value into a bounded delay.";
+const objective = "Parse an HTTP Retry-After delta-seconds value into a bounded delay.";
 const acceptanceCriteria = [
-  "Return null for missing, blank, negative, or invalid values.",
+  "Return null for missing, blank, negative, fractional, or invalid values.",
   "Support non-negative integer delta-seconds.",
-  "Support an HTTP-date relative to the supplied current time.",
   "Never exceed the supplied delay cap.",
 ];
 const constitutionDigest = "a".repeat(64);
@@ -23,14 +22,11 @@ const completeCandidate: ProgramCandidateProposal = {
     {
       path: "src/retry-after.ts",
       content: [
-        "export function retryAfterMs(value: string | undefined, nowMs: number, capMs: number): number | null {",
+        "export function retryAfterMs(value: string | undefined, capMs: number): number | null {",
         '  if (value === undefined || value.trim() === "") return null;',
         "  const seconds = Number(value);",
-        "  const delayMs = Number.isInteger(seconds) && seconds >= 0",
-        "    ? seconds * 1000",
-        "    : Date.parse(value) - nowMs;",
-        "  if (!Number.isFinite(delayMs) || delayMs < 0) return null;",
-        "  return Math.min(capMs, delayMs);",
+        "  if (!Number.isInteger(seconds) || seconds < 0) return null;",
+        "  return Math.min(capMs, seconds * 1000);",
         "}",
         "",
       ].join("\n"),
@@ -39,15 +35,14 @@ const completeCandidate: ProgramCandidateProposal = {
       path: "tests/retry-after.test.ts",
       content: [
         'import { retryAfterMs } from "../src/retry-after.ts";',
-        'const now = Date.parse("Wed, 21 Oct 2015 07:28:00 GMT");',
         'const equal = (actual: unknown, expected: unknown, label: string) => { if (actual !== expected) throw new Error(`${label}: ${String(actual)}`); };',
-        'equal(retryAfterMs(undefined, now, 5000), null, "missing");',
-        'equal(retryAfterMs("", now, 5000), null, "blank");',
-        'equal(retryAfterMs("2", now, 5000), 2000, "delta-seconds");',
-        'equal(retryAfterMs("100", now, 5000), 5000, "cap");',
-        'equal(retryAfterMs("Wed, 21 Oct 2015 07:28:03 GMT", now, 5000), 3000, "http-date");',
-        'equal(retryAfterMs("-1", now, 5000), null, "negative");',
-        'equal(retryAfterMs("not-a-date", now, 5000), null, "invalid");',
+        'equal(retryAfterMs(undefined, 5000), null, "missing");',
+        'equal(retryAfterMs("", 5000), null, "blank");',
+        'equal(retryAfterMs("2", 5000), 2000, "delta-seconds");',
+        'equal(retryAfterMs("100", 5000), 5000, "cap");',
+        'equal(retryAfterMs("-1", 5000), null, "negative");',
+        'equal(retryAfterMs("2.5", 5000), null, "fractional");',
+        'equal(retryAfterMs("not-a-number", 5000), null, "invalid");',
         "",
       ].join("\n"),
     },
