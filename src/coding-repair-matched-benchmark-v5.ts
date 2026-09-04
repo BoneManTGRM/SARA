@@ -9,7 +9,7 @@ export async function runMatchedCodingRepairBenchmarkV5(
   const horizonGovernance = {
     horizonSource: "controller_owned_remaining_cycles_within_existing_three_cycle_ceiling" as const,
     finalOpportunity: "remaining_cycles_equals_one" as const,
-    diversifyTrigger: "prior_verified_gain_plus_latest_evidence_backed_no_gain_rollback" as const,
+    diversifyTrigger: "prior_verified_gain_plus_latest_evidence_backed_no_gain_rejection" as const,
     missingTacticEvidence: "conserve_without_invented_novelty" as const,
     tacticFamilyRule: "disallow_latest_rejected_family_only_for_diversify_rethink_or_retreat" as const,
     authorityEffect: "selection_only_no_cycle_budget_or_mutation_ceiling_expansion" as const,
@@ -24,7 +24,7 @@ export async function runMatchedCodingRepairBenchmarkV5(
     },
     tgrmGovernance: {
       ...structuredClone(base.contract.tgrmGovernance),
-      adaptation: "retain_gain_conserve_after_rollback_and_diversify_on_final_evidence_backed_opportunity" as const,
+      adaptation: "retain_gain_conserve_after_rejection_and_diversify_on_final_evidence_backed_opportunity" as const,
     },
     horizonGovernance,
   };
