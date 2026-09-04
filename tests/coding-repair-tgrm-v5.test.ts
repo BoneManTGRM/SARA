@@ -80,7 +80,7 @@ const productiveLesson = lesson(
   1,
   "accepted_improvement",
   0.2,
-  ["call:Number.isFinite:+1", "syntax:IfStatement:+1"],
+  ["call:Number.isInteger:+1", "syntax:IfStatement:+1"],
 );
 const rejectedLesson = lesson(
   2,
@@ -89,7 +89,10 @@ const rejectedLesson = lesson(
   ["call:Math.round:+1"],
 );
 
-function trendFor(remainingCycles: number, lessons = [productiveLesson, rejectedLesson]) {
+function trendFor(
+  remainingCycles: number,
+  lessons: CodingRepairAttemptLesson[] = [productiveLesson, rejectedLesson],
+) {
   return summarizeCodingRepairGovernanceTrend(
     buildCodingRepairGovernanceSignals({ lessons, limits: INITIAL_CODING_REPAIR_LIMITS }),
     { remainingCycles },
@@ -143,23 +146,26 @@ function retryAfterCandidate(source: string): ProgramCandidateProposal {
     schemaVersion: 1,
     candidateKind: "typescript_program",
     programName: "Fresh Retry-After horizon holdout",
-    summary: "A fresh HTTP Retry-After fixture with an independently executed verifier.",
+    summary: "A fresh numeric HTTP Retry-After fixture with an independently executed verifier.",
     limitations: [],
     files: [
+      {
+        path: "src/index.ts",
+        content: 'export { retryAfterMs } from "./retry-after.ts";\n',
+      },
       { path: "src/retry-after.ts", content: source },
       {
         path: "tests/retry-after.test.ts",
         content: [
           'import { retryAfterMs } from "../src/retry-after.ts";',
-          'const now = Date.parse("Wed, 21 Oct 2015 07:28:00 GMT");',
           'const equal = (actual: unknown, expected: unknown, label: string) => { if (actual !== expected) throw new Error(`${label}: ${String(actual)}`); };',
-          'equal(retryAfterMs(undefined, now, 5000), null, "missing");',
-          'equal(retryAfterMs("", now, 5000), null, "blank");',
-          'equal(retryAfterMs("2", now, 5000), 2000, "delta-seconds");',
-          'equal(retryAfterMs("100", now, 5000), 5000, "cap");',
-          'equal(retryAfterMs("Wed, 21 Oct 2015 07:28:03 GMT", now, 5000), 3000, "http-date");',
-          'equal(retryAfterMs("-1", now, 5000), null, "negative");',
-          'equal(retryAfterMs("not-a-date", now, 5000), null, "invalid");',
+          'equal(retryAfterMs(undefined, 5000), null, "missing");',
+          'equal(retryAfterMs("", 5000), null, "blank");',
+          'equal(retryAfterMs("2", 5000), 2000, "delta-seconds");',
+          'equal(retryAfterMs("100", 5000), 5000, "cap");',
+          'equal(retryAfterMs("-1", 5000), null, "negative");',
+          'equal(retryAfterMs("2.5", 5000), null, "fractional");',
+          'equal(retryAfterMs("not-a-number", 5000), null, "invalid");',
           "",
         ].join("\n"),
       },
@@ -168,7 +174,7 @@ function retryAfterCandidate(source: string): ProgramCandidateProposal {
 }
 
 const baseline = retryAfterCandidate([
-  "export function retryAfterMs(value: string | undefined, nowMs: number, capMs: number): number | null {",
+  "export function retryAfterMs(value: string | undefined, capMs: number): number | null {",
   '  const marker: number = "broken";',
   "  if (value === undefined) return null;",
   "  return Number(value) * 1000;",
@@ -178,10 +184,10 @@ const baseline = retryAfterCandidate([
 
 function firstRepair(): string {
   return [
-    "export function retryAfterMs(value: string | undefined, nowMs: number, capMs: number): number | null {",
+    "export function retryAfterMs(value: string | undefined, capMs: number): number | null {",
     '  if (value === undefined || value.trim() === "") return null;',
     "  const seconds = Number(value);",
-    "  if (!Number.isFinite(seconds) || seconds < 0) return null;",
+    "  if (!Number.isInteger(seconds) || seconds < 0) return null;",
     "  return seconds * 1000;",
     "}",
     "",
@@ -193,18 +199,10 @@ function rejectedRoundingRepair(): string {
 }
 
 function completeRepair(): string {
-  return [
-    "export function retryAfterMs(value: string | undefined, nowMs: number, capMs: number): number | null {",
-    '  if (value === undefined || value.trim() === "") return null;',
-    "  const seconds = Number(value);",
-    "  const delayMs = Number.isInteger(seconds) && seconds >= 0",
-    "    ? seconds * 1000",
-    "    : Date.parse(value) - nowMs;",
-    "  if (!Number.isFinite(delayMs) || delayMs < 0) return null;",
-    "  return Math.min(capMs, delayMs);",
-    "}",
-    "",
-  ].join("\n");
+  return firstRepair().replace(
+    "return seconds * 1000;",
+    "return Math.min(capMs, seconds * 1000);",
+  );
 }
 
 function makeMatchedModel(counter: { calls: number; diversifiedCalls: number }): CodingRepairModel {
@@ -279,8 +277,8 @@ describe("TGRM V5 horizon-aware repair governance", () => {
   it("projects a bounded final-opportunity directive without protected-test disclosure", () => {
     const { candidate, verification } = promptFixture();
     const prompt = buildCodingRepairPrompt({
-      objective: "Parse Retry-After safely.",
-      acceptanceCriteria: ["Support delta-seconds and HTTP-date values within the supplied cap."],
+      objective: "Parse numeric Retry-After safely.",
+      acceptanceCriteria: ["Support non-negative integer delta-seconds within the supplied cap."],
       candidate,
       artifactDigest: verification.artifactDigest,
       failures: verification.failures,
@@ -306,18 +304,17 @@ describe("TGRM V5 horizon-aware repair governance", () => {
     assert.equal(payload.tgrmGovernance.trend.finalOpportunity, true);
     assert.equal(payload.tgrmGovernance.trend.allowSameTacticFamily, false);
     assert.match(payload.tgrmGovernance.directive, /Final bounded repair opportunity/u);
-    assert(payload.productiveSourceSignals.includes("call:Number.isFinite:+1"));
+    assert(payload.productiveSourceSignals.includes("call:Number.isInteger:+1"));
     assert(payload.rejectedSourceSignals.includes("call:Math.round:+1"));
     assert(!prompt.includes("TOP_SECRET_EXPECTED_RETRY_AFTER_VALUE_7429"));
   });
 
   it("improves a fresh independently executed matched holdout without another cycle or more authority", async () => {
     const counter = { calls: 0, diversifiedCalls: 0 };
-    const objective = "Parse an HTTP Retry-After value into a bounded delay.";
+    const objective = "Parse an HTTP Retry-After delta-seconds value into a bounded delay.";
     const acceptanceCriteria = [
-      "Return null for missing, blank, negative, or invalid values.",
+      "Return null for missing, blank, negative, fractional, or invalid values.",
       "Support non-negative integer delta-seconds.",
-      "Support an HTTP-date relative to the supplied current time.",
       "Never exceed the supplied delay cap.",
     ];
     const constitutionDigest = "a".repeat(64);
