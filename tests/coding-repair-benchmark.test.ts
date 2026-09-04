@@ -22,6 +22,7 @@ describe("paired coding benchmark runner", () => {
     const task = { taskId: "task-1", taskDigest: sha256("task-1") };
     const receipt = await runPairedCodingBenchmark({
       pairId: randomUUID(),
+      protocolDigest: sha256("protocol-v1"),
       corpusVersion: "repair-v1",
       task,
       canaryPercent: 5,

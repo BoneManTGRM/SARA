@@ -15,6 +15,7 @@ function pair(): CodingBenchmarkPairReceipt {
   return {
     schemaVersion: 1,
     pairId: randomUUID(),
+    protocolDigest: sha256("protocol-v1"),
     corpusVersion: "repair-v1",
     taskId: "task-1",
     taskDigest: sha256("task-1"),
@@ -32,8 +33,8 @@ describe("durable Reparodynamic coding evidence", () => {
     roots.push(root);
     const receipt = pair();
     await persistCodingBenchmarkPair({ stateDirectory: root, pair: receipt });
-    assert.deepEqual(await loadCodingBenchmarkPairs({ stateDirectory: root, corpusVersion: "repair-v1", canaryPercent: 5 }), [receipt]);
-    const stored = await readFile(join(root, "coding-repair-benchmarks", "repair-v1", "005", `${receipt.pairId}.json`), "utf8");
+    assert.deepEqual(await loadCodingBenchmarkPairs({ stateDirectory: root, protocolDigest: sha256("protocol-v1"), corpusVersion: "repair-v1", canaryPercent: 5 }), [receipt]);
+    const stored = await readFile(join(root, "coding-repair-benchmarks", "repair-v1", sha256("protocol-v1"), "005", `${receipt.pairId}.json`), "utf8");
     assert.equal(stored.includes("replacementText"), false);
     assert.equal(stored.includes("outputText"), false);
   });
@@ -43,22 +44,55 @@ describe("durable Reparodynamic coding evidence", () => {
     roots.push(root);
     const receipt = pair();
     await persistCodingBenchmarkPair({ stateDirectory: root, pair: receipt });
-    const path = join(root, "coding-repair-benchmarks", "repair-v1", "005", `${receipt.pairId}.json`);
+    const path = join(root, "coding-repair-benchmarks", "repair-v1", sha256("protocol-v1"), "005", `${receipt.pairId}.json`);
     const envelope = JSON.parse(await readFile(path, "utf8")) as { pair: CodingBenchmarkPairReceipt };
     envelope.pair.reparodynamic.score = 0;
     await writeFile(path, `${JSON.stringify(envelope)}\n`, "utf8");
-    await assert.rejects(() => loadCodingBenchmarkPairs({ stateDirectory: root, corpusVersion: "repair-v1", canaryPercent: 5 }), /digest verification failed/);
+    await assert.rejects(() => loadCodingBenchmarkPairs({ stateDirectory: root, protocolDigest: sha256("protocol-v1"), corpusVersion: "repair-v1", canaryPercent: 5 }), /digest verification failed/);
   });
 
   it("atomically replaces the derived aggregate summary", async () => {
     const root = await mkdtemp(join(tmpdir(), "sara-coding-evidence-"));
     roots.push(root);
     const receipt = pair();
-    const aggregate = aggregateCodingBenchmarkPairs({ receipts: [receipt], corpusVersion: "repair-v1", canaryPercent: 5 });
+    const aggregate = aggregateCodingBenchmarkPairs({ protocolDigest: sha256("protocol-v1"), receipts: [receipt], corpusVersion: "repair-v1", canaryPercent: 5 });
     const decision = evaluateCodingRollout({ aggregate });
     await persistCodingBenchmarkSummary({ stateDirectory: root, aggregate, decision });
     await persistCodingBenchmarkSummary({ stateDirectory: root, aggregate, decision });
-    const summary = JSON.parse(await readFile(join(root, "coding-repair-benchmarks", "repair-v1", "005", "summary.json"), "utf8")) as { summaryDigest: string };
+    const summary = JSON.parse(await readFile(join(root, "coding-repair-benchmarks", "repair-v1", sha256("protocol-v1"), "005", "summary.json"), "utf8")) as { summaryDigest: string };
     assert.match(summary.summaryDigest, /^[a-f0-9]{64}$/u);
   });
+
+  it("treats an identical persisted pair as an idempotent crash-recovery replay", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sara-coding-evidence-"));
+    roots.push(root);
+    const receipt = pair();
+    await persistCodingBenchmarkPair({ stateDirectory: root, pair: receipt });
+    await persistCodingBenchmarkPair({ stateDirectory: root, pair: receipt });
+    const stored = await loadCodingBenchmarkPairs({ stateDirectory: root, protocolDigest: sha256("protocol-v1"), corpusVersion: "repair-v1", canaryPercent: 5 });
+    assert.equal(stored.length, 1);
+  });
+
+  it("rejects reuse of a pair id with different evidence", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sara-coding-evidence-"));
+    roots.push(root);
+    const receipt = pair();
+    await persistCodingBenchmarkPair({ stateDirectory: root, pair: receipt });
+    const conflicting = structuredClone(receipt);
+    conflicting.reparodynamic.score = 0.9;
+    await assert.rejects(
+      () => persistCodingBenchmarkPair({ stateDirectory: root, pair: conflicting }),
+      /already exists with different evidence/,
+    );
+  });
+
+  it("rejects unsafe evidence scope before resolving a filesystem path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "sara-coding-evidence-"));
+    roots.push(root);
+    await assert.rejects(
+      () => loadCodingBenchmarkPairs({ stateDirectory: root, protocolDigest: sha256("protocol-v1"), corpusVersion: "../escape", canaryPercent: 5 }),
+      /corpus version is malformed/,
+    );
+  });
+
 });
