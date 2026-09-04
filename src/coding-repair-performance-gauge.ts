@@ -25,6 +25,8 @@ function aggregateBehavioralChecks(value: unknown): CodingBehavioralCheckSummary
     (candidate.passed as number) < 0 ||
     (candidate.total as number) <= 0 ||
     (candidate.passed as number) > (candidate.total as number) ||
+    typeof candidate.suiteDigest !== "string" ||
+    !HEX_DIGEST.test(candidate.suiteDigest) ||
     typeof candidate.evidenceDigest !== "string" ||
     !HEX_DIGEST.test(candidate.evidenceDigest)
   ) {
@@ -34,6 +36,7 @@ function aggregateBehavioralChecks(value: unknown): CodingBehavioralCheckSummary
     schemaVersion: 1,
     passed: candidate.passed as number,
     total: candidate.total as number,
+    suiteDigest: candidate.suiteDigest,
     evidenceDigest: candidate.evidenceDigest,
     disclosure: "aggregate_only",
   };
@@ -74,6 +77,7 @@ function projectBehavioralChecks(summary: CodingBehavioralCheckSummary) {
   return {
     passed: summary.passed,
     total: summary.total,
+    suiteDigest: summary.suiteDigest,
     evidenceDigest: summary.evidenceDigest,
   };
 }
@@ -85,7 +89,7 @@ function buildBehavioralProgress(
   const baseline = knownBehavioralChecks(baselineVerification);
   const final = knownBehavioralChecks(finalVerification);
   if (!baseline || !final) return null;
-  const comparable = baseline.total === final.total;
+  const comparable = baseline.total === final.total && baseline.suiteDigest === final.suiteDigest;
   return {
     disclosure: "aggregate_only",
     comparable,
