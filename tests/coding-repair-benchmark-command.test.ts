@@ -1,12 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseCodingBenchmarkCommand } from "../src/coding-repair-benchmark-command.ts";
+import {
+  assertCodingBenchmarkSourceRevision,
+  codingBenchmarkAuthorityDigest,
+  parseCodingBenchmarkCommand,
+} from "../src/coding-repair-benchmark-command.ts";
 
 const benchmarkId = "11111111-1111-4111-8111-111111111111";
+const sourceRevision = "1".repeat(40);
+const authorityInput = {
+  benchmarkId,
+  sourceRevision,
+  maximumSpendUsd: 3,
+  currentCanaryPercent: 5,
+  caseCount: 10,
+};
 const validEnvironment = {
   OPENAI_API_KEY: "test-secret",
-  SARA_CODING_BENCHMARK_AUTHORITY_SHA256: "a".repeat(64),
-  SARA_CODING_BENCHMARK_SOURCE_REVISION: "1".repeat(40),
+  SARA_CODING_BENCHMARK_AUTHORITY_SHA256: codingBenchmarkAuthorityDigest(authorityInput),
+  SARA_CODING_BENCHMARK_SOURCE_REVISION: sourceRevision,
 };
 const validArguments = [
   "--live",
@@ -35,7 +47,8 @@ describe("live coding benchmark command", () => {
     assert.equal(parsed.currentCanaryPercent, 5);
     assert.equal(parsed.caseCount, 10);
     assert.equal(parsed.stateDirectory, ".sara-state");
-    assert.equal(parsed.sourceRevision, "1".repeat(40));
+    assert.equal(parsed.sourceRevision, sourceRevision);
+    assert.equal(parsed.authorityDigest, codingBenchmarkAuthorityDigest(authorityInput));
   });
 
   it("fails closed without explicit live and LAB-only acknowledgement flags", () => {
@@ -66,6 +79,25 @@ describe("live coding benchmark command", () => {
         /required/,
       );
     }
+  });
+
+  it("rejects an approval digest copied from a different benchmark target", () => {
+    assert.throws(
+      () => parseCodingBenchmarkCommand({
+        args: validArguments.map((argument) => argument === "5" ? "20" : argument),
+        env: validEnvironment,
+        maximumCases: 10,
+      }),
+      /does not match the exact live benchmark target/,
+    );
+  });
+
+  it("requires the running checkout to equal the bound immutable revision", () => {
+    assert.doesNotThrow(() => assertCodingBenchmarkSourceRevision(sourceRevision, sourceRevision));
+    assert.throws(
+      () => assertCodingBenchmarkSourceRevision(sourceRevision, "2".repeat(40)),
+      /does not match the exact checked-out revision/,
+    );
   });
 
   it("requires enough cap for the maximum two-arm spend and rejects unknown arguments", () => {
