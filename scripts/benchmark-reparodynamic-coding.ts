@@ -1,7 +1,12 @@
 import * as ts from "typescript";
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { promisify } from "node:util";
 import { canonicalJson, sha256 } from "../src/canonical.ts";
-import { parseCodingBenchmarkCommand } from "../src/coding-repair-benchmark-command.ts";
+import {
+  assertCodingBenchmarkSourceRevision,
+  parseCodingBenchmarkCommand,
+} from "../src/coding-repair-benchmark-command.ts";
 import {
   INITIAL_CODING_BENCHMARK_CORPUS,
   codingBenchmarkCorpusDigest,
@@ -29,6 +34,36 @@ import { INITIAL_CODING_REPAIR_LIMITS } from "../src/coding-repair-policy.ts";
 import { createLunaCodingRepairModel } from "../src/luna-coding-repair-model.ts";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
 import { verifyGenomeLabProgramCandidate } from "../src/genome-lab-verifier.ts";
+
+const execFileAsync = promisify(execFile);
+const repositoryRoot = new URL("../", import.meta.url);
+
+async function assertExactSourceCheckout(expectedRevision: string): Promise<void> {
+  let revision: string;
+  let trackedChanges: string;
+  try {
+    const [revisionResult, statusResult] = await Promise.all([
+      execFileAsync("git", ["rev-parse", "HEAD"], {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        timeout: 5_000,
+      }),
+      execFileAsync("git", ["status", "--porcelain", "--untracked-files=no"], {
+        cwd: repositoryRoot,
+        encoding: "utf8",
+        timeout: 5_000,
+      }),
+    ]);
+    revision = revisionResult.stdout;
+    trackedChanges = statusResult.stdout;
+  } catch {
+    throw new Error("The live coding benchmark could not verify its Git source checkout.");
+  }
+  assertCodingBenchmarkSourceRevision(expectedRevision, revision);
+  if (trackedChanges.trim()) {
+    throw new Error("The live coding benchmark requires a clean tracked source checkout.");
+  }
+}
 
 async function digestSourceFiles(paths: string[]): Promise<string> {
   const sources = await Promise.all(paths.map(async (path) => ({
@@ -93,6 +128,7 @@ const config = parseCodingBenchmarkCommand({
   env: process.env,
   maximumCases: INITIAL_CODING_BENCHMARK_CORPUS.cases.length,
 });
+await assertExactSourceCheckout(config.sourceRevision);
 const corpus = selectedCorpus(config.caseCount);
 const corpusDigest = codingBenchmarkCorpusDigest(corpus);
 const constitutionSource = await readFile(
