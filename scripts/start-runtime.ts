@@ -3,13 +3,7 @@ import { spawn } from "node:child_process";
 if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
   const child = spawn(
     process.execPath,
-    [
-      "--import",
-      "tsx",
-      "scripts/benchmark-reparodynamic-coding.ts",
-      "--live",
-      "--acknowledge-max-spend-usd=0.15",
-    ],
+    ["scripts/standalone-coding-speed-live.mjs"],
     { stdio: "inherit", env: process.env },
   );
   const exitCode = await new Promise<number>((resolve, reject) => {
