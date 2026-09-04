@@ -67,6 +67,49 @@ describe("TGRM V4 semantic stagnation governance", () => {
     assert.equal(trend.allowSameTacticFamily, false);
   });
 
+  it("normalizes tactic occurrence counts when detecting the same semantic family", () => {
+    const second = lesson({
+      cycle: 2,
+      proposalDigest: digest("proposal-count-two"),
+      sourceChanges: [{
+        schemaVersion: 1,
+        path: "src/value.ts",
+        beforeContentDigest: digest("before-two"),
+        afterContentDigest: digest("after-two"),
+        addedSignals: ["call:Math.round:+2"],
+        removedSignals: [],
+        signalDigest: digest("rounding-tactic-two"),
+      }],
+      sourceChangesDigest: digest("changes-two"),
+    });
+    const trend = summarizeCodingRepairGovernanceTrend(buildCodingRepairGovernanceSignals({
+      lessons: [lesson({ cycle: 1 }), second],
+      limits: INITIAL_CODING_REPAIR_LIMITS,
+    }));
+
+    assert.equal(trend.semanticRepeatStreak, 2);
+    assert.equal(trend.action, "rethink");
+  });
+
+  it("does not invent semantic repetition when no source-tactic evidence exists", () => {
+    const noSignals = (cycle: number): CodingRepairAttemptLesson => lesson({
+      cycle,
+      proposalDigest: digest(`proposal-empty-${cycle}`),
+      proposedArtifactDigest: digest(`proposed-empty-${cycle}`),
+      sourceChanges: [],
+      sourceChangesDigest: digest(`changes-empty-${cycle}`),
+    });
+    const trend = summarizeCodingRepairGovernanceTrend(buildCodingRepairGovernanceSignals({
+      lessons: [noSignals(1), noSignals(2)],
+      limits: INITIAL_CODING_REPAIR_LIMITS,
+    }));
+
+    assert.equal(trend.noGainStreak, 2);
+    assert.equal(trend.semanticRepeatStreak, 0);
+    assert.equal(trend.action, "conserve");
+    assert.equal(trend.allowSameTacticFamily, true);
+  });
+
   it("does not penalize a materially novel tactic that produces verified gain", () => {
     const signals = buildCodingRepairGovernanceSignals({
       lessons: [
