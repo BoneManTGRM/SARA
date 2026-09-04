@@ -19,7 +19,7 @@ export class RevenuePilotTestingRuntime {
       throw new Error("No-price testing is frozen by SARA's emergency stop.");
     }
     const availableCapabilities = status.capabilities
-      .filter((capability) => capability.status === "available" || capability.status === "production")
+      .filter((capability) => capability.status === "available")
       .map((capability) => capability.id);
     const job = createRevenuePilotTestingJob(input, availableCapabilities);
     this.#jobs.set(job.id, structuredClone(job));
