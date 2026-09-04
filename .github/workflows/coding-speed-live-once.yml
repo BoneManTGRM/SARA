@@ -1,0 +1,34 @@
+name: One-shot matched coding speed
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  matched-coding-speed:
+    if: github.head_ref == 'experiment/coding-speed-live-run-20260904'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SARA_BENCHMARK_COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Run matched coding-speed benchmark
+        run: node --import tsx scripts/benchmark-reparodynamic-learning-v5-live.ts --live --acknowledge-max-spend-usd=0.15 | tee matched-coding-speed.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: matched-coding-speed-evidence
+          path: matched-coding-speed.json
+          if-no-files-found: error
