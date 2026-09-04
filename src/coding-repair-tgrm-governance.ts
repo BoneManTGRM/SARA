@@ -6,6 +6,7 @@ import type {
 } from "./coding-repair-types.ts";
 
 const MAX_TACTIC_SIGNALS = 32;
+const MAX_PROBLEM_SIGNALS = 8;
 const SEMANTIC_REPEAT_THRESHOLD = 0.5;
 
 export type CodingRepairGovernanceSignal = {
@@ -18,6 +19,8 @@ export type CodingRepairGovernanceSignal = {
   energyHeadroom: number;
   driftScore: number;
   verifiedGain: number;
+  problemSignals: string[];
+  problemFamilyDigest: string | null;
   tacticSignals: string[];
   tacticFamilyDigest: string | null;
   noGain: boolean;
@@ -64,8 +67,8 @@ function normalizeTacticSignal(signal: string): string {
   return signal.replace(/:[+-]\d+$/u, "");
 }
 
-function orderedUnique(values: readonly string[]): string[] {
-  return [...new Set(values)].sort().slice(0, MAX_TACTIC_SIGNALS);
+function orderedUnique(values: readonly string[], maximum = MAX_TACTIC_SIGNALS): string[] {
+  return [...new Set(values)].sort().slice(0, maximum);
 }
 
 function intersection(left: readonly string[], right: readonly string[]): string[] {
@@ -91,7 +94,26 @@ export function codingRepairTacticSignals(
   ]));
 }
 
-function tacticFamilyDigest(signals: readonly string[]): string | null {
+function codingRepairProblemSignals(lesson: CodingRepairAttemptLesson): string[] {
+  const visibleFailures = [
+    ...(lesson.beforeFailures ?? []),
+    ...(lesson.afterFailures ?? []),
+  ];
+  if (visibleFailures.length) {
+    return orderedUnique(visibleFailures.map((failure) => `failure:${sha256(canonicalJson({
+      kind: failure.kind,
+      code: failure.code,
+      file: failure.file,
+    }))}`), MAX_PROBLEM_SIGNALS);
+  }
+
+  return orderedUnique([
+    ...lesson.beforeFailureFingerprints,
+    ...lesson.afterFailureFingerprints,
+  ].map((fingerprint) => `fingerprint:${fingerprint}`), MAX_PROBLEM_SIGNALS);
+}
+
+function familyDigest(signals: readonly string[]): string | null {
   return signals.length ? sha256(canonicalJson(signals)) : null;
 }
 
@@ -119,6 +141,7 @@ export function buildCodingRepairGovernanceSignal(input: {
   const driftScore = boundedRatio(scoreRegression + checkRegression);
   const verifiedGain = boundedRatio(Math.max(0, input.lesson.scoreDelta));
   const noGain = verifiedGain === 0 && input.lesson.newlyReachedChecks.length === 0;
+  const problemSignals = codingRepairProblemSignals(input.lesson);
   const tacticSignals = codingRepairTacticSignals(input.lesson.sourceChanges ?? []);
 
   let governanceAction: CodingRepairGovernanceSignal["governanceAction"] = "hold";
@@ -144,8 +167,10 @@ export function buildCodingRepairGovernanceSignal(input: {
     energyHeadroom,
     driftScore,
     verifiedGain,
+    problemSignals,
+    problemFamilyDigest: familyDigest(problemSignals),
     tacticSignals,
-    tacticFamilyDigest: tacticFamilyDigest(tacticSignals),
+    tacticFamilyDigest: familyDigest(tacticSignals),
     noGain,
     governanceAction,
   };
@@ -200,9 +225,15 @@ export function summarizeCodingRepairGovernanceTrend(
   const semanticSimilarity = previous
     ? overlapCoefficient(previous.tacticSignals, latest.tacticSignals)
     : 0;
+  const sameProblemFamily = previous
+    ? intersection(previous.problemSignals, latest.problemSignals).length > 0
+    : false;
   const semanticRepeatStreak = latest.tacticSignals.length === 0
     ? 0
-    : previous && repeatedTacticSignals.length > 0 && semanticSimilarity >= SEMANTIC_REPEAT_THRESHOLD
+    : previous &&
+        sameProblemFamily &&
+        repeatedTacticSignals.length > 0 &&
+        semanticSimilarity >= SEMANTIC_REPEAT_THRESHOLD
       ? 2
       : 1;
 
