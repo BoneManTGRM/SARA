@@ -29,7 +29,7 @@
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts",
     "demo": "node --import tsx cli.ts",
-    "start": "node --import tsx src/main.ts",
+    "start": "node --import tsx scripts/start-runtime.ts",
     "proof:bootstrap": "node --import tsx proof/bootstrap.ts",
     "proof:self-build": "node --import tsx proof/self-build.ts",
     "proof:revenue-pilot": "node --import tsx proof/revenue-pilot.ts",
