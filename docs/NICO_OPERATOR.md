@@ -2,6 +2,8 @@
 
 SARA can create and advance an authorized, anonymous/read-only NICO Comprehensive assessment for one public GitHub repository pinned to an exact commit. She can also request a certified `Authorized Automated Technical Assessment` package without a human specialist when NICO reports zero unresolved review-work units and the exact artifact identity still matches.
 
+For the fixed $149 Public Repository Readiness Snapshot, the production revenue operator now invokes this automated path after SARA's independent verifier and deterministic report compiler pass. It derives one deterministic NICO run ID from the paid job, reuses the exact collected commit, advances the run across restart-safe ticks, accepts only the exact artifact identity, and stores the certified package by digest before authorizing customer delivery. The customer receives a separate authenticated download URL for that package. If NICO has any review-required work, stale identity, target mismatch, missing package digest, or unavailable credential, fulfillment stops without delivery.
+
 ## Production configuration
 
 Set `SARA_NICO_BASE_URL=https://app.nicoaudit.com/api/nico/` and a long random `SARA_NICO_OPERATOR_PASSWORD` on the private SARA operator service. NICO holds only the password's SHA-256 verifier. It is SARA's scoped service password, not NICO's master admin password.

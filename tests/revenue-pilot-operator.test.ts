@@ -7,6 +7,7 @@ import { afterEach, describe, it } from "node:test";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
 import { sha256 } from "../src/canonical.ts";
 import type { WorkerModelClient } from "../src/model-router.ts";
+import type { NicoArtifactIdentity, NicoOperator } from "../src/nico-operator.ts";
 import type {
   PublicRepositoryEvidenceCollector,
   PublicRepositoryEvidenceSnapshot,
@@ -142,6 +143,29 @@ function fakeEvidence(calls: string[] = []): PublicRepositoryEvidenceCollector {
   };
 }
 
+function fakeNico(calls: string[]): NicoOperator {
+  const packageBody = new TextEncoder().encode("authorized nico package");
+  return {
+    async createRun(input) { calls.push(`create:${input.repository}:${input.commitSha}`); return { run_id: input.runId, status: "pending" }; },
+    async getRun(id) {
+      calls.push(`get:${id}`);
+      const identity: NicoArtifactIdentity = { schema: "nico.review-artifact-identity.v1", run_id: id, revision: 1, report_artifact_digest: "a".repeat(64), artifact_digests: { pdf: "b".repeat(64) } };
+      return { run_id: id, immutable_commit_sha: "a".repeat(40), artifact_identity: identity };
+    },
+    async continueRun(id) { calls.push(`continue:${id}`); return { run_id: id }; },
+    async getReport() { throw new Error("not used"); },
+    async getReviewQueue() { throw new Error("not used"); },
+    async finalizeExactDraft() { throw new Error("not used"); },
+    async authorizeDelivery() { throw new Error("not used"); },
+    async getApprovedDeliveryPackage() { throw new Error("not used"); },
+    async getAutomatedDeliveryPackage(id, _password, input) {
+      calls.push(`package:${id}:${input.confirmAutomatedDisclosure}`);
+      assert.equal(input.expectedArtifactIdentity.run_id, id);
+      return { contentType: "application/zip", body: packageBody, digest: sha256(Buffer.from(packageBody)) };
+    },
+  };
+}
+
 function readinessDraft(overrides: Record<string, unknown> = {}): string {
   const evidenceUrl = evidenceSnapshot().sampledFiles[0].permalink;
   return JSON.stringify({
@@ -231,6 +255,7 @@ describe("bounded persistent Luna revenue operator", () => {
       approvedAt: "2026-09-03T11:59:00.000Z",
       ownerId: owner.id,
     });
+    const nicoCalls: string[] = [];
     const operator = new RevenuePilotOperator({
       kernel,
       modelClient: fakeLuna([
@@ -242,10 +267,13 @@ describe("bounded persistent Luna revenue operator", () => {
       repositoryEvidenceCollector: fakeEvidence(),
       stateDirectory: directory,
       now: () => new Date("2026-09-03T12:01:00.000Z"),
+      nicoOperator: fakeNico(nicoCalls),
     });
 
     assert.equal((await operator.tick()).outcome, "authorized_job");
     for (let index = 0; index < 4; index += 1) assert.equal((await operator.tick()).outcome, "completed_role");
+    assert.equal((await operator.tick()).outcome, "nico_run_created");
+    assert.equal((await operator.tick()).outcome, "nico_package_authorized");
     const deliveryTick = await operator.tick();
     assert.equal(deliveryTick.outcome, "authorized_delivery");
     const status = await kernel.getStatus();
@@ -257,6 +285,8 @@ describe("bounded persistent Luna revenue operator", () => {
     assert.equal(delivery?.accessSecretDigest, paymentClientSecretDigest(clientSecret));
     assert.match(delivery?.approvalId ?? "", /^standing-mandate:/u);
     assert.equal(status.realizedProfit.collectedRevenueUsd, 149);
+    assert.deepEqual(nicoCalls.map((call) => call.split(":")[0]), ["create", "get", "package"]);
+    assert.equal(status.autonomyDecisions.filter((decision) => decision.requestId.startsWith("nico-automated-fulfillment:")).length, 1);
   });
 
   it("does not call a model unless a paid job has owner authorization", async () => {

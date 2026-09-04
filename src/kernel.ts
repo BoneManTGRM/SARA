@@ -1239,6 +1239,36 @@ export class SaraKernel {
     });
   }
 
+  authorizeAutomatedNicoFulfillmentUnderMandate(
+    principal: Principal,
+    jobId: string,
+    runId: string,
+    requestedAt = new Date().toISOString(),
+  ): Promise<AutonomyDecision> {
+    return this.serializeMutation(async () => {
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find((candidate) => candidate.id === jobId);
+      if (!job || job.status !== "owner_review" || !job.revenueEvidenceId) {
+        throw new Error("Paid owner-review job is required for automated NICO fulfillment.");
+      }
+      if (job.plan.serviceId !== "public-repository-readiness-snapshot") {
+        throw new Error("Automated NICO fulfillment is restricted to the fixed readiness service.");
+      }
+      if (!/^comprun_[0-9a-f]{32}$/u.test(runId)) throw new Error("Automated NICO run ID is invalid.");
+      return this.authorizeAutonomousRoutine(principal, state, {
+        id: `nico-automated-fulfillment:${job.id}:${runId}`,
+        kind: "fixed_service_fulfillment",
+        targetId: `nico:${runId}:automated-delivery-package`,
+        channel: "approved_api",
+        serviceId: job.plan.serviceId,
+        estimatedCostUsd: 0,
+        external: true,
+        requestedAt,
+        platform: "owner_site",
+      });
+    });
+  }
+
   accessRevenueDelivery(id: string, secret: string): Promise<{ job: RevenuePilotJob; delivery: RevenueDelivery }> {
     return this.serializeMutation(async () => {
       await this.authorize(SARA_PRINCIPAL, {

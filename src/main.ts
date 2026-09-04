@@ -187,6 +187,7 @@ server.listen(port, host, () => {
         stateDirectory,
         monthlyBudgetUsd: monthlyBudgetUsd - activeTelegramMonthlyBudgetUsd,
         monthlyCostOffsetUsd: proofIsCurrentMonth ? startupProof.accountedCostUsd : 0,
+        ...(nicoOperator ? { nicoOperator } : {}),
       });
       if (!liveProofEnabled || startupProof.status === "succeeded") {
         operator.start();

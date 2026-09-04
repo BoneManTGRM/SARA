@@ -110,6 +110,45 @@ function artifactIdentity(value: NicoArtifactIdentity, expectedRunId: string): N
   };
 }
 
+export function extractNicoArtifactIdentity(value: unknown, expectedRunId: string): NicoArtifactIdentity | null {
+  const visited = new Set<object>();
+  const visit = (candidate: unknown): NicoArtifactIdentity | null => {
+    if (!candidate || typeof candidate !== "object") return null;
+    if (visited.has(candidate)) return null;
+    visited.add(candidate);
+    if (!Array.isArray(candidate)) {
+      const record = candidate as Record<string, unknown>;
+      if (
+        typeof record.schema === "string" &&
+        record.run_id === expectedRunId &&
+        Number.isInteger(record.revision) &&
+        typeof record.report_artifact_digest === "string" &&
+        record.artifact_digests && typeof record.artifact_digests === "object"
+      ) {
+        return artifactIdentity(record as NicoArtifactIdentity, expectedRunId);
+      }
+      for (const nested of Object.values(record)) {
+        const found = visit(nested);
+        if (found) return found;
+      }
+      return null;
+    }
+    for (const nested of candidate) {
+      const found = visit(nested);
+      if (found) return found;
+    }
+    return null;
+  };
+  return visit(value);
+}
+
+export function assertNicoRunTarget(value: unknown, expectedRunId: string, expectedCommitSha: string): void {
+  const serialized = JSON.stringify(value);
+  if (!serialized.includes(expectedRunId) || !serialized.includes(expectedCommitSha)) {
+    throw new Error("NICO run response is not bound to the expected run and immutable commit.");
+  }
+}
+
 async function boundedBody(response: Response, maximum: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maximum) throw new Error("NICO response exceeded the permitted size.");

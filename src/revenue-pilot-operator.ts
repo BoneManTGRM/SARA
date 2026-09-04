@@ -1,5 +1,6 @@
 import { SaraKernel, SARA_PRINCIPAL } from "./kernel.ts";
-import { canonicalJson } from "./canonical.ts";
+import { canonicalJson, sha256 } from "./canonical.ts";
+import { assertNicoRunTarget, extractNicoArtifactIdentity, type NicoOperator } from "./nico-operator.ts";
 import type { WorkerModelClient, WorkerTaskKind } from "./model-router.ts";
 import { compileVerifiedLearningMemory } from "./reparodynamics.ts";
 import {
@@ -21,11 +22,13 @@ import {
   readRepositoryReadinessReportArtifact,
 } from "./repository-readiness-report-artifacts.ts";
 import type { MemoryRecall } from "./types.ts";
+import { persistRevenueNicoPackage, persistRevenueNicoRun, readRevenueNicoArtifact } from "./revenue-nico-artifacts.ts";
 
 export type RevenuePilotOperatorTick =
   | { outcome: "authorized_job"; jobId: string; paymentIntentId: string }
   | { outcome: "authorized_delivery"; jobId: string; deliveryId: string; reportDigest: string }
   | { outcome: "completed_role"; jobId: string; role: RevenuePilotLease["role"]; costUsd: number }
+  | { outcome: "nico_run_created" | "nico_run_advanced" | "nico_package_authorized"; jobId: string; runId: string }
   | {
     outcome: "idle";
     reason: "no_authorized_job" | "active_lease" | "emergency_stop" | "monthly_budget" | "repository_evidence_unavailable";
@@ -245,6 +248,7 @@ export class RevenuePilotOperator {
   readonly #monthlyBudgetUsd: number;
   readonly #monthlyCostOffsetUsd: number;
   readonly #now: () => Date;
+  readonly #nicoOperator: NicoOperator | null;
   #running = false;
   #timer: NodeJS.Timeout | null = null;
   #tickInFlight: Promise<RevenuePilotOperatorTick> | null = null;
@@ -259,6 +263,7 @@ export class RevenuePilotOperator {
     monthlyBudgetUsd?: number;
     monthlyCostOffsetUsd?: number;
     now?: () => Date;
+    nicoOperator?: NicoOperator;
   }) {
     const monthlyBudgetUsd = options.monthlyBudgetUsd ?? 10;
     if (!Number.isFinite(monthlyBudgetUsd) || monthlyBudgetUsd < 0 || monthlyBudgetUsd > 50) {
@@ -275,6 +280,7 @@ export class RevenuePilotOperator {
     }
     this.#monthlyCostOffsetUsd = monthlyCostOffsetUsd;
     this.#now = options.now ?? (() => new Date());
+    this.#nicoOperator = options.nicoOperator ?? null;
   }
 
   async status(): Promise<RevenuePilotOperatorStatus> {
@@ -331,6 +337,10 @@ export class RevenuePilotOperator {
         candidate.jobId === completedJob.id && candidate.status === "authorized"
       );
       if (intent) {
+        if (this.#nicoOperator && completedJob.plan.serviceId === "public-repository-readiness-snapshot") {
+          const nicoTick = await this.#advanceAutomatedNico(completedJob, now);
+          if (nicoTick) return this.#record(nicoTick);
+        }
         const report = await readRepositoryReadinessReportArtifact({
           stateDirectory: this.#stateDirectory,
           jobId: completedJob.id,
@@ -454,6 +464,51 @@ export class RevenuePilotOperator {
       role,
       costUsd: result.job.receipts.at(-1)?.costUsd ?? 0,
     });
+  }
+
+  async #advanceAutomatedNico(job: RevenuePilotJob, now: Date): Promise<RevenuePilotOperatorTick | null> {
+    if (!this.#nicoOperator) return null;
+    let artifact = await readRevenueNicoArtifact(this.#stateDirectory, job.id);
+    if (artifact?.state === "package_ready") return null;
+    const evidence = await readPublicRepositoryEvidence({ stateDirectory: this.#stateDirectory, jobId: job.id });
+    if (!evidence) throw new Error("NICO orchestration requires the immutable repository evidence packet.");
+    const repositoryUrl = new URL(evidence.snapshot.repository);
+    const repository = repositoryUrl.pathname.split("/").filter(Boolean).join("/");
+    const runId = `comprun_${sha256(`sara-nico:${job.id}`).slice(0, 32)}`;
+    await this.#kernel.authorizeAutomatedNicoFulfillmentUnderMandate(SARA_PRINCIPAL, job.id, runId, now.toISOString());
+    if (!artifact) {
+      const created = await this.#nicoOperator.createRun({
+        runId,
+        repository,
+        commitSha: evidence.snapshot.immutableCommitSha,
+        clientName: "SARA Readiness Customer",
+        projectName: `SARA automated readiness ${job.id}`.slice(0, 160),
+        authorizedBy: "SARA owner-approved standing mandate",
+        authorizationScope: `Customer-authorized public repository ${repository} at exact commit ${evidence.snapshot.immutableCommitSha}; defensive anonymous read-only assessment only.`,
+        primaryTechnicalContact: "SARA automated service operator",
+      });
+      if (created.run_id !== runId) throw new Error("NICO created a different run identity.");
+      artifact = await persistRevenueNicoRun({ stateDirectory: this.#stateDirectory, jobId: job.id, runId, repository, commitSha: evidence.snapshot.immutableCommitSha, updatedAt: now.toISOString() });
+      return { outcome: "nico_run_created", jobId: job.id, runId };
+    }
+    if (artifact.runId !== runId || artifact.repository !== repository || artifact.commitSha !== evidence.snapshot.immutableCommitSha) {
+      throw new Error("Persisted NICO orchestration target is stale.");
+    }
+    const run = await this.#nicoOperator.getRun(runId);
+    assertNicoRunTarget(run, runId, artifact.commitSha);
+    const identity = extractNicoArtifactIdentity(run, runId);
+    if (!identity) {
+      const advanced = await this.#nicoOperator.continueRun(runId);
+      if (advanced.run_id !== undefined && advanced.run_id !== runId) throw new Error("NICO advanced a different run identity.");
+      return { outcome: "nico_run_advanced", jobId: job.id, runId };
+    }
+    const packaged = await this.#nicoOperator.getAutomatedDeliveryPackage(runId, undefined, {
+      expectedArtifactIdentity: identity,
+      confirmExactArtifact: true,
+      confirmAutomatedDisclosure: true,
+    });
+    await persistRevenueNicoPackage({ stateDirectory: this.#stateDirectory, artifact, artifactIdentity: identity, body: packaged.body, contentType: packaged.contentType, providerDigest: packaged.digest, updatedAt: now.toISOString() });
+    return { outcome: "nico_package_authorized", jobId: job.id, runId };
   }
 
   async #recordVerifiedLearning(job: RevenuePilotJob, role: RevenuePilotLease["role"]): Promise<void> {

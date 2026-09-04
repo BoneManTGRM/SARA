@@ -16,6 +16,7 @@ Allow SARA to accept and complete the fixed $149 Public Repository Readiness Sna
 6. Custom terms, private repositories, credentials, regulated data, exploitation, production access, human impersonation, refunds, and money transfers remain blocked.
 7. The emergency stop freezes acceptance, fulfillment, NICO activity, and delivery.
 8. NICO Comprehensive may be orchestrated by SARA, but its `AUTHORIZED_HUMAN_REVIEWED` status requires an artifact-bound decision from a real named specialist; SARA may not manufacture that attestation.
+   The separate `AUTHORIZED_AUTOMATED_TECHNICAL_ASSESSMENT` path requires no human specialist, must disclose `Human reviewed: No`, and may release only when NICO's deterministic review queue is empty.
 9. SARA's NICO credential remains separately scoped, secret-backed, and unable to administer unrelated NICO systems.
 10. Beneficiary identities remain outside source control. The spouse-primary model remains legally inactive until a private registry, legally effective instrument, titled account, qualified review, and successor fiduciary are verified.
 
