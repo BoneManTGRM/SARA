@@ -34,6 +34,7 @@ export type CodingBehavioralCheckSummary = {
   schemaVersion: 1;
   passed: number;
   total: number;
+  suiteDigest: string;
   evidenceDigest: string;
   disclosure: "aggregate_only";
 };
@@ -192,11 +193,13 @@ export type CodingRepairBehavioralProgress = {
   baseline: {
     passed: number;
     total: number;
+    suiteDigest: string;
     evidenceDigest: string;
   };
   final: {
     passed: number;
     total: number;
+    suiteDigest: string;
     evidenceDigest: string;
   };
   passedDelta: number | null;
