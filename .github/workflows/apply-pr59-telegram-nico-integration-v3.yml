@@ -1,0 +1,156 @@
+name: Apply PR59 Telegram NICO integration v3
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-20260904
+    paths:
+      - .github/workflows/apply-pr59-telegram-nico-integration-v3.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-pr59-telegram-nico-integration-v3
+  cancel-in-progress: false
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/telegram-nico-gmail-delivery
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Apply narrow backend integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          test = Path("tests/telegram-nico-http.test.ts")
+          if test.exists():
+              test.write_text(test.read_text().replace(
+                  'import { createServer, type AddressInfo } from "node:http";',
+                  'import { createServer } from "node:http";\nimport type { AddressInfo } from "node:net";'
+              ))
+
+          operator = Path("src/telegram-nico-delivery.ts")
+          value = operator.read_text()
+          value = value.replace(
+              '      if (existing.status === "failed" && existing.failure) throw new Error(existing.failure.reason);\n',
+              '      // Re-evaluate a blocked or interrupted command with the same immutable request and run identity.\n'
+          )
+          marker = '  const identity = artifactIdentity(source) ?? run.artifactIdentity;\n  if (!identity) throw new Error("NICO did not return an exact artifact schema plus hash-and-size identity.");\n'
+          if 'const humanReviewed = firstValue(source, new Set(["humanreviewed"]));' not in value:
+              if marker not in value:
+                  raise SystemExit("NICO package identity marker not found")
+              value = value.replace(marker, marker + '  const humanReviewed = firstValue(source, new Set(["humanreviewed"]));\n  if (humanReviewed !== false) throw new Error("The automated NICO package must explicitly state that it was not human reviewed.");\n')
+          value = value.replace('    humanReviewed: firstValue(source, new Set(["humanreviewed"])) === true,', '    humanReviewed: false,')
+          operator.write_text(value)
+
+          server = Path("src/server.ts")
+          value = server.read_text()
+          import_line = 'import { handleTelegramNicoProductionRequest } from "./telegram-nico-production.ts";\n'
+          if import_line not in value:
+              lines = value.splitlines(True)
+              last = max(i for i, line in enumerate(lines) if line.startswith("import "))
+              lines.insert(last + 1, import_line)
+              value = "".join(lines)
+          if "handleTelegramNicoProductionRequest({" not in value:
+              anchor = value.rfind("createServer(")
+              if anchor < 0:
+                  raise SystemExit("createServer anchor not found")
+              callback = re.search(r"async\s*\(\s*([A-Za-z_$][\w$]*)\s*,\s*([A-Za-z_$][\w$]*)\s*\)\s*=>", value[anchor:])
+              if not callback:
+                  raise SystemExit("async request callback not found")
+              request_name, response_name = callback.group(1), callback.group(2)
+              url_statement = re.search(r"(?m)^(\s*)const\s+url\s*=\s*new\s+URL\([^;]+;", value[anchor:])
+              if not url_statement:
+                  raise SystemExit("request URL statement not found")
+              absolute_end = anchor + url_statement.end()
+              indent = url_statement.group(1)
+              addition = "\n" + indent + "if (await handleTelegramNicoProductionRequest({\n"
+              addition += indent + f"  request: {request_name},\n"
+              addition += indent + f"  response: {response_name},\n"
+              addition += indent + "  url,\n"
+              addition += indent + "  kernel,\n"
+              addition += indent + "  options,\n"
+              addition += indent + "})) return;"
+              value = value[:absolute_end] + addition + value[absolute_end:]
+          server.write_text(value)
+          PY
+
+      - name: Install exact dependency tree
+        run: npm ci
+
+      - name: Run focused trust-boundary suite
+        id: focused
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          node --import tsx --test \
+            tests/telegram-nico-delivery.test.ts \
+            tests/telegram-nico-delivery-workflow.test.ts \
+            tests/telegram-nico-http.test.ts \
+            tests/telegram-nico-production.test.ts \
+            tests/github-exact-target-verifier.test.ts \
+            tests/nico-automated-package-verifier.test.ts \
+            tests/gmail-oauth-activation.test.ts \
+            tests/gmail-verified-report-sender.test.ts 2>&1 | tee focused.log
+
+      - name: Run strict typecheck
+        id: typecheck
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee typecheck.log
+
+      - name: Run complete repository gate
+        id: verify
+        if: steps.focused.outcome == 'success' && steps.typecheck.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify 2>&1 | tee verify.log
+
+      - name: Upload exact logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr59-verification-logs-v3
+          path: |
+            focused.log
+            typecheck.log
+            verify.log
+          if-no-files-found: warn
+          retention-days: 2
+
+      - name: Enforce all gates
+        if: always()
+        run: |
+          test "${{ steps.focused.outcome }}" = "success"
+          test "${{ steps.typecheck.outcome }}" = "success"
+          test "${{ steps.verify.outcome }}" = "success"
+          ! grep -RIn --exclude-dir=node_modules --exclude='*.test.ts' 'beardedwarrior5161@gmail.com' src docs proof scripts
+          ! grep -RIn --exclude-dir=node_modules --exclude='*.test.ts' -E '(gmail|google).*(password|app password)' src docs proof scripts
+          git diff --check
+
+      - name: Push exact verified integration
+        run: |
+          git config user.name "Reparodynamics"
+          git config user.email "papadenico@yahoo.com"
+          git add src tests
+          if git diff --cached --quiet; then
+            echo "The PR branch already contains the exact verified integration."
+            exit 0
+          fi
+          git commit -m "Complete bounded Telegram NICO and Gmail integration"
+          git push origin HEAD:feature/telegram-nico-gmail-delivery
