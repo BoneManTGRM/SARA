@@ -125,4 +125,23 @@ describe("GPT-5.6 Luna Responses transport", () => {
       return true;
     });
   });
+
+  it("requests strict Structured Outputs for coding repair proposals", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const client = new OpenAIResponsesClient({
+      apiKey: "test-openai-key",
+      fetchImpl: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(JSON.stringify({ object: "response.input_tokens", input_tokens: 10 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+    await client.countInputTokens("OUTPUT CONTRACT: SARA_CODING_REPAIR_V1\n{}\n");
+    const text = bodies[0].text as { format: { name: string; strict: boolean; schema: Record<string, unknown> } };
+    assert.equal(text.format.name, "sara_coding_repair_v1");
+    assert.equal(text.format.strict, true);
+    assert.equal(text.format.schema.additionalProperties, false);
+  });
 });

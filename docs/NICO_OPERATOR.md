@@ -6,7 +6,7 @@ For the fixed $149 Public Repository Readiness Snapshot, the production revenue 
 
 ## Production configuration
 
-Set `SARA_NICO_BASE_URL=https://app.nicoaudit.com/api/nico/` and a long random `SARA_NICO_OPERATOR_PASSWORD` on the private SARA operator service. NICO holds only the password's SHA-256 verifier. It is SARA's scoped service password, not NICO's master admin password.
+Set `SARA_NICO_BASE_URL=https://app.nicoaudit.com/api/nico/` and a long random `SARA_NICO_OPERATOR_PASSWORD` on the private SARA operator service. Configure the same value as NICO's private `NICO_SARA_OPERATOR_PASSWORD`; NICO compares the bearer credential in constant time and no fast password hash is committed or accepted. It is SARA's scoped service password, not NICO's master admin password.
 
 SARA loads her service password from the deployment secret store and passes it as NICO's `X-NICO-Admin-Token` header. It is never written to SARA state, memory, audit events, logs, tool descriptors, URLs, or responses. An authenticated owner may supply a one-request override, but normal operation requires no password entry. Telegram and the read-only bridge cannot invoke these endpoints.
 

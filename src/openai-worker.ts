@@ -10,6 +10,7 @@ const SAFE_RESPONSE_STATUSES = new Set([
 ]);
 const SAFE_INCOMPLETE_REASONS = new Set(["content_filter", "max_output_tokens"]);
 const READINESS_DELIVERY_CONTRACT = "OUTPUT CONTRACT: Return only one JSON object without Markdown fences.";
+const CODING_REPAIR_CONTRACT = "OUTPUT CONTRACT: SARA_CODING_REPAIR_V1";
 
 const REPOSITORY_READINESS_JSON_SCHEMA = {
   type: "object",
@@ -84,13 +85,55 @@ const REPOSITORY_READINESS_JSON_SCHEMA = {
 type OpenAITextFormat = {
   format: {
     type: "json_schema";
-    name: "sara_repository_readiness_report_v2";
+    name: string;
     strict: true;
-    schema: typeof REPOSITORY_READINESS_JSON_SCHEMA;
+    schema: Record<string, unknown>;
   };
 };
 
+const CODING_REPAIR_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["schemaVersion", "baseArtifactDigest", "failureFingerprint", "strategy", "changes", "limitations"],
+  properties: {
+    schemaVersion: { type: "integer", const: 1 },
+    baseArtifactDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    failureFingerprint: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    strategy: { type: "string", enum: ["surgical", "deep"] },
+    changes: {
+      type: "array",
+      minItems: 1,
+      maxItems: 6,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["path", "expectedContentDigest", "replacementText"],
+        properties: {
+          path: { type: "string", minLength: 1, maxLength: 240 },
+          expectedContentDigest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+          replacementText: { type: "string", minLength: 1, maxLength: 16384 },
+        },
+      },
+    },
+    limitations: {
+      type: "array",
+      maxItems: 16,
+      items: { type: "string", minLength: 1, maxLength: 300 },
+    },
+  },
+} as const;
+
 function responseTextFormat(prompt: string): OpenAITextFormat | undefined {
+  if (prompt.includes(CODING_REPAIR_CONTRACT)) {
+    return {
+      format: {
+        type: "json_schema",
+        name: "sara_coding_repair_v1",
+        strict: true,
+        schema: CODING_REPAIR_JSON_SCHEMA,
+      },
+    };
+  }
   if (!prompt.includes(READINESS_DELIVERY_CONTRACT)) return undefined;
   return {
     format: {
