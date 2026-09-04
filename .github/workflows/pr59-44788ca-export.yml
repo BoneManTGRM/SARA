@@ -1,0 +1,29 @@
+name: PR59 exact source export
+
+on:
+  push:
+    branches:
+      - automation/export-pr59-44788ca
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Remove Git metadata
+        run: rm -rf .git
+      - name: Upload exact source
+        uses: actions/upload-artifact@v4
+        with:
+          name: sara-pr59-44788ca-source
+          path: .
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
