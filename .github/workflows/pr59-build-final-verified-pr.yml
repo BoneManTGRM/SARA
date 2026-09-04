@@ -1,0 +1,307 @@
+name: Build final verified Telegram NICO delivery PR
+
+on:
+  push:
+    branches:
+      - automation/pr59-production-wiring-final
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-final-telegram-nico-delivery
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Check out bounded orchestrator
+        uses: actions/checkout@v4
+        with:
+          path: orchestrator
+          persist-credentials: false
+
+      - name: Check out current feature tree
+        uses: actions/checkout@v4
+        with:
+          ref: feature/telegram-nico-gmail-delivery
+          fetch-depth: 0
+          path: work
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Require the source branch to settle before repair
+        working-directory: work
+        run: |
+          set -euo pipefail
+          remote_ref=refs/remotes/origin/feature/telegram-nico-gmail-delivery
+          for attempt in $(seq 1 8); do
+            git fetch origin feature/telegram-nico-gmail-delivery
+            first="$(git rev-parse "$remote_ref")"
+            sleep 15
+            git fetch origin feature/telegram-nico-gmail-delivery
+            second="$(git rev-parse "$remote_ref")"
+            if [ "$first" = "$second" ]; then
+              git reset --hard "$second"
+              echo "SOURCE_HEAD=$second" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          exit 1
+
+      - name: Install locked dependencies
+        working-directory: work
+        run: npm ci
+
+      - name: Apply only verified known repairs
+        run: |
+          node orchestrator/.github/scripts/pr59_repair_known.mjs work
+          node orchestrator/.github/scripts/pr59_repair_restart.mjs work
+          node orchestrator/.github/scripts/pr59_repair_http.mjs work
+
+      - name: Verify feature behavior before production wiring
+        working-directory: work
+        run: |
+          npm run verify
+          git diff --check
+
+      - name: Patch the transport adapter generator to use a safe request proxy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('orchestrator/.github/scripts/pr59_wire_server.mjs')
+          source = path.read_text(encoding='utf-8')
+          old = '''  return Object.assign(web, {\\n    raw: request,\\n    rawBody: bytes,\\n    body: parsed,\\n    url: url.pathname + url.search,\\n    path: url.pathname,\\n  }) as Request & Record<string, unknown>;\\n'''
+          new = '''  const extras: Record<string, unknown> = {\\n    raw: request,\\n    rawBody: bytes,\\n    body: parsed,\\n    parsedBody: parsed,\\n    url: url.pathname + url.search,\\n    path: url.pathname,\\n  };\\n  return new Proxy(web, {\\n    get(target, property) {\\n      if (typeof property === "string" && Object.prototype.hasOwnProperty.call(extras, property)) return extras[property];\\n      const value = Reflect.get(target, property, target);\\n      return typeof value === "function" ? value.bind(target) : value;\\n    },\\n  }) as Request & Record<string, unknown>;\\n'''
+          if old not in source:
+              raise SystemExit('safe request-adapter patch target was not found')
+          path.write_text(source.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Bind the separate production action route and prove it is mounted
+        run: node --import tsx orchestrator/.github/scripts/pr59_wire_server.mjs work
+
+      - name: Add exact-head CI, CodeQL, and merge gate to the final branch
+        run: |
+          mkdir -p work/.github/workflows
+          cat > work/.github/workflows/telegram-nico-final-exact-gate.yml <<'YAML'
+          name: Telegram NICO final exact gate
+
+          on:
+            push:
+              branches:
+                - feature/telegram-nico-gmail-delivery-final
+
+          permissions:
+            contents: write
+            pull-requests: write
+            checks: read
+            actions: read
+            security-events: write
+
+          concurrency:
+            group: telegram-nico-final-exact-gate-${{ github.ref }}
+            cancel-in-progress: true
+
+          jobs:
+            verify:
+              runs-on: ubuntu-latest
+              timeout-minutes: 25
+              steps:
+                - uses: actions/checkout@v4
+                  with:
+                    persist-credentials: false
+                - run: npm ci
+                - name: Complete repository verification
+                  run: |
+                    npm run verify
+                    git diff --check
+                    test -z "$(git status --porcelain)"
+                - name: Fail on committed credential material
+                  run: |
+                    if git grep -nEI '(ya29\.|GOCSPX-|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- ':!package-lock.json'; then
+                      exit 1
+                    fi
+
+            codeql:
+              runs-on: ubuntu-latest
+              timeout-minutes: 30
+              steps:
+                - uses: actions/checkout@v4
+                  with:
+                    persist-credentials: false
+                - uses: github/codeql-action/init@v3
+                  with:
+                    languages: javascript-typescript
+                - run: npm ci
+                - uses: github/codeql-action/analyze@v3
+                  with:
+                    category: /language:javascript-typescript/telegram-nico-final
+
+            merge:
+              needs: [verify, codeql]
+              runs-on: ubuntu-latest
+              timeout-minutes: 35
+              steps:
+                - name: Require every exact-head check and merge the matching PR only
+                  env:
+                    GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                    REPOSITORY: ${{ github.repository }}
+                    EXACT_HEAD: ${{ github.sha }}
+                    HEAD_BRANCH: feature/telegram-nico-gmail-delivery-final
+                  run: |
+                    set -euo pipefail
+                    api="https://api.github.com/repos/$REPOSITORY"
+                    auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+                    pr=""
+                    for attempt in $(seq 1 60); do
+                      pulls="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls?state=open&head=${REPOSITORY%%/*}:$HEAD_BRANCH&per_page=20")"
+                      count="$(jq 'length' <<<"$pulls")"
+                      if [ "$count" = "1" ]; then
+                        pr="$(jq '.[0]' <<<"$pulls")"
+                        break
+                      fi
+                      sleep 10
+                    done
+                    test -n "$pr"
+                    number="$(jq -r '.number' <<<"$pr")"
+                    test "$(jq -r '.head.sha' <<<"$pr")" = "$EXACT_HEAD"
+
+                    for attempt in $(seq 1 120); do
+                      pr="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls/$number")"
+                      test "$(jq -r '.head.sha' <<<"$pr")" = "$EXACT_HEAD"
+                      checks="$(curl --fail --silent --show-error "${auth[@]}" "$api/commits/$EXACT_HEAD/check-runs?per_page=100")"
+                      incomplete="$(jq '[.check_runs[] | select(.status != "completed")] | length' <<<"$checks")"
+                      failures="$(jq '[.check_runs[] | select(.status == "completed" and (.conclusion | IN("failure", "cancelled", "timed_out", "action_required", "stale")))] | length' <<<"$checks")"
+                      standard_test="$(jq -r '[.check_runs[] | select(.name == "test")][-1].conclusion // "missing"' <<<"$checks")"
+                      standard_codeql="$(jq -r '[.check_runs[] | select(.name == "CodeQL")][-1].conclusion // "missing"' <<<"$checks")"
+                      standard_analyze="$(jq -r '[.check_runs[] | select(.name == "Analyze (javascript-typescript)")][-1].conclusion // "missing"' <<<"$checks")"
+                      own_verify="$(jq -r '[.check_runs[] | select(.name == "verify")][-1].conclusion // "missing"' <<<"$checks")"
+                      own_codeql="$(jq -r '[.check_runs[] | select(.name == "codeql")][-1].conclusion // "missing"' <<<"$checks")"
+                      if [ "$incomplete" = "0" ] && [ "$failures" = "0" ] \
+                        && [ "$standard_test" = "success" ] \
+                        && [ "$standard_codeql" = "success" ] \
+                        && [ "$standard_analyze" = "success" ] \
+                        && [ "$own_verify" = "success" ] \
+                        && [ "$own_codeql" = "success" ]; then
+                        break
+                      fi
+                      sleep 15
+                    done
+                    test "$incomplete" = "0"
+                    test "$failures" = "0"
+                    test "$standard_test" = "success"
+                    test "$standard_codeql" = "success"
+                    test "$standard_analyze" = "success"
+                    test "$own_verify" = "success"
+                    test "$own_codeql" = "success"
+
+                    if [ "$(jq -r '.draft' <<<"$pr")" = "true" ]; then
+                      gh pr ready "$number" --repo "$REPOSITORY"
+                    fi
+                    mergeable="null"
+                    for attempt in $(seq 1 24); do
+                      current="$(curl --fail --silent --show-error "${auth[@]}" "$api/pulls/$number")"
+                      test "$(jq -r '.head.sha' <<<"$current")" = "$EXACT_HEAD"
+                      mergeable="$(jq -r '.mergeable' <<<"$current")"
+                      [ "$mergeable" = "true" ] && break
+                      sleep 5
+                    done
+                    test "$mergeable" = "true"
+                    result="$(curl --fail --silent --show-error -X PUT "${auth[@]}" "$api/pulls/$number/merge" -d "$(jq -nc --arg sha "$EXACT_HEAD" '{sha:$sha,merge_method:"squash"}')")"
+                    test "$(jq -r '.merged' <<<"$result")" = "true"
+                    jq -n \
+                      --arg schema "sara.telegram_nico.final_release.v1" \
+                      --arg pr_number "$number" \
+                      --arg pr_url "$(jq -r '.html_url' <<<"$pr")" \
+                      --arg head_sha "$EXACT_HEAD" \
+                      --arg merged_sha "$(jq -r '.sha' <<<"$result")" \
+                      --arg merged_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                      '{schema:$schema,pull_request:($pr_number|tonumber),pull_request_url:$pr_url,head_sha:$head_sha,merged_commit_sha:$merged_sha,merged_at:$merged_at,ci:"success",codeql:"success"}' > release-evidence.json
+                - uses: actions/upload-artifact@v4
+                  with:
+                    name: telegram-nico-final-release-evidence
+                    path: release-evidence.json
+                    if-no-files-found: error
+                    retention-days: 30
+          YAML
+
+      - name: Write non-secret final-branch readiness evidence
+        working-directory: work
+        run: |
+          python - <<'PY'
+          import hashlib, json, subprocess
+          from pathlib import Path
+          tracked = [
+              'src/github-exact-target-verifier.ts',
+              'src/gmail-oauth-activation.ts',
+              'src/gmail-verified-report-sender.ts',
+              'src/nico-automated-package-verifier.ts',
+              'src/telegram-nico-delivery.ts',
+              'src/telegram-nico-http.ts',
+              'src/telegram-nico-production.ts',
+              'src/telegram-nico-server-binding.ts',
+              'src/server.ts',
+              'tests/telegram-nico-server-wiring.test.ts',
+          ]
+          digest = hashlib.sha256()
+          for name in tracked:
+              path = Path(name)
+              if not path.exists():
+                  raise SystemExit(f'missing required final file: {name}')
+              digest.update(name.encode())
+              digest.update(b'\0')
+              digest.update(path.read_bytes())
+              digest.update(b'\0')
+          payload = {
+              'schema': 'sara.telegram_nico.final_branch_ready.v1',
+              'source_feature_head': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
+              'implementation_digest_sha256': digest.hexdigest(),
+              'ordinary_luna_analysis_only': True,
+              'production_action_route': '/telegram/nico/action',
+              'gmail_sender': 'sara.reparodynamics@gmail.com',
+              'gmail_recipient': 'reparodynamics@gmail.com',
+              'gmail_oauth_identity_verification_required_before_send': True,
+              'private_p_map_test_not_run': True,
+          }
+          Path('docs/TELEGRAM_NICO_FINAL_BRANCH_READY.json').write_text(json.dumps(payload, indent=2) + '\n')
+          PY
+
+      - name: Run complete verification on the exact final tree
+        working-directory: work
+        run: |
+          npm run verify
+          node --import tsx --test tests/telegram-nico-server-wiring.test.ts
+          git diff --check
+          if git grep -nEI '(ya29\.|GOCSPX-|-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----|ghp_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- ':!package-lock.json'; then
+            exit 1
+          fi
+
+      - name: Commit and publish the exact final candidate
+        working-directory: work
+        env:
+          FINAL_BRANCH: feature/telegram-nico-gmail-delivery-final
+        run: |
+          set -euo pipefail
+          git fetch origin "$FINAL_BRANCH"
+          expected="$(git rev-parse "refs/remotes/origin/$FINAL_BRANCH")"
+          git config user.name "Reparodynamics Release Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -B "$FINAL_BRANCH"
+          git add \
+            .github/workflows/telegram-nico-final-exact-gate.yml \
+            docs/TELEGRAM_NICO_PRODUCTION_WIRING.json \
+            docs/TELEGRAM_NICO_FINAL_BRANCH_READY.json \
+            src/server.ts \
+            src/telegram-nico-server-binding.ts \
+            src/github-exact-target-verifier.ts \
+            src/telegram-nico-delivery.ts \
+            src/telegram-nico-http.ts \
+            src/telegram-nico-production.ts \
+            tests/nico-automated-package-verifier.test.ts \
+            tests/gmail-verified-report-sender.test.ts \
+            tests/telegram-nico-server-wiring.test.ts
+          git diff --cached --check
+          git commit -m "fix: complete production Telegram NICO delivery boundary"
+          git push origin HEAD:"$FINAL_BRANCH" --force-with-lease="refs/heads/$FINAL_BRANCH:$expected"
