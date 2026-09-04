@@ -104,9 +104,18 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.match(home.headers.get("content-security-policy") ?? "", /frame-ancestors 'none'/);
     const health = await fetch(`${baseUrl}/health`);
     assert.equal(health.status, 200);
-    const publicHealth = await health.json() as { constitutionVerified: boolean; workerConfigured: boolean };
+    const publicHealth = await health.json() as {
+      constitutionVerified: boolean;
+      workerConfigured: boolean;
+      commerceConfigured: boolean;
+      nicoConfigured: boolean;
+      autonomousPaidFulfillment: boolean;
+    };
     assert.equal(publicHealth.constitutionVerified, true);
     assert.equal(publicHealth.workerConfigured, true);
+    assert.equal(publicHealth.commerceConfigured, false);
+    assert.equal(publicHealth.nicoConfigured, false);
+    assert.equal(publicHealth.autonomousPaidFulfillment, false);
     assert.equal((await fetch(`${baseUrl}/api/status`)).status, 401);
     const ownerStatus = await fetch(`${baseUrl}/api/status`, { headers: { Authorization: `Bearer ${token}` } });
     assert.equal(ownerStatus.status, 200);
@@ -300,6 +309,12 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.equal(mandate.maximumCostPerActionUsd, 3);
     assert.ok(mandate.allowedActions.includes("fixed_service_fulfillment"));
     assert.ok(mandate.allowedActions.includes("verified_report_delivery"));
+    const autonomousHealth = await fetch(`${baseUrl}/health`);
+    assert.equal(autonomousHealth.status, 200);
+    assert.equal(
+      (await autonomousHealth.json() as { autonomousPaidFulfillment: boolean }).autonomousPaidFulfillment,
+      true,
+    );
     const candidate = await fetch(`${baseUrl}/api/bridge/actions/business-candidates`, {
       method: "POST",
       headers: bridgeHeaders,
