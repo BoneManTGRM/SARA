@@ -11,7 +11,18 @@ export type CodingRepairGovernanceSignal = {
   energyHeadroom: number;
   driftScore: number;
   verifiedGain: number;
+  tacticFamilyDigest: string;
+  noGain: boolean;
   governanceAction: "advance" | "hold" | "conserve" | "retreat";
+};
+
+export type CodingRepairGovernanceTrend = {
+  schemaVersion: 1;
+  observedCycles: number;
+  semanticRepeatStreak: number;
+  noGainStreak: number;
+  action: "advance" | "hold" | "conserve" | "rethink" | "retreat";
+  allowSameTacticFamily: boolean;
 };
 
 function rounded(value: number): number {
@@ -21,6 +32,14 @@ function rounded(value: number): number {
 
 function boundedRatio(value: number): number {
   return rounded(Math.max(0, Math.min(1, value)));
+}
+
+function tacticFamilyDigest(lesson: CodingRepairAttemptLesson): string {
+  const signals = [...new Set((lesson.sourceChanges ?? []).flatMap((change) => [
+    ...change.addedSignals,
+    ...change.removedSignals.map((signal) => `removed:${signal}`),
+  ]))].sort().slice(0, 32);
+  return sha256(canonicalJson(signals));
 }
 
 export function buildCodingRepairGovernanceSignal(input: {
@@ -42,12 +61,11 @@ export function buildCodingRepairGovernanceSignal(input: {
   const blastRadiusRatio = Math.max(fileBudgetRatio, lineBudgetRatio);
   const energyHeadroom = boundedRatio(1 - blastRadiusRatio);
 
-  // Adapt the report's Drift Score concept to SARA's existing deterministic verifier.
-  // Only negative verified movement contributes: score regression and previously-passing checks lost.
   const scoreRegression = Math.max(0, -input.lesson.scoreDelta);
   const checkRegression = Math.min(1, input.lesson.lostChecks.length / 5);
   const driftScore = boundedRatio(scoreRegression + checkRegression);
   const verifiedGain = boundedRatio(Math.max(0, input.lesson.scoreDelta));
+  const noGain = verifiedGain === 0 && input.lesson.newlyReachedChecks.length === 0;
 
   let governanceAction: CodingRepairGovernanceSignal["governanceAction"] = "hold";
   if (driftScore > 0 || blastRadiusRatio >= 1) {
@@ -72,6 +90,8 @@ export function buildCodingRepairGovernanceSignal(input: {
     energyHeadroom,
     driftScore,
     verifiedGain,
+    tacticFamilyDigest: tacticFamilyDigest(input.lesson),
+    noGain,
     governanceAction,
   };
 }
@@ -90,6 +110,56 @@ export function buildCodingRepairGovernanceSignals(input: {
     lesson,
     limits: input.limits,
   }));
+}
+
+export function summarizeCodingRepairGovernanceTrend(
+  signals: readonly CodingRepairGovernanceSignal[],
+): CodingRepairGovernanceTrend {
+  const bounded = signals.slice(-2);
+  if (!bounded.length) {
+    return {
+      schemaVersion: 1,
+      observedCycles: 0,
+      semanticRepeatStreak: 0,
+      noGainStreak: 0,
+      action: "hold",
+      allowSameTacticFamily: true,
+    };
+  }
+
+  let noGainStreak = 0;
+  for (let index = bounded.length - 1; index >= 0; index -= 1) {
+    if (!bounded[index].noGain) break;
+    noGainStreak += 1;
+  }
+
+  let semanticRepeatStreak = 1;
+  const latestDigest = bounded[bounded.length - 1].tacticFamilyDigest;
+  for (let index = bounded.length - 2; index >= 0; index -= 1) {
+    if (bounded[index].tacticFamilyDigest !== latestDigest) break;
+    semanticRepeatStreak += 1;
+  }
+
+  const latest = bounded[bounded.length - 1];
+  let action: CodingRepairGovernanceTrend["action"] = latest.governanceAction;
+  if (latest.governanceAction === "retreat") {
+    action = "retreat";
+  } else if (latest.verifiedGain > 0 || latest.governanceAction === "advance") {
+    action = "advance";
+  } else if (noGainStreak >= 2 && semanticRepeatStreak >= 2) {
+    action = "rethink";
+  } else if (noGainStreak >= 2 || latest.governanceAction === "conserve") {
+    action = "conserve";
+  }
+
+  return {
+    schemaVersion: 1,
+    observedCycles: bounded.length,
+    semanticRepeatStreak,
+    noGainStreak,
+    action,
+    allowSameTacticFamily: action !== "rethink" && action !== "retreat",
+  };
 }
 
 export function digestCodingRepairGovernanceSignals(
