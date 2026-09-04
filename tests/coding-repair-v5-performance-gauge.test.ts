@@ -7,6 +7,7 @@ import type { ProgramCandidateProposal } from "../src/types.ts";
 
 const digest = (value: string) => sha256(value);
 const privateBehaviorOutput = "PRIVATE_HIDDEN_BEHAVIOR_OUTPUT";
+const behavioralSuiteDigest = digest("aggregate-behavior-suite");
 const behavioralEvidenceDigest = digest("aggregate-behavior:1-of-4");
 
 const baseline: ProgramCandidateProposal = {
@@ -42,6 +43,7 @@ function verification(candidate: ProgramCandidateProposal): ProgramVerificationR
       schemaVersion: 1,
       passed: 1,
       total: 4,
+      suiteDigest: behavioralSuiteDigest,
       evidenceDigest: behavioralEvidenceDigest,
       disclosure: "aggregate_only",
     },
@@ -64,8 +66,8 @@ type PerformanceGaugeView = {
   behavioralProgress: {
     disclosure: "aggregate_only";
     comparable: boolean;
-    baseline: { passed: number; total: number; evidenceDigest: string };
-    final: { passed: number; total: number; evidenceDigest: string };
+    baseline: { passed: number; total: number; suiteDigest: string; evidenceDigest: string };
+    final: { passed: number; total: number; suiteDigest: string; evidenceDigest: string };
     passedDelta: number | null;
     completionRatioDelta: number | null;
   } | null;
@@ -144,6 +146,7 @@ describe("V5 bounded performance gauge", () => {
     assert.deepEqual(gauge.behavioralProgress.baseline, {
       passed: 1,
       total: 4,
+      suiteDigest: behavioralSuiteDigest,
       evidenceDigest: behavioralEvidenceDigest,
     });
     assert.deepEqual(gauge.behavioralProgress.final, gauge.behavioralProgress.baseline);
@@ -175,6 +178,7 @@ describe("V5 bounded performance gauge", () => {
             schemaVersion: 1,
             passed: Number.MAX_SAFE_INTEGER + 1,
             total: Number.MAX_SAFE_INTEGER + 1,
+            suiteDigest: behavioralSuiteDigest,
             evidenceDigest: digest("unsafe-counter-evidence"),
             disclosure: "aggregate_only",
           },
@@ -197,5 +201,95 @@ describe("V5 bounded performance gauge", () => {
     assert.equal(run.performanceGauge.modelCalls, 0);
     assert.equal(run.performanceGauge.accountedCostUsd, 0);
     assert.equal(JSON.stringify(run).includes(privateUnsafeOutput), false);
+  });
+
+  it("refuses aggregate deltas when the behavioral suite identity changes", async () => {
+    const firstSuiteDigest = digest("behavior-suite-a");
+    const secondSuiteDigest = digest("behavior-suite-b");
+    const firstEvidenceDigest = digest("behavior-suite-a:1-of-4");
+    const secondEvidenceDigest = digest("behavior-suite-b:4-of-4");
+    let verifierCalls = 0;
+    const run = await runCodingRepairController({
+      baseline,
+      verify: async (candidate) => {
+        verifierCalls += 1;
+        if (verifierCalls === 1) {
+          return {
+            passed: false,
+            score: 0.8,
+            artifactDigest: digest(JSON.stringify(candidate.files)),
+            failures: [failure],
+            completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
+            evidenceDigests: [firstEvidenceDigest],
+            behavioralChecks: {
+              schemaVersion: 1,
+              passed: 1,
+              total: 4,
+              suiteDigest: firstSuiteDigest,
+              evidenceDigest: firstEvidenceDigest,
+              disclosure: "aggregate_only",
+            },
+          } as ProgramVerificationResult;
+        }
+        return {
+          passed: true,
+          score: 1,
+          artifactDigest: digest(JSON.stringify(candidate.files)),
+          failures: [],
+          completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
+          evidenceDigests: [secondEvidenceDigest],
+          behavioralChecks: {
+            schemaVersion: 1,
+            passed: 4,
+            total: 4,
+            suiteDigest: secondSuiteDigest,
+            evidenceDigest: secondEvidenceDigest,
+            disclosure: "aggregate_only",
+          },
+        } as ProgramVerificationResult;
+      },
+      model: {
+        async propose(request) {
+          return {
+            proposal: {
+              schemaVersion: 1,
+              baseArtifactDigest: request.verification.artifactDigest,
+              failureFingerprint: request.verification.failures[0].fingerprint,
+              strategy: request.strategy,
+              changes: [{
+                path: "src/value.ts",
+                expectedContentDigest: digest(request.candidate.files[0].content),
+                replacementText: "export const value = 2;\n",
+              }],
+              limitations: [],
+            },
+            inputTokens: 10,
+            outputTokens: 10,
+            accountedCostUsd: 0.01,
+          };
+        },
+      },
+    });
+
+    assert.equal(run.state, "VERIFIED_CANDIDATE");
+    assert.equal(verifierCalls, 2);
+    assert.deepEqual(run.performanceGauge.behavioralProgress, {
+      disclosure: "aggregate_only",
+      comparable: false,
+      baseline: {
+        passed: 1,
+        total: 4,
+        suiteDigest: firstSuiteDigest,
+        evidenceDigest: firstEvidenceDigest,
+      },
+      final: {
+        passed: 4,
+        total: 4,
+        suiteDigest: secondSuiteDigest,
+        evidenceDigest: secondEvidenceDigest,
+      },
+      passedDelta: null,
+      completionRatioDelta: null,
+    });
   });
 });
