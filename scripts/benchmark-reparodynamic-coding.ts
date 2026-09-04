@@ -1,5 +1,6 @@
 import * as ts from "typescript";
 import { canonicalJson, sha256 } from "../src/canonical.ts";
+import { bindCodingRepairBenchmarkAuthority } from "../src/coding-repair-evidence.ts";
 import { runMatchedCodingRepairBenchmark } from "../src/coding-repair-matched-benchmark.ts";
 import { INITIAL_CODING_REPAIR_LIMITS } from "../src/coding-repair-policy.ts";
 import { loadConstitution } from "../src/constitution.ts";
@@ -78,7 +79,7 @@ const context = {
   constitutionDigest,
   memoryContext,
 };
-const result = await runMatchedCodingRepairBenchmark({
+const benchmarkResult = await runMatchedCodingRepairBenchmark({
   caseId: "allocate-cents-staged-v1",
   sourceCommit,
   modelRouteKey: client.routeKey,
@@ -103,5 +104,6 @@ const result = await runMatchedCodingRepairBenchmark({
   model: createLunaCodingRepairModel({ client, context }),
   limits: INITIAL_CODING_REPAIR_LIMITS,
 });
+const result = bindCodingRepairBenchmarkAuthority(benchmarkResult);
 console.log(JSON.stringify(result, null, 2));
 if (!result.valid) process.exitCode = 1;
