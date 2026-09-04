@@ -9,6 +9,7 @@ import { PILOT_REQUIRED_CAPABILITIES } from "./revenue-pilot.ts";
 import { createSaraServer } from "./server.ts";
 import { compileCommercialTerms, compilePreviousCommercialTermsDigest } from "./commercial-terms.ts";
 import { NicoOperatorClient } from "./nico-operator.ts";
+import { activateApprovedAutonomousPaidMandate } from "./autonomous-paid-mandate-bootstrap.ts";
 
 const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? ".sara-state");
 const host = process.env.SARA_HOST ?? "127.0.0.1";
@@ -30,6 +31,8 @@ const publicBaseUrl = process.env.SARA_PUBLIC_BASE_URL?.trim()
   ?? (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : undefined);
 const nicoBaseUrl = process.env.SARA_NICO_BASE_URL?.trim();
 const nicoOperatorPassword = process.env.SARA_NICO_OPERATOR_PASSWORD?.trim();
+const ownerToken = process.env.SARA_OWNER_TOKEN?.trim();
+const approvedAutonomousPaidMandateDigest = process.env.SARA_AUTONOMOUS_PAID_MANDATE_APPROVED_SHA256?.trim();
 if (!ownerTokenSha256 || !/^[a-f0-9]{64}$/i.test(ownerTokenSha256)) {
   throw new Error("Set SARA_OWNER_TOKEN_SHA256 to a SHA-256 digest before starting the owner dashboard.");
 }
@@ -96,6 +99,11 @@ const kernel = await SaraKernel.boot({
   stateDirectory,
   ownerTokenSha256,
   bootstrapRevenueCapabilities: true,
+});
+await activateApprovedAutonomousPaidMandate({
+  kernel,
+  ...(ownerToken ? { ownerToken } : {}),
+  ...(approvedAutonomousPaidMandateDigest ? { approvedDigest: approvedAutonomousPaidMandateDigest } : {}),
 });
 const bootStatus = await kernel.getStatus();
 const capabilityReadiness = PILOT_REQUIRED_CAPABILITIES.map((id) => ({
