@@ -8,6 +8,12 @@ import {
 } from "./coding-repair-lessons.ts";
 import { chooseCodingRepairStrategy, INITIAL_CODING_REPAIR_LIMITS, repairYieldPerEnergy } from "./coding-repair-policy.ts";
 import { validateCodingRepairProposal } from "./coding-repair-prompt.ts";
+import { summarizeCodingRepairSourceChanges } from "./coding-repair-source-signals.ts";
+import {
+  assessCodingRepairTacticNovelty,
+  buildCodingRepairGovernanceSignals,
+  summarizeCodingRepairGovernanceTrend,
+} from "./coding-repair-tgrm-governance.ts";
 import type {
   CodingRepairAttemptLesson,
   CodingRepairLimits,
@@ -229,14 +235,14 @@ export async function runCodingRepairController(input: {
       };
       receipts.push(receipt);
       attemptLessons = appendAttemptLesson(attemptLessons, buildCodingRepairAttemptLesson({
-          cycle,
-          requestedStrategy: modelStrategy,
-          proposalDigest,
-          championArtifactDigest: verification.artifactDigest,
-          proposedArtifactDigest: null,
-          changedPaths: response.proposal.changes.map((change) => change.path),
-          changedFiles: response.proposal.changes.length,
-          changedLines: applied.changedLines,
+        cycle,
+        requestedStrategy: modelStrategy,
+        proposalDigest,
+        championArtifactDigest: verification.artifactDigest,
+        proposedArtifactDigest: null,
+        changedPaths: response.proposal.changes.map((change) => change.path),
+        changedFiles: response.proposal.changes.length,
+        changedLines: applied.changedLines,
         before: verification,
         after: verification,
         beforeCandidate: champion,
@@ -249,6 +255,58 @@ export async function runCodingRepairController(input: {
       continue;
     }
     attemptedProposalKeys.add(proposalKey);
+
+    const governanceTrend = summarizeCodingRepairGovernanceTrend(
+      buildCodingRepairGovernanceSignals({ lessons: attemptLessons, limits }),
+    );
+    const proposedSourceChanges = summarizeCodingRepairSourceChanges({
+      before: champion,
+      after: applied.candidate,
+      changedPaths: response.proposal.changes.map((change) => change.path),
+    });
+    const novelty = assessCodingRepairTacticNovelty({
+      trend: governanceTrend,
+      sourceChanges: proposedSourceChanges,
+    });
+    if (!novelty.allowed) {
+      const receipt: CodingRepairReceipt = {
+        cycle,
+        beforeArtifactDigest: verification.artifactDigest,
+        failureFingerprint: target.fingerprint,
+        proposalDigest,
+        afterArtifactDigest: null,
+        strategy: decision.strategy,
+        changedFiles: response.proposal.changes.length,
+        changedLines: applied.changedLines,
+        verifierEvidenceDigests: verification.evidenceDigests,
+        inputTokens: response.inputTokens,
+        outputTokens: response.outputTokens,
+        accountedCostUsd: response.accountedCostUsd,
+        rye: 0,
+        outcome: "duplicate_rejected",
+        reasonCode: "semantic_tactic_repeat",
+      };
+      receipts.push(receipt);
+      attemptLessons = appendAttemptLesson(attemptLessons, buildCodingRepairAttemptLesson({
+        cycle,
+        requestedStrategy: modelStrategy,
+        proposalDigest,
+        championArtifactDigest: verification.artifactDigest,
+        proposedArtifactDigest: null,
+        changedPaths: response.proposal.changes.map((change) => change.path),
+        changedFiles: response.proposal.changes.length,
+        changedLines: applied.changedLines,
+        before: verification,
+        after: verification,
+        beforeCandidate: champion,
+        afterCandidate: applied.candidate,
+        outcome: "duplicate_rejected",
+        reasonCode: receipt.reasonCode,
+        rye: 0,
+      }));
+      await input.onReceipt?.(structuredClone(receipt));
+      continue;
+    }
 
     const beforeVerification = verification;
     const started = performance.now();
@@ -289,14 +347,14 @@ export async function runCodingRepairController(input: {
     receipts.push(receipt);
     if (!nextVerification.passed) {
       attemptLessons = appendAttemptLesson(attemptLessons, buildCodingRepairAttemptLesson({
-          cycle,
-          requestedStrategy: modelStrategy,
-          proposalDigest,
-          championArtifactDigest: beforeVerification.artifactDigest,
-          proposedArtifactDigest: nextVerification.artifactDigest,
-          changedPaths: response.proposal.changes.map((change) => change.path),
-          changedFiles: response.proposal.changes.length,
-          changedLines: applied.changedLines,
+        cycle,
+        requestedStrategy: modelStrategy,
+        proposalDigest,
+        championArtifactDigest: beforeVerification.artifactDigest,
+        proposedArtifactDigest: nextVerification.artifactDigest,
+        changedPaths: response.proposal.changes.map((change) => change.path),
+        changedFiles: response.proposal.changes.length,
+        changedLines: applied.changedLines,
         before: beforeVerification,
         after: nextVerification,
         beforeCandidate: champion,
