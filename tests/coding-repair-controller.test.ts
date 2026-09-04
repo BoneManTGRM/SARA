@@ -14,8 +14,13 @@ const baseline: ProgramCandidateProposal = {
   ],
 };
 
-function result(candidate: ProgramCandidateProposal, score: number, failures: CodingFailureSignal[]): ProgramVerificationResult {
-  return { passed: score === 1 && failures.length === 0, score, artifactDigest: sha256(JSON.stringify(candidate.files)), failures, completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"], evidenceDigests: [sha256(String(score))] };
+function result(
+  candidate: ProgramCandidateProposal,
+  score: number,
+  failures: CodingFailureSignal[],
+  completedChecks: ProgramVerificationResult["completedChecks"] = ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
+): ProgramVerificationResult {
+  return { passed: score === 1 && failures.length === 0, score, artifactDigest: sha256(JSON.stringify(candidate.files)), failures, completedChecks, evidenceDigests: [sha256(`${score}:${failures.map((failure) => failure.fingerprint).join(":")}`)] };
 }
 
 const typeFailure: CodingFailureSignal = { kind: "type", code: "TS2322", file: "src/value.ts", line: 1, column: 1, evidenceDigest: "a".repeat(64), fingerprint: "b".repeat(64), severity: "medium", existedBeforeRepair: true };
@@ -43,5 +48,67 @@ describe("Reparodynamic coding controller", () => {
     assert.equal(run.state, "STOPPED");
     assert.equal(run.receipts[0].outcome, "rolled_back");
     assert.deepEqual(run.champion, baseline);
+  });
+
+  it("retains a type repair when it first exposes an independently checked behavior failure", async () => {
+    const stagedBaseline: ProgramCandidateProposal = {
+      ...baseline,
+      files: baseline.files.map((file) => file.path === "src/value.ts"
+        ? { ...file, content: "export const value: number = 'bad';\n" }
+        : file),
+    };
+    const behaviorFailure: CodingFailureSignal = {
+      kind: "behavior",
+      code: "GENOME_LAB_RUNTIME_FAILURE",
+      file: "",
+      line: 0,
+      column: 0,
+      evidenceDigest: "c".repeat(64),
+      fingerprint: "d".repeat(64),
+      severity: "high",
+      existedBeforeRepair: true,
+    };
+    let modelCalls = 0;
+    const run = await runCodingRepairController({
+      baseline: stagedBaseline,
+      verify: async (candidate) => {
+        const source = candidate.files.find((file) => file.path === "src/value.ts")?.content ?? "";
+        if (source.includes("'bad'")) {
+          return result(candidate, 0.6, [typeFailure], ["source_policy", "syntax", "typecheck"]);
+        }
+        if (!source.includes("42")) {
+          return result(candidate, 0.8, [behaviorFailure], ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"]);
+        }
+        return result(candidate, 1, []);
+      },
+      model: {
+        propose: async ({ candidate, verification, strategy }) => {
+          modelCalls += 1;
+          const current = candidate.files.find((file) => file.path === "src/value.ts")?.content ?? "";
+          return {
+            proposal: {
+              schemaVersion: 1,
+              baseArtifactDigest: verification.artifactDigest,
+              failureFingerprint: verification.failures[0].fingerprint,
+              strategy,
+              changes: [{
+                path: "src/value.ts",
+                expectedContentDigest: sha256(current),
+                replacementText: modelCalls === 1 ? "export const value: number = 1;\n" : "export const value: number = 42;\n",
+              }],
+              limitations: [],
+            },
+            inputTokens: 10,
+            outputTokens: 10,
+            accountedCostUsd: 0.01,
+          };
+        },
+      },
+    });
+
+    assert.equal(modelCalls, 2);
+    assert.equal(run.state, "VERIFIED_CANDIDATE");
+    assert.deepEqual(run.receipts.map((receipt) => receipt.outcome), ["accepted_improvement", "verified_complete"]);
+    assert(run.champion.files.find((file) => file.path === "src/value.ts")?.content.includes("42"));
   });
 });
