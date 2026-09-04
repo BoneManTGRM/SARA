@@ -1,3 +1,4 @@
+import { canonicalJson, sha256 } from "./canonical.ts";
 import { INITIAL_CODING_REPAIR_LIMITS } from "./coding-repair-policy.ts";
 
 export type CodingBenchmarkCommandConfig = {
@@ -11,6 +12,14 @@ export type CodingBenchmarkCommandConfig = {
   authorityDigest: string;
   sourceRevision: string;
   apiKey: string;
+};
+
+export type CodingBenchmarkAuthorityInput = {
+  benchmarkId: string;
+  sourceRevision: string;
+  maximumSpendUsd: number;
+  currentCanaryPercent: number;
+  caseCount: number;
 };
 
 const VALUE_ARGUMENTS = new Set([
@@ -41,6 +50,51 @@ function parseMoney(value: string | undefined): number {
     throw new Error("--max-spend-usd must be greater than 0 and no more than 10.00.");
   }
   return parsed;
+}
+
+export function codingBenchmarkAuthorityDigest(
+  input: CodingBenchmarkAuthorityInput,
+): string {
+  if (!UUID_V4.test(input.benchmarkId)) throw new Error("Benchmark authority id is malformed.");
+  if (!SOURCE_REVISION.test(input.sourceRevision)) {
+    throw new Error("Benchmark authority source revision is malformed.");
+  }
+  if (!Number.isFinite(input.maximumSpendUsd) || input.maximumSpendUsd <= 0 || input.maximumSpendUsd > 10) {
+    throw new Error("Benchmark authority maximum spend is malformed.");
+  }
+  if (
+    !Number.isInteger(input.currentCanaryPercent)
+    || input.currentCanaryPercent < 0
+    || input.currentCanaryPercent > 100
+  ) throw new Error("Benchmark authority canary percentage is malformed.");
+  if (!Number.isInteger(input.caseCount) || input.caseCount < 1 || input.caseCount > 100) {
+    throw new Error("Benchmark authority case count is malformed.");
+  }
+  return sha256(canonicalJson({
+    schemaVersion: 1,
+    action: "run_live_reparodynamic_coding_benchmark",
+    evidenceScope: "LAB_SYNTHETIC_ONLY",
+    benchmarkId: input.benchmarkId.toLowerCase(),
+    sourceRevision: input.sourceRevision.toLowerCase(),
+    maximumSpendUsd: input.maximumSpendUsd,
+    currentCanaryPercent: input.currentCanaryPercent,
+    caseCount: input.caseCount,
+    maximumModelSpendUsdPerArm: INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd,
+  }));
+}
+
+export function assertCodingBenchmarkSourceRevision(
+  expectedRevision: string,
+  actualRevision: string,
+): void {
+  const expected = expectedRevision.trim().toLowerCase();
+  const actual = actualRevision.trim().toLowerCase();
+  if (!SOURCE_REVISION.test(expected) || !SOURCE_REVISION.test(actual)) {
+    throw new Error("The coding benchmark source revision is malformed.");
+  }
+  if (expected !== actual) {
+    throw new Error("The bound source revision does not match the exact checked-out revision.");
+  }
 }
 
 export function parseCodingBenchmarkCommand(input: {
@@ -78,7 +132,7 @@ export function parseCodingBenchmarkCommand(input: {
   if (!flags.has("--acknowledge-lab-only")) {
     throw new Error("Live execution requires explicit LAB-only evidence acknowledgement.");
   }
-  const benchmarkId = values.get("--benchmark-id") ?? "";
+  const benchmarkId = values.get("--benchmark-id")?.toLowerCase() ?? "";
   if (!UUID_V4.test(benchmarkId)) {
     throw new Error("--benchmark-id is required and must be a UUID v4.");
   }
@@ -109,6 +163,13 @@ export function parseCodingBenchmarkCommand(input: {
   if (!stateDirectory.trim() || stateDirectory.length > 1_024 || stateDirectory.includes("\0")) {
     throw new Error("--state-directory is malformed.");
   }
+  const sourceRevision = input.env.SARA_CODING_BENCHMARK_SOURCE_REVISION
+    ?.trim().toLowerCase() ?? "";
+  if (!SOURCE_REVISION.test(sourceRevision)) {
+    throw new Error(
+      "SARA_CODING_BENCHMARK_SOURCE_REVISION is required as an immutable Git revision.",
+    );
+  }
   const authorityDigest = input.env.SARA_CODING_BENCHMARK_AUTHORITY_SHA256
     ?.trim().toLowerCase() ?? "";
   if (!HEX_DIGEST.test(authorityDigest)) {
@@ -116,11 +177,16 @@ export function parseCodingBenchmarkCommand(input: {
       "SARA_CODING_BENCHMARK_AUTHORITY_SHA256 is required as a target-bound SHA-256 digest.",
     );
   }
-  const sourceRevision = input.env.SARA_CODING_BENCHMARK_SOURCE_REVISION
-    ?.trim().toLowerCase() ?? "";
-  if (!SOURCE_REVISION.test(sourceRevision)) {
+  const expectedAuthorityDigest = codingBenchmarkAuthorityDigest({
+    benchmarkId,
+    sourceRevision,
+    maximumSpendUsd,
+    currentCanaryPercent,
+    caseCount,
+  });
+  if (authorityDigest !== expectedAuthorityDigest) {
     throw new Error(
-      "SARA_CODING_BENCHMARK_SOURCE_REVISION is required as an immutable Git revision.",
+      "SARA_CODING_BENCHMARK_AUTHORITY_SHA256 does not match the exact live benchmark target.",
     );
   }
   const apiKey = input.env.OPENAI_API_KEY?.trim() ?? "";
