@@ -41,7 +41,8 @@
     "executor:site": "node --import tsx scripts/site-directive-executor.ts",
     "executor:cloudflare": "node --import tsx scripts/cloudflare-objective-executor.ts",
     "typecheck": "tsc --noEmit",
-    "verify": "npm test && npm run typecheck && npm run demo && npm run proof:bootstrap && npm run proof:self-build && npm run proof:revenue-pilot && npm run proof:reparodynamic-coding && npm run proof:reparodynamic-learning-v3 && npm run proof:http"
+    "verify": "npm test && npm run typecheck && npm run demo && npm run proof:bootstrap && npm run proof:self-build && npm run proof:revenue-pilot && npm run proof:reparodynamic-coding && npm run proof:reparodynamic-learning-v3 && npm run proof:http && npm run proof:reparodynamic-efficiency-v6",
+    "proof:reparodynamic-efficiency-v6": "node --import tsx proof/reparodynamic-efficiency-v6.ts"
   },
   "engines": {
     "node": ">=22"

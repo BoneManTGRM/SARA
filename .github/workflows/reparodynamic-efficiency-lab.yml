@@ -25,6 +25,7 @@ jobs:
           set -euo pipefail
           npm run verify > /tmp/efficiency-verification.log 2>&1
           tail -n 35 /tmp/efficiency-verification.log
+          npm run proof:http > /tmp/efficiency-http-repeat.log 2>&1
       - name: Export reproducible source and installed toolchain
         if: always()
         shell: bash
@@ -35,6 +36,7 @@ jobs:
           git archive --format=tar.gz HEAD > /tmp/efficiency-artifact/source.tar.gz
           tar -czf /tmp/efficiency-artifact/node_modules.tar.gz node_modules
           cp /tmp/efficiency-verification.log /tmp/efficiency-artifact/verification.log
+          cp /tmp/efficiency-http-repeat.log /tmp/efficiency-artifact/http-repeat.log
           cd /tmp/efficiency-artifact
           sha256sum source.tar.gz node_modules.tar.gz verification.log > SHA256SUMS
       - uses: actions/upload-artifact@v4
@@ -44,3 +46,25 @@ jobs:
           path: /tmp/efficiency-artifact/
           retention-days: 14
           if-no-files-found: error
+  security:
+    name: Exact-head CodeQL
+    if: github.event.pull_request.head.ref == 'experiment/reparodynamic-efficiency-v6' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      actions: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /reparodynamic-efficiency-v6/javascript-typescript
