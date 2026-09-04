@@ -211,6 +211,7 @@ export type CodingRepairPerformanceGauge = {
   semanticRepeatRejections: number;
   verifierExecutionsAvoided: number;
   modelCalls: number;
+  accountedCostUsd: number;
   completionGain: number;
   scoreGain: number;
   behavioralProgress: CodingRepairBehavioralProgress | null;
