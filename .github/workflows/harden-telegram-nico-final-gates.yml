@@ -1,0 +1,449 @@
+name: Harden Telegram NICO final gates
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-20260904
+    paths:
+      - .github/workflows/harden-telegram-nico-final-gates.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: harden-telegram-nico-final-gates
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: BoneManTGRM/SARA
+    steps:
+      - name: Check out orchestration branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Select the open feature branch or a follow-up from main
+        id: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api repos/$REPOSITORY/pulls/59 > pr59.json
+          if [ "$(jq -r .merged pr59.json)" = false ] && [ "$(jq -r .state pr59.json)" = open ]; then
+            branch="$(jq -r .head.ref pr59.json)"
+            mode=existing_pr
+            pr=59
+            git fetch origin "$branch"
+            git checkout -B "$branch" "origin/$branch"
+          else
+            branch=fix/telegram-nico-final-safety
+            mode=follow_up
+            pr=none
+            git fetch origin main
+            git checkout -B "$branch" origin/main
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+
+      - name: Require the bounded implementation tree
+        run: |
+          set -euo pipefail
+          for path in \
+            src/telegram-nico-delivery.ts \
+            src/gmail-verified-report-sender.ts \
+            src/telegram-nico-production.ts \
+            src/server.ts; do
+            test -f "$path"
+          done
+
+      - name: Recheck authority per external step and preserve explicit cost evidence
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("src/telegram-nico-delivery.ts")
+          text = path.read_text()
+
+          text = text.replace(
+              '  reportDigest?: string;\n  delivery?: GmailDeliveryReceipt;',
+              '  reportDigest?: string;\n  assessmentCostUsd?: number;\n  modelCostUsd?: 0;\n  totalCostUsd?: number;\n  delivery?: GmailDeliveryReceipt;'
+          )
+          text = text.replace('  costUsd: number;\n};\n\ntype WorkflowState', '  costUsd?: number;\n};\n\ntype WorkflowState')
+          text = text.replace('  costUsd: number;\n  updatedAt: string;\n};\n\ntype CommandState', '  costUsd?: number;\n  updatedAt: string;\n};\n\ntype CommandState')
+
+          old_cost = '''  const costUsd = optionalNumber(value, ["cost_usd", "costUsd", "total_cost_usd", "totalCostUsd", "accounted_cost_usd", "accountedCostUsd"]) ?? 0;
+  if (costUsd > costLimitUsd) throw new Error("The NICO assessment exceeded the bounded assessment cost limit.");'''
+          new_cost = '''  const costUsd = optionalNumber(value, ["cost_usd", "costUsd", "total_cost_usd", "totalCostUsd", "accounted_cost_usd", "accountedCostUsd"]);
+  if (costUsd !== undefined && costUsd > costLimitUsd) throw new Error("The NICO assessment exceeded the bounded assessment cost limit.");'''
+          if old_cost in text:
+              text = text.replace(old_cost, new_cost)
+
+          text = text.replace('      costUsd: 0,\n      updatedAt:', '      updatedAt:')
+          text = text.replace('      costUsd: run.costUsd,', '      costUsd: run.costUsd ?? workflow.costUsd,')
+          text = text.replace('      costUsd: Math.max(workflow.costUsd, run.costUsd),', '      costUsd: run.costUsd === undefined ? workflow.costUsd : Math.max(workflow.costUsd ?? 0, run.costUsd),')
+
+          receipt_old = '''    reportContentType: workflow.verifiedPackage?.contentType,
+    reportDigest: workflow.verifiedPackage?.reportDigest,
+    delivery: workflow.delivery,'''
+          receipt_new = '''    reportContentType: workflow.verifiedPackage?.contentType,
+    reportDigest: workflow.verifiedPackage?.reportDigest,
+    assessmentCostUsd: workflow.costUsd,
+    modelCostUsd: 0,
+    totalCostUsd: workflow.costUsd,
+    delivery: workflow.delivery,'''
+          if receipt_old in text:
+              text = text.replace(receipt_old, receipt_new)
+
+          daily_old = '''    } else {
+      await atomicJson(commandPath, {
+        version: 1,
+        inputDigest: digest,
+        action: input.action,
+        assessmentRequestId,
+        status: "accepted",
+        updatedAt: this.#now().toISOString(),
+      } satisfies CommandState);
+      await this.#consumeDailyAction(input.requestId);
+    }'''
+          daily_new = '''    } else {
+      await this.#consumeDailyAction(input.requestId);
+      await atomicJson(commandPath, {
+        version: 1,
+        inputDigest: digest,
+        action: input.action,
+        assessmentRequestId,
+        status: "accepted",
+        updatedAt: this.#now().toISOString(),
+      } satisfies CommandState);
+    }'''
+          if daily_old in text:
+              text = text.replace(daily_old, daily_new)
+
+          refresh_signature = '  async #refresh(workflow: WorkflowState): Promise<WorkflowState> {\n'
+          refresh_guard = '''  async #refresh(workflow: WorkflowState): Promise<WorkflowState> {
+    if (workflow.stage === "package_verified" || workflow.stage === "provider_accepted") return workflow;
+'''
+          if refresh_signature in text and refresh_guard not in text:
+              text = text.replace(refresh_signature, refresh_guard)
+
+          helper_marker = '  async #lockTarget(workflow: WorkflowState): Promise<WorkflowState> {\n'
+          helper = '''  async #assertWorkflowAuthorized(workflow: WorkflowState, action: TelegramNicoAction): Promise<void> {
+    const decision = await this.#authorize({
+      action,
+      requestId: workflow.assessmentRequestId,
+      assessmentRequestId: workflow.assessmentRequestId,
+    });
+    if (!decision.allowed) throw new Error(decision.reason);
+  }
+
+'''
+          if helper_marker in text and '#assertWorkflowAuthorized(' not in text:
+              text = text.replace(helper_marker, helper + helper_marker)
+
+          replacements = {
+              '''  async #lockTarget(workflow: WorkflowState): Promise<WorkflowState> {
+    if (workflow.stage !== "accepted") return workflow;
+    const verified =''': '''  async #lockTarget(workflow: WorkflowState): Promise<WorkflowState> {
+    if (workflow.stage !== "accepted") return workflow;
+    await this.#assertWorkflowAuthorized(workflow, "nico_assessment_start");
+    const verified =''',
+              '''  async #startRun(workflow: WorkflowState): Promise<WorkflowState> {
+    if (workflow.stage !== "target_locked") return workflow;
+    await this.#nico.createRun''': '''  async #startRun(workflow: WorkflowState): Promise<WorkflowState> {
+    if (workflow.stage !== "target_locked") return workflow;
+    await this.#assertWorkflowAuthorized(workflow, "nico_assessment_start");
+    await this.#nico.createRun''',
+              '''  async #continue(workflow: WorkflowState): Promise<WorkflowState> {
+    if (new Set(["terminal", "package_verified", "provider_accepted"]).has(workflow.stage)) return workflow;
+    const run =''': '''  async #continue(workflow: WorkflowState): Promise<WorkflowState> {
+    if (new Set(["terminal", "package_verified", "provider_accepted"]).has(workflow.stage)) return workflow;
+    await this.#assertWorkflowAuthorized(workflow, "nico_assessment_continue");
+    const run =''',
+              '''  async #verifyPackage(workflow: WorkflowState): Promise<WorkflowState> {
+    if (workflow.stage === "package_verified" || workflow.stage === "provider_accepted") return workflow;
+    if (workflow.stage !== "terminal" || !workflow.artifactIdentity)''': '''  async #verifyPackage(workflow: WorkflowState): Promise<WorkflowState> {
+    if (workflow.stage === "package_verified" || workflow.stage === "provider_accepted") return workflow;
+    if (workflow.stage !== "terminal" || !workflow.artifactIdentity)''',
+              '''    const queue = await this.#nico.getReviewQueue(workflow.runId);
+    const unresolved =''': '''    if (workflow.costUsd === undefined) throw new Error("NICO did not provide explicit assessment cost evidence.");
+    await this.#assertWorkflowAuthorized(workflow, "nico_automated_package");
+    const queue = await this.#nico.getReviewQueue(workflow.runId);
+    const unresolved =''',
+              '''    const raw = this.#nico.getAutomatedDeliveryPackage.length >= 2''': '''    await this.#assertWorkflowAuthorized(workflow, "nico_automated_package");
+    const raw = this.#nico.getAutomatedDeliveryPackage.length >= 2''',
+              '''  async #email(workflow: WorkflowState, command: TelegramNicoCommand): Promise<WorkflowState> {
+    if (workflow.stage === "provider_accepted") return workflow;
+    if (workflow.stage !== "package_verified" || !workflow.verifiedPackage)''': '''  async #email(workflow: WorkflowState, command: TelegramNicoCommand): Promise<WorkflowState> {
+    if (workflow.stage === "provider_accepted") return workflow;
+    if (workflow.stage !== "package_verified" || !workflow.verifiedPackage)''',
+              '''    if (!this.#gmailSender) throw new Error("SARA Gmail is not authenticated for verified report delivery.");''': '''    if (!this.#gmailSender) throw new Error("SARA Gmail is not authenticated for verified report delivery.");
+    if (workflow.costUsd === undefined) throw new Error("NICO did not provide explicit assessment cost evidence.");
+    await this.#assertWorkflowAuthorized(workflow, "email_verified_report");''',
+          }
+          for old, new in replacements.items():
+              if old in text:
+                  text = text.replace(old, new)
+
+          path.write_text(text)
+          PY
+
+      - name: Permit safe retry only when Gmail definitely did not send
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("src/gmail-verified-report-sender.ts")
+          text = path.read_text()
+          old = '''      if (existing.state === "sending" || existing.state === "delivery_unknown") {
+        throw new Error("A prior Gmail delivery may have reached the provider; automatic resend is refused.");
+      }
+      throw new Error("The original Gmail delivery attempt failed; use explicit owner recovery rather than an automatic resend.");'''
+          new = '''      if (existing.state === "sending" || existing.state === "delivery_unknown") {
+        throw new Error("A prior Gmail delivery may have reached the provider; automatic resend is refused.");
+      }
+      if (existing.state !== "failed" || !new Set(["PRE_SEND_FAILURE", "PROVIDER_REJECTED"]).has(existing.failureCode ?? "")) {
+        throw new Error("The original Gmail delivery outcome is not safe for automatic retry.");
+      }'''
+          if old in text:
+              text = text.replace(old, new)
+          path.write_text(text)
+          PY
+
+      - name: Add final safety regression tests
+        run: |
+          cat > tests/telegram-nico-final-safety.test.ts <<'TS'
+          import assert from "node:assert/strict";
+          import { createHash } from "node:crypto";
+          import { mkdtemp, rm } from "node:fs/promises";
+          import { tmpdir } from "node:os";
+          import { join } from "node:path";
+          import { afterEach, describe, it } from "node:test";
+          import { TelegramNicoDeliveryOperator } from "../src/telegram-nico-delivery.ts";
+          import { GmailVerifiedReportSender } from "../src/gmail-verified-report-sender.ts";
+          import { GMAIL_REPORT_SENDER } from "../src/gmail-oauth-activation.ts";
+          import { GMAIL_REPORT_RECIPIENT } from "../src/gmail-verified-report-sender.ts";
+
+          const USER = "paired-owner";
+          const USER_SHA = createHash("sha256").update(USER).digest("hex");
+          const REPO = "https://github.com/sindresorhus/p-map";
+          const COMMIT = "22dda61ea29037ba85af25e84bc5efba77e62f44";
+          const dirs: string[] = [];
+          afterEach(async () => Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true }))));
+          async function directory(prefix: string): Promise<string> {
+            const value = await mkdtemp(join(tmpdir(), prefix));
+            dirs.push(value);
+            return value;
+          }
+          function pdf() {
+            const body = new Uint8Array(Buffer.from("%PDF-1.7\nverified\n"));
+            return { body, digest: createHash("sha256").update(body).digest("hex") };
+          }
+          function fixture(cost: number | undefined, authorize: () => Promise<{ allowed: boolean; code: string; reason: string }>) {
+            const report = pdf();
+            const artifact = { artifact_schema: "nico.auto.v1", artifact_id: "artifact-1", revision: 1, hash_and_size: { sha256: report.digest, size_bytes: report.body.byteLength } };
+            let packageCalls = 0;
+            let emailCalls = 0;
+            return {
+              packageCalls: () => packageCalls,
+              emailCalls: () => emailCalls,
+              options: {
+                expectedTelegramUserIdSha256: USER_SHA,
+                targetVerifier: { verify: async () => ({ repository: "sindresorhus/p-map", repositoryUrl: REPO, commitSha: COMMIT }) },
+                authorize: async () => authorize(),
+                nicoOperator: {
+                  createRun: async () => ({}),
+                  getRun: async (runId: unknown) => ({ run_id: String(runId), repository_url: REPO, commit_sha: COMMIT, status: "complete", terminal: true, human_reviewed: false, artifact_identity: artifact, ...(cost === undefined ? {} : { cost_usd: cost }) }),
+                  continueRun: async (runId: unknown) => ({ run_id: String(runId), repository_url: REPO, commit_sha: COMMIT, status: "complete", terminal: true, human_reviewed: false, artifact_identity: artifact, ...(cost === undefined ? {} : { cost_usd: cost }) }),
+                  getReviewQueue: async () => ({ unresolved_review_workload: 0 }),
+                  getAutomatedDeliveryPackage: async () => { packageCalls += 1; return { run_id: "unused", repository_url: REPO, commit_sha: COMMIT, artifact_identity: artifact, authorization_status: "Authorized — Automated Delivery", human_reviewed: false, automated_delivery_disclosure: "Automated delivery; not human reviewed.", content_type: "application/pdf", body: report.body, digest: report.digest }; },
+                },
+                gmailSender: { send: async () => { emailCalls += 1; throw new Error("not expected"); } },
+              },
+            };
+          }
+          function start(requestId: string) {
+            return { requestId, telegramUserId: USER, action: "nico_assessment_start", repository: REPO, commitSha: COMMIT, emailVerifiedReport: false } as const;
+          }
+
+          describe("Telegram NICO final safety gates", () => {
+            it("does not let a rejected daily-limit attempt bypass quota on replay", async () => {
+              const stateDirectory = await directory("sara-final-daily-");
+              const f = fixture(0.25, async () => ({ allowed: true, code: "OK", reason: "ok" }));
+              const operator = new TelegramNicoDeliveryOperator({ stateDirectory, ...f.options, dailyActionLimit: 0 });
+              await assert.rejects(() => operator.submit(start("request-daily-final")), /daily action limit/);
+              await assert.rejects(() => operator.submit(start("request-daily-final")), /daily action limit/);
+            });
+
+            it("requires explicit NICO cost evidence before package authorization", async () => {
+              const stateDirectory = await directory("sara-final-cost-");
+              const f = fixture(undefined, async () => ({ allowed: true, code: "OK", reason: "ok" }));
+              const operator = new TelegramNicoDeliveryOperator({ stateDirectory, ...f.options });
+              await operator.submit(start("request-cost-final"));
+              await assert.rejects(() => operator.submit({ requestId: "request-package-final", assessmentRequestId: "request-cost-final", telegramUserId: USER, action: "nico_automated_package" }), /explicit assessment cost evidence/);
+              assert.equal(f.packageCalls(), 0);
+              assert.equal(f.emailCalls(), 0);
+            });
+
+            it("rechecks owner authority before package retrieval and stops after revocation", async () => {
+              const stateDirectory = await directory("sara-final-authority-");
+              let allowed = true;
+              const f = fixture(0.25, async () => allowed ? { allowed: true, code: "OK", reason: "ok" } : { allowed: false, code: "REVOKED", reason: "owner revoked" });
+              const operator = new TelegramNicoDeliveryOperator({ stateDirectory, ...f.options });
+              const terminal = await operator.submit(start("request-authority-final"));
+              assert.equal(terminal.state, "terminal");
+              assert.equal(terminal.assessmentCostUsd, 0.25);
+              assert.equal(terminal.modelCostUsd, 0);
+              assert.equal(terminal.totalCostUsd, 0.25);
+              allowed = false;
+              await assert.rejects(() => operator.submit({ requestId: "request-package-revoked", assessmentRequestId: "request-authority-final", telegramUserId: USER, action: "nico_automated_package" }), /owner revoked/);
+              assert.equal(f.packageCalls(), 0);
+            });
+          });
+
+          describe("Gmail definitely-not-sent recovery", () => {
+            it("permits one safe retry after a pre-send OAuth failure but never duplicates provider acceptance", async () => {
+              const stateDirectory = await directory("sara-final-gmail-");
+              const report = pdf();
+              let tokenAttempts = 0;
+              let sends = 0;
+              const sender = new GmailVerifiedReportSender({
+                stateDirectory,
+                clientId: "client-id-123456",
+                clientSecret: "client-secret-123456",
+                refreshToken: "refresh-token-123456",
+                fetchImpl: async (input) => {
+                  const url = String(input);
+                  if (url.includes("oauth2.googleapis.com")) {
+                    tokenAttempts += 1;
+                    if (tokenAttempts === 1) return new Response("denied", { status: 503 });
+                    return Response.json({ access_token: "access-token", token_type: "Bearer" });
+                  }
+                  if (url.includes("openidconnect.googleapis.com")) return Response.json({ email: GMAIL_REPORT_SENDER, email_verified: true });
+                  sends += 1;
+                  return Response.json({ id: "gmail-provider-final" });
+                },
+              });
+              const input = { requestId: "email:final-retry-1", sender: GMAIL_REPORT_SENDER, recipient: GMAIL_REPORT_RECIPIENT, repository: "sindresorhus/p-map", commitSha: COMMIT, reportDigest: report.digest, contentType: "application/pdf", reportBytes: report.body } as const;
+              await assert.rejects(() => sender.send(input), /authorization refresh failed/);
+              const receipt = await sender.send(input);
+              assert.equal(receipt.providerDeliveryId, "gmail-provider-final");
+              assert.deepEqual(await sender.send(input), receipt);
+              assert.equal(sends, 1);
+            });
+          });
+          TS
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Run focused final-safety tests
+        id: focused
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          node --import tsx --test \
+            tests/telegram-nico-final-safety.test.ts \
+            tests/telegram-nico-delivery.test.ts \
+            tests/telegram-nico-delivery-workflow.test.ts \
+            tests/telegram-nico-security-regressions.test.ts \
+            tests/telegram-nico-http.test.ts \
+            tests/telegram-nico-production.test.ts \
+            tests/gmail-verified-report-sender.test.ts \
+            tests/gmail-oauth-activation.test.ts \
+            tests/nico-automated-package-verifier.test.ts \
+            tests/nico-operator.test.ts \
+            tests/revenue-pilot-operator.test.ts 2>&1 | tee focused-final.log
+
+      - name: Run strict typecheck
+        id: typecheck
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee typecheck-final.log
+
+      - name: Run full repository verification
+        id: verify
+        if: steps.focused.outcome == 'success' && steps.typecheck.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify 2>&1 | tee verify-final.log
+
+      - name: Inspect exact candidate
+        id: review
+        if: steps.focused.outcome == 'success' && steps.typecheck.outcome == 'success' && steps.verify.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          unexpected="$(git diff --name-only | awk '!/^(src|tests)\// { count += 1 } END { print count + 0 }')"
+          test "$unexpected" -eq 0
+          ! grep -RIn --exclude-dir=node_modules --exclude='*.test.ts' 'beardedwarrior5161@gmail.com' src
+          ! grep -RIn --exclude-dir=node_modules -E 'console\.(log|error|warn).*(refreshToken|clientSecret|authorization)' src/gmail-*.ts src/telegram-nico-*.ts
+
+      - name: Upload exact diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-nico-final-gates
+          path: |
+            focused-final.log
+            typecheck-final.log
+            verify-final.log
+            pr59.json
+          if-no-files-found: warn
+          retention-days: 5
+
+      - name: Enforce all gates
+        if: always()
+        run: |
+          test "${{ steps.focused.outcome }}" = success
+          test "${{ steps.typecheck.outcome }}" = success
+          test "${{ steps.verify.outcome }}" = success
+          test "${{ steps.review.outcome }}" = success
+
+      - name: Commit and push exact verified hardening
+        id: push
+        env:
+          TARGET_BRANCH: ${{ steps.target.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "Reparodynamics"
+          git config user.email "papadenico@yahoo.com"
+          git add src tests
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "Tighten Telegram NICO authorization and cost evidence"
+            git push origin HEAD:"$TARGET_BRANCH"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create follow-up pull request when PR 59 was already merged
+        if: steps.target.outputs.mode == 'follow_up'
+        env:
+          TARGET_BRANCH: ${{ steps.target.outputs.branch }}
+          TARGET_SHA: ${{ steps.push.outputs.sha }}
+        run: |
+          set -euo pipefail
+          existing="$(gh pr list --head "$TARGET_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$existing" ]; then
+            gh pr create \
+              --base main \
+              --head "$TARGET_BRANCH" \
+              --title "Tighten Telegram NICO authorization and cost evidence" \
+              --body "Follow-up hardening for the bounded Telegram NICO and Gmail path. Rechecks owner authority before external mutation/delivery steps, requires explicit assessment cost evidence before automated-package authorization, preserves terminal delivery state during status reads, closes a durable daily-limit replay gap, and permits retry only when Gmail definitely did not send. Full repository verification passed before push. Exact candidate: \`$TARGET_SHA\`." \
+              --draft
+          fi
