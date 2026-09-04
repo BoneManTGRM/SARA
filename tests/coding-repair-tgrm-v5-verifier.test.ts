@@ -20,6 +20,10 @@ const completeCandidate: ProgramCandidateProposal = {
   limitations: [],
   files: [
     {
+      path: "src/index.ts",
+      content: 'export { retryAfterMs } from "./retry-after.ts";\n',
+    },
+    {
       path: "src/retry-after.ts",
       content: [
         "export function retryAfterMs(value: string | undefined, capMs: number): number | null {",
