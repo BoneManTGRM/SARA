@@ -20,8 +20,8 @@ function aggregateBehavioralChecks(value: unknown): CodingBehavioralCheckSummary
   if (
     candidate.schemaVersion !== 1 ||
     candidate.disclosure !== "aggregate_only" ||
-    !Number.isInteger(candidate.passed) ||
-    !Number.isInteger(candidate.total) ||
+    !Number.isSafeInteger(candidate.passed) ||
+    !Number.isSafeInteger(candidate.total) ||
     (candidate.passed as number) < 0 ||
     (candidate.total as number) <= 0 ||
     (candidate.passed as number) > (candidate.total as number) ||
