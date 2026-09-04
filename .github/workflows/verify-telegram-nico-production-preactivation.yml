@@ -1,0 +1,120 @@
+name: Verify Telegram NICO production preactivation
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-20260904
+    paths:
+      - .github/workflows/verify-telegram-nico-production-preactivation.yml
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: verify-telegram-nico-production-preactivation
+  cancel-in-progress: false
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: BoneManTGRM/SARA
+      FINALIZER: finalize-telegram-nico-after-hardening.yml
+      ORIGIN: https://sara-operator-production.up.railway.app
+    steps:
+      - name: Wait for final exact-tree release gate
+        id: finalizer
+        run: |
+          set -euo pipefail
+          run_id=""
+          for attempt in $(seq 1 60); do
+            run_id="$(gh run list --repo "$REPOSITORY" --workflow "$FINALIZER" --branch automation/export-sara-pr59-20260904 --limit 1 --json databaseId --jq '.[0].databaseId // empty')"
+            [ -n "$run_id" ] && break
+            sleep 5
+          done
+          test -n "$run_id"
+          for attempt in $(seq 1 240); do
+            status="$(gh run view "$run_id" --repo "$REPOSITORY" --json status --jq .status)"
+            [ "$status" = completed ] && break
+            sleep 10
+          done
+          conclusion="$(gh run view "$run_id" --repo "$REPOSITORY" --json conclusion --jq .conclusion)"
+          test "$conclusion" = success
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Lock final main and merged pull-request evidence
+        id: release
+        run: |
+          set -euo pipefail
+          main_sha="$(gh api repos/$REPOSITORY/branches/main --jq .commit.sha)"
+          test "${#main_sha}" -eq 40
+          gh api repos/$REPOSITORY/pulls/59 > pr59.json
+          followup="$(gh pr list --repo "$REPOSITORY" --head fix/telegram-nico-final-safety --state merged --json number,mergeCommit --jq '.[0] // empty')"
+          jq -n --arg main "$main_sha" --argjson pr59 "$(cat pr59.json)" --argjson followup "${followup:-null}" '{mainCommit:$main, pr59:{number:$pr59.number,state:$pr59.state,merged:$pr59.merged,mergeCommit:$pr59.merge_commit_sha}, followup:$followup}' > release.json
+          echo "main_sha=$main_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for Railway public health to bind the exact main commit
+        env:
+          MAIN_SHA: ${{ steps.release.outputs.main_sha }}
+        run: |
+          set -euo pipefail
+          healthy=false
+          for attempt in $(seq 1 180); do
+            code="$(curl --silent --show-error --output health.json --write-out '%{http_code}' --max-time 15 "$ORIGIN/health" || true)"
+            if [ "$code" = 200 ] && jq -e . health.json >/dev/null 2>&1 && grep -Fq "$MAIN_SHA" health.json; then
+              healthy=true
+              break
+            fi
+            sleep 10
+          done
+          test "$healthy" = true
+          jq -e . health.json >/dev/null
+
+      - name: Verify the operational route is deployed but inactive without production pairing/OAuth configuration
+        run: |
+          set -euo pipefail
+          action_code="$(curl --silent --show-error --output action.json --write-out '%{http_code}' --max-time 15 -X POST -H 'content-type: application/json' --data '{"requestId":"preactivation-proof-0001","telegramUserId":"untrusted","action":"nico_assessment_status","assessmentRequestId":"none"}' "$ORIGIN/api/telegram/actions" || true)"
+          test "$action_code" = 401 -o "$action_code" = 503
+          jq -e '.error | type == "string"' action.json >/dev/null
+          ! grep -Eiq '(token|password|secret|credential)[=:][^ ]+' action.json
+
+      - name: Verify the ordinary Luna route remains separate
+        run: |
+          set -euo pipefail
+          luna_code="$(curl --silent --show-error --output luna.json --write-out '%{http_code}' --max-time 20 -X POST -H 'content-type: application/json' --data '{"requestId":"preactivation-luna-0001","telegramUserId":"untrusted","prompt":"Analyze only; do not execute."}' "$ORIGIN/api/telegram/luna" || true)"
+          test "$luna_code" != 404
+          test "$luna_code" != 500
+          if jq -e . luna.json >/dev/null 2>&1; then
+            ! grep -Eiq 'nico_assessment_start|provider_accepted|gmail-provider' luna.json
+          fi
+
+      - name: Write non-secret production preactivation receipt
+        env:
+          MAIN_SHA: ${{ steps.release.outputs.main_sha }}
+          FINALIZER_RUN: ${{ steps.finalizer.outputs.run_id }}
+        run: |
+          jq -n \
+            --arg mainCommit "$MAIN_SHA" \
+            --arg finalizerRun "$FINALIZER_RUN" \
+            --arg origin "$ORIGIN" \
+            --arg actionStatus "$(cat action.json | jq -r '.error // "bounded refusal"')" \
+            '{mainCommit:$mainCommit, finalizerWorkflowRun:$finalizerRun, origin:$origin, productionHealth:"success_exact_commit", operationalRoute:"deployed_fail_closed", ordinaryLunaRoute:"separate_not_404_or_500", gmailAuthenticated:false, assessmentExecuted:false, emailSent:false, operationalRefusal:$actionStatus}' \
+            > production-preactivation-receipt.json
+
+      - name: Upload preactivation evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-nico-production-preactivation
+          path: |
+            pr59.json
+            release.json
+            health.json
+            action.json
+            luna.json
+            production-preactivation-receipt.json
+          if-no-files-found: error
+          retention-days: 14
