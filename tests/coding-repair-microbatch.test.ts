@@ -8,6 +8,11 @@ const tasks = [
   { id: "c", objective: "Return x - 1", source: "export const f = (x) => x;" },
 ] as const;
 
+const fourTasks = [
+  ...tasks,
+  { id: "d", objective: "Return x / 2", source: "export const f = (x) => x;" },
+] as const;
+
 describe("verified coding microbatch", () => {
   it("completes three independent repairs in one model call only when each independently verifies", async () => {
     let batchCalls = 0;
@@ -42,6 +47,32 @@ describe("verified coding microbatch", () => {
     assert.equal(result.modelCallThroughputIncreasePercent, 200);
     assert.equal(result.accuracyPreserved, true);
     assert.equal(result.generalClaimSupported, false);
+  });
+
+  it("supports a four-repair verified batch with a 300% model-call throughput ceiling", async () => {
+    const result = await runVerifiedCodingMicroBatch({
+      tasks: fourTasks,
+      maximumSpendUsd: 0.15,
+      model: {
+        async proposeBatch(requests) {
+          return {
+            proposals: requests.map((task) => ({ id: task.id, source: `${task.source}\n// fixed` })),
+            accountedCostUsd: 0.04,
+            inputTokens: 400,
+            outputTokens: 400,
+            elapsedMilliseconds: 100,
+          };
+        },
+        async proposeSingle() { throw new Error("unused"); },
+      },
+      verify: async (_task, candidate) => ({ passed: candidate.includes("// fixed"), score: 1 }),
+    });
+
+    assert.equal(result.verifiedComplete, 4);
+    assert.equal(result.modelCalls, 1);
+    assert.equal(result.modelCallThroughputRatio, 4);
+    assert.equal(result.modelCallThroughputIncreasePercent, 300);
+    assert.equal(result.accuracyPreserved, true);
   });
 
   it("keeps verified batch repairs and retries only the failed member", async () => {
@@ -83,6 +114,50 @@ describe("verified coding microbatch", () => {
     assert.equal(result.results.find((entry) => entry.id === "a")?.attempts, 1);
     assert.equal(result.results.find((entry) => entry.id === "b")?.attempts, 2);
     assert.equal(result.results.find((entry) => entry.id === "c")?.attempts, 1);
+    assert.equal(result.accuracyPreserved, true);
+  });
+
+  it("runs independent failed-member fallbacks concurrently and accounts wall-clock model time", async () => {
+    let inFlight = 0;
+    let maximumInFlight = 0;
+    const result = await runVerifiedCodingMicroBatch({
+      tasks: fourTasks,
+      maximumSpendUsd: 0.15,
+      model: {
+        async proposeBatch(requests) {
+          return {
+            proposals: requests.map((task) => ({
+              id: task.id,
+              source: task.id === "a" || task.id === "d" ? `${task.source}\n// fixed` : task.source,
+            })),
+            accountedCostUsd: 0.04,
+            inputTokens: 400,
+            outputTokens: 300,
+            elapsedMilliseconds: 100,
+          };
+        },
+        async proposeSingle(task) {
+          inFlight += 1;
+          maximumInFlight = Math.max(maximumInFlight, inFlight);
+          await new Promise((resolve) => setTimeout(resolve, task.id === "b" ? 25 : 15));
+          inFlight -= 1;
+          return {
+            proposal: { id: task.id, source: `${task.source}\n// fixed` },
+            accountedCostUsd: 0.01,
+            inputTokens: 100,
+            outputTokens: 100,
+            elapsedMilliseconds: task.id === "b" ? 125 : 115,
+          };
+        },
+      },
+      verify: async (_task, candidate) => ({ passed: candidate.includes("// fixed"), score: candidate.includes("// fixed") ? 1 : 0 }),
+    });
+
+    assert.equal(maximumInFlight, 2);
+    assert.equal(result.verifiedComplete, 4);
+    assert.equal(result.modelCalls, 3);
+    assert.equal(result.accountedCostUsd, 0.06);
+    assert.equal(result.activeModelMilliseconds, 225);
     assert.equal(result.accuracyPreserved, true);
   });
 
