@@ -91,6 +91,8 @@ export type CodingBenchmarkSummary = {
     finalScoreDelta95: CodingBenchmarkInterval;
     verifiedThroughputDeltaPerSecond: number;
     verifiedThroughputDelta95: CodingBenchmarkInterval;
+    relativeTimeReduction: number;
+    relativeTimeReduction95: CodingBenchmarkInterval;
     relativeCostReduction: number | null;
     relativeCostReduction95: CodingBenchmarkInterval | null;
     costComparablePairs: number;
@@ -109,6 +111,11 @@ export type CodingBenchmarkPromotionDecision = {
 
 const HEX_DIGEST = /^[a-f0-9]{64}$/u;
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const MATERIAL_TASK_CLASSES: CodingBenchmarkTaskClass[] = [
+  "synthetic",
+  "reconstructed_sara",
+  "licensed_public",
+];
 const BINDING_KEYS: Array<keyof CodingBenchmarkBindings> = [
   "sourceCommit",
   "corpusDigest",
@@ -292,6 +299,12 @@ function mixedBindingReasons(
   return [...new Set(reasons)].sort();
 }
 
+function hasMaterialCoverage(pairs: readonly CodingBenchmarkPairReceipt[]): boolean {
+  return MATERIAL_TASK_CLASSES.every(
+    (taskClass) => pairs.filter((pair) => pair.taskClass === taskClass).length >= 10,
+  );
+}
+
 export function codingBenchmarkPairDigest(pair: CodingBenchmarkPairReceipt): string {
   assertPair(pair);
   return sha256(canonicalJson(pair));
@@ -350,12 +363,13 @@ export function summarizeCodingBenchmark(input: {
   const livePairCount = pairs.filter((pair) => pair.executionKind === "live").length;
   const distinctTaskClasses = new Set(pairs.map((pair) => pair.taskClass)).size;
   const distinctTaskFamilies = new Set(pairs.map((pair) => pair.taskFamily)).size;
+  const materialCoverage = hasMaterialCoverage(pairs);
   let evidenceLevel: CodingBenchmarkEvidenceLevel;
   if (staleReasons.length) evidenceLevel = "STALE";
   else if (livePairCount !== pairs.length) evidenceLevel = "SIMULATED";
-  else if (pairs.length >= 100 && distinctTaskClasses >= 3 && distinctTaskFamilies >= 3) {
+  else if (pairs.length >= 100 && materialCoverage && distinctTaskFamilies >= 3) {
     evidenceLevel = "REPLICATED";
-  } else if (pairs.length >= 30 && distinctTaskClasses >= 3 && distinctTaskFamilies >= 3) {
+  } else if (pairs.length >= 30 && materialCoverage && distinctTaskFamilies >= 3) {
     evidenceLevel = "MEASURED";
   } else evidenceLevel = "LAB";
 
@@ -371,6 +385,9 @@ export function summarizeCodingBenchmark(input: {
     - Number(pair.normal.verifiedComplete)
       / (pair.normal.activeExecutionMilliseconds / 1_000)
   ));
+  const timeReductions = pairs.map(
+    (pair) => 1 - pair.reparodynamic.activeExecutionMilliseconds / pair.normal.activeExecutionMilliseconds,
+  );
   const costReductions = pairs.flatMap((pair) => {
     const normal = pair.normal.accountedCostUsd;
     const reparodynamic = pair.reparodynamic.accountedCostUsd;
@@ -402,6 +419,12 @@ export function summarizeCodingBenchmark(input: {
       throughputDeltas,
       bootstrapSamples,
       { seed, metric: "verified_throughput" },
+    ),
+    relativeTimeReduction: rounded(mean(timeReductions)),
+    relativeTimeReduction95: bootstrapInterval(
+      timeReductions,
+      bootstrapSamples,
+      { seed, metric: "relative_time_reduction" },
     ),
     relativeCostReduction: costReductions.length ? rounded(mean(costReductions)) : null,
     relativeCostReduction95: costReductions.length
@@ -485,12 +508,16 @@ export function evaluateCodingBenchmarkPromotion(input: {
     && summary.paired.verifiedSuccessDelta95.lower > 0;
   const equivalentSuccess = summary.paired.verifiedSuccessDelta >= 0
     && summary.paired.verifiedSuccessDelta95.lower >= 0;
+  const timeReductionSupported = equivalentSuccess
+    && summary.paired.relativeTimeReduction >= 0.25
+    && summary.paired.relativeTimeReduction95.lower >= 0.25;
   const costReductionSupported = equivalentSuccess
+    && summary.paired.costComparablePairs === summary.pairCount
     && summary.paired.relativeCostReduction !== null
     && summary.paired.relativeCostReduction >= 0.25
     && summary.paired.relativeCostReduction95 !== null
     && summary.paired.relativeCostReduction95.lower >= 0.25;
-  if (!verifiedSuccessGainSupported && !costReductionSupported) {
+  if (!verifiedSuccessGainSupported && !timeReductionSupported && !costReductionSupported) {
     return {
       ...base,
       action: "hold",
@@ -500,6 +527,7 @@ export function evaluateCodingBenchmarkPromotion(input: {
   }
   const benefitReasons = [
     ...(verifiedSuccessGainSupported ? ["verified_success_gain_supported"] : []),
+    ...(timeReductionSupported ? ["equivalent_success_time_reduction_supported"] : []),
     ...(costReductionSupported ? ["equivalent_success_cost_reduction_supported"] : []),
   ];
 
