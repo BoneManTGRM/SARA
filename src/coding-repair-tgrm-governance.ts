@@ -7,15 +7,6 @@ import type {
 
 const MAX_TACTIC_SIGNALS = 32;
 const SEMANTIC_REPEAT_THRESHOLD = 0.5;
-const LOW_INFORMATION_TACTIC_SIGNALS = new Set([
-  "call:local",
-  "call:method",
-  "new:local",
-  "syntax:ArrayLiteralExpression",
-  "syntax:ArrowFunction",
-  "syntax:ObjectLiteralExpression",
-  "syntax:ReturnStatement",
-]);
 
 export type CodingRepairGovernanceSignal = {
   schemaVersion: 1;
@@ -73,11 +64,6 @@ function normalizeTacticSignal(signal: string): string {
   return signal.replace(/:[+-]\d+$/u, "");
 }
 
-function isMaterialTacticSignal(signal: string): boolean {
-  const core = signal.startsWith("removed:") ? signal.slice("removed:".length) : signal;
-  return !LOW_INFORMATION_TACTIC_SIGNALS.has(core);
-}
-
 function orderedUnique(values: readonly string[]): string[] {
   return [...new Set(values)].sort().slice(0, MAX_TACTIC_SIGNALS);
 }
@@ -102,7 +88,7 @@ export function codingRepairTacticSignals(
   return orderedUnique(sourceChanges.flatMap((change) => [
     ...change.addedSignals.map(normalizeTacticSignal),
     ...change.removedSignals.map((signal) => `removed:${normalizeTacticSignal(signal)}`),
-  ]).filter(isMaterialTacticSignal));
+  ]));
 }
 
 function tacticFamilyDigest(signals: readonly string[]): string | null {
