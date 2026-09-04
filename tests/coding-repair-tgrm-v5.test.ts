@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { sha256 } from "../src/canonical.ts";
 import type { CodingRepairModel } from "../src/coding-repair-controller.ts";
-import { runMatchedCodingRepairBenchmarkV3 } from "../src/coding-repair-matched-benchmark-v3.ts";
+import { runMatchedCodingRepairBenchmarkV5 } from "../src/coding-repair-matched-benchmark-v5.ts";
 import { INITIAL_CODING_REPAIR_LIMITS } from "../src/coding-repair-policy.ts";
 import { buildCodingRepairPrompt } from "../src/coding-repair-prompt.ts";
 import {
@@ -318,7 +318,7 @@ describe("TGRM V5 horizon-aware repair governance", () => {
       "Never exceed the supplied delay cap.",
     ];
     const constitutionDigest = "a".repeat(64);
-    const result = await runMatchedCodingRepairBenchmarkV3({
+    const result = await runMatchedCodingRepairBenchmarkV5({
       caseId: "retry-after-final-opportunity-v5-holdout",
       sourceCommit: "b".repeat(40),
       modelRouteKey: "deterministic:horizon-holdout:v1",
@@ -339,6 +339,8 @@ describe("TGRM V5 horizon-aware repair governance", () => {
     });
 
     assert.equal(result.valid, true);
+    assert.equal(result.schemaVersion, 5);
+    assert.equal(result.contract.canaryPolicy, "bounded_reparodynamic_horizon_learning_v5");
     assert.equal(result.control.verifiedComplete, false);
     assert.equal(result.control.score, 0.8);
     assert.equal(result.canary.verifiedComplete, true);
