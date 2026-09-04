@@ -92,6 +92,8 @@ assert.equal(gauge.semanticRepeatRejections, 1);
 assert.equal(gauge.verifierExecutionsAvoided, 1);
 assert.equal(gauge.modelCalls, 3);
 assert.equal(gauge.modelCalls, modelCalls);
+assert.equal(gauge.accountedCostUsd, 0.03);
+assert.equal(gauge.accountedCostUsd, run.accountedCostUsd);
 assert.equal(gauge.completionGain, 0);
 assert.equal(gauge.scoreGain, 0);
 assert.deepEqual(gauge.behavioralProgress, {
@@ -117,6 +119,7 @@ console.log(JSON.stringify({
     semanticRepeatRejections: gauge.semanticRepeatRejections,
     verifierExecutionsAvoided: gauge.verifierExecutionsAvoided,
     deterministicModelCalls: gauge.modelCalls,
+    logicalAccountedCostUsd: gauge.accountedCostUsd,
     completionGain: gauge.completionGain,
     scoreGain: gauge.scoreGain,
     behavioralProgress: gauge.behavioralProgress,
