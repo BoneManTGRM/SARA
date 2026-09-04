@@ -21,7 +21,9 @@ export type CodingRepairGovernanceTrend = {
   observedCycles: number;
   semanticRepeatStreak: number;
   noGainStreak: number;
-  action: "advance" | "hold" | "conserve" | "rethink" | "retreat";
+  remainingCycles: number | null;
+  finalOpportunity: boolean;
+  action: "advance" | "hold" | "conserve" | "diversify" | "rethink" | "retreat";
   allowSameTacticFamily: boolean;
 };
 
@@ -32,6 +34,14 @@ function rounded(value: number): number {
 
 function boundedRatio(value: number): number {
   return rounded(Math.max(0, Math.min(1, value)));
+}
+
+function normalizeRemainingCycles(value: number | undefined): number | null {
+  if (value === undefined) return null;
+  if (!Number.isInteger(value) || value < 1 || value > 3) {
+    throw new RangeError("TGRM governance remaining cycles must stay within the existing repair horizon.");
+  }
+  return value;
 }
 
 function normalizeTacticSignal(signal: string): string {
@@ -118,7 +128,10 @@ export function buildCodingRepairGovernanceSignals(input: {
 
 export function summarizeCodingRepairGovernanceTrend(
   signals: readonly CodingRepairGovernanceSignal[],
+  options: { remainingCycles?: number } = {},
 ): CodingRepairGovernanceTrend {
+  const remainingCycles = normalizeRemainingCycles(options.remainingCycles);
+  const finalOpportunity = remainingCycles === 1;
   const bounded = signals.slice(-2);
   if (!bounded.length) {
     return {
@@ -126,6 +139,8 @@ export function summarizeCodingRepairGovernanceTrend(
       observedCycles: 0,
       semanticRepeatStreak: 0,
       noGainStreak: 0,
+      remainingCycles,
+      finalOpportunity,
       action: "hold",
       allowSameTacticFamily: true,
     };
@@ -147,6 +162,17 @@ export function summarizeCodingRepairGovernanceTrend(
   }
 
   const latest = bounded[bounded.length - 1];
+  const priorVerifiedGain = bounded
+    .slice(0, -1)
+    .some((signal) => signal.verifiedGain > 0 || signal.governanceAction === "advance");
+  const finalRollbackWithEvidence = (
+    finalOpportunity &&
+    priorVerifiedGain &&
+    latest.noGain &&
+    latest.governanceAction === "conserve" &&
+    latest.tacticFamilyDigest !== null
+  );
+
   let action: CodingRepairGovernanceTrend["action"] = latest.governanceAction;
   if (latest.governanceAction === "retreat") {
     action = "retreat";
@@ -154,6 +180,8 @@ export function summarizeCodingRepairGovernanceTrend(
     action = "advance";
   } else if (noGainStreak >= 2 && semanticRepeatStreak >= 2) {
     action = "rethink";
+  } else if (finalRollbackWithEvidence) {
+    action = "diversify";
   } else if (noGainStreak >= 2 || latest.governanceAction === "conserve") {
     action = "conserve";
   }
@@ -163,8 +191,10 @@ export function summarizeCodingRepairGovernanceTrend(
     observedCycles: bounded.length,
     semanticRepeatStreak,
     noGainStreak,
+    remainingCycles,
+    finalOpportunity,
     action,
-    allowSameTacticFamily: action !== "rethink" && action !== "retreat",
+    allowSameTacticFamily: !["diversify", "rethink", "retreat"].includes(action),
   };
 }
 
