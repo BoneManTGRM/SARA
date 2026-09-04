@@ -22,11 +22,12 @@ export function buildCodingRepairPrompt(input: {
   const maximumChangedLines = input.strategy === "surgical" ? input.limits.surgicalChangedLines : input.limits.deepChangedLines;
   return [
     CODING_REPAIR_OUTPUT_CONTRACT,
-    "Return one JSON object only. Propose a bounded replacement for listed candidate files; do not claim verification.",
+    "Return one JSON object only. The strategy field must exactly equal requiredStrategy. Propose a bounded replacement for listed candidate files; do not claim verification.",
     canonicalJson({
       objective: input.objective,
       acceptanceCriteria: input.acceptanceCriteria,
       currentArtifactDigest: input.artifactDigest,
+      requiredStrategy: input.strategy,
       failures: input.failures,
       files: input.candidate.files.map((file) => ({
         path: file.path,

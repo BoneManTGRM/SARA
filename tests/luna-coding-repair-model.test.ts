@@ -6,7 +6,7 @@ import type { WorkerModelClient } from "../src/model-router.ts";
 import type { ProgramCandidateProposal } from "../src/types.ts";
 
 describe("Luna coding repair adapter", () => {
-  it("uses the bounded Luna router and parses the strict repair contract", async () => {
+  it("uses the bounded Luna router and keeps repair strategy controller-owned", async () => {
     const candidate: ProgramCandidateProposal = {
       schemaVersion: 1, candidateKind: "typescript_program", programName: "Fixture", summary: "fixture", limitations: [],
       files: [{ path: "src/index.ts", content: "export const value = 1;\n" }, { path: "src/more.ts", content: "export const more = true;\n" }, { path: "tests/index.test.ts", content: "// immutable\n" }],
@@ -20,7 +20,7 @@ describe("Luna coding repair adapter", () => {
       async countInputTokens(prompt) { observedPrompt = prompt; return 100; },
       async execute() {
         return {
-          outputText: JSON.stringify({ schemaVersion: 1, baseArtifactDigest: artifactDigest, failureFingerprint: fingerprint, strategy: "surgical", changes: [{ path: "src/index.ts", expectedContentDigest: sha256(candidate.files[0].content), replacementText: "export const value = 42;\n" }], limitations: [] }),
+          outputText: JSON.stringify({ schemaVersion: 1, baseArtifactDigest: artifactDigest, failureFingerprint: fingerprint, strategy: "deep", changes: [{ path: "src/index.ts", expectedContentDigest: sha256(candidate.files[0].content), replacementText: "export const value = 42;\n" }], limitations: [] }),
           inputTokens: 100,
           billableOutputTokens: 50,
         };
@@ -38,7 +38,9 @@ describe("Luna coding repair adapter", () => {
       remainingCostUsd: 0.15,
     });
     assert.equal(result.proposal.changes[0].replacementText, "export const value = 42;\n");
+    assert.equal(result.proposal.strategy, "surgical");
     assert(observedPrompt.includes("OUTPUT CONTRACT: SARA_CODING_REPAIR_V1"));
+    assert(observedPrompt.includes('"requiredStrategy":"surgical"'));
     assert.equal(observedPrompt.includes("// immutable"), false);
     assert(result.accountedCostUsd > 0);
   });

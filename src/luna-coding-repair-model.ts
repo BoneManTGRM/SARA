@@ -54,8 +54,9 @@ export function createLunaCodingRepairModel(input: {
         prompt,
         [input.client],
       );
+      const proposal = parseProposal(execution.outputText);
       return {
-        proposal: parseProposal(execution.outputText),
+        proposal: { ...proposal, strategy: request.strategy },
         inputTokens: execution.evidence.inputTokens,
         outputTokens: execution.evidence.billableOutputTokens,
         accountedCostUsd: execution.evidence.accountedCostUsd,
