@@ -8,6 +8,11 @@ import {
 } from "../src/coding-repair-benchmark.ts";
 
 const digest = (character: string): string => character.repeat(64);
+const materialClasses: CodingBenchmarkTaskClass[] = [
+  "synthetic",
+  "reconstructed_sara",
+  "licensed_public",
+];
 
 function pair(input: {
   index: number;
@@ -89,9 +94,18 @@ function pair(input: {
   };
 }
 
+function materialPair(input: Parameters<typeof pair>[0]): CodingBenchmarkPairReceipt {
+  const classIndex = (input.index - 1) % materialClasses.length;
+  return pair({
+    ...input,
+    taskClass: materialClasses[classIndex],
+    taskFamily: `family-${classIndex + 1}`,
+  });
+}
+
 describe("matched Reparodynamic coding benchmark", () => {
   it("measures a supported success lift and opens only the next canary stage", () => {
-    const pairs = Array.from({ length: 30 }, (_, index) => pair({
+    const pairs = Array.from({ length: 30 }, (_, index) => materialPair({
       index: index + 1,
       normalSuccess: index < 6,
       reparodynamicSuccess: index < 12,
@@ -107,13 +121,29 @@ describe("matched Reparodynamic coding benchmark", () => {
     assert.ok(decision.reasonCodes.includes("verified_success_gain_supported"));
   });
 
-  it("holds when the matched interval crosses zero", () => {
+  it("keeps a thirty-case single-class result at LAB and blocks promotion", () => {
     const pairs = Array.from({ length: 30 }, (_, index) => pair({
+      index: index + 1,
+      normalSuccess: false,
+      reparodynamicSuccess: true,
+    }));
+    const summary = summarizeCodingBenchmark({ pairs, bootstrapSamples: 2_000 });
+    assert.equal(summary.evidenceLevel, "LAB");
+    assert.equal(summary.distinctTaskClasses, 1);
+
+    const decision = evaluateCodingBenchmarkPromotion({ summary, currentCanaryPercent: 5 });
+    assert.equal(decision.action, "hold");
+    assert.ok(decision.reasonCodes.includes("insufficient_matched_live_evidence"));
+  });
+
+  it("holds when the matched interval crosses zero", () => {
+    const pairs = Array.from({ length: 30 }, (_, index) => materialPair({
       index: index + 1,
       normalSuccess: index < 15,
       reparodynamicSuccess: index >= 15,
     }));
     const summary = summarizeCodingBenchmark({ pairs, bootstrapSamples: 4_000 });
+    assert.equal(summary.evidenceLevel, "MEASURED");
     assert.ok(summary.paired.verifiedSuccessDelta95.lower <= 0);
     assert.ok(summary.paired.verifiedSuccessDelta95.upper >= 0);
 
@@ -124,13 +154,10 @@ describe("matched Reparodynamic coding benchmark", () => {
   });
 
   it("requires replicated evidence across three material task classes before full canary", () => {
-    const classes: CodingBenchmarkTaskClass[] = ["synthetic", "reconstructed_sara", "licensed_public"];
-    const pairs = Array.from({ length: 100 }, (_, index) => pair({
+    const pairs = Array.from({ length: 100 }, (_, index) => materialPair({
       index: index + 1,
       normalSuccess: false,
       reparodynamicSuccess: true,
-      taskClass: classes[index % classes.length],
-      taskFamily: `family-${index % 3}`,
     }));
     const summary = summarizeCodingBenchmark({ pairs, bootstrapSamples: 4_000 });
     assert.equal(summary.evidenceLevel, "REPLICATED");
@@ -141,7 +168,7 @@ describe("matched Reparodynamic coding benchmark", () => {
   });
 
   it("marks mixed or changed benchmark bindings stale and blocks promotion", () => {
-    const pairs = Array.from({ length: 30 }, (_, index) => pair({
+    const pairs = Array.from({ length: 30 }, (_, index) => materialPair({
       index: index + 1,
       normalSuccess: false,
       reparodynamicSuccess: true,
@@ -161,7 +188,7 @@ describe("matched Reparodynamic coding benchmark", () => {
   });
 
   it("accepts a supported cost reduction only at equivalent verified success", () => {
-    const pairs = Array.from({ length: 30 }, (_, index) => pair({
+    const pairs = Array.from({ length: 30 }, (_, index) => materialPair({
       index: index + 1,
       normalSuccess: true,
       reparodynamicSuccess: true,
@@ -169,6 +196,7 @@ describe("matched Reparodynamic coding benchmark", () => {
       reparodynamicCostUsd: 0.05,
     }));
     const summary = summarizeCodingBenchmark({ pairs, bootstrapSamples: 2_000 });
+    assert.equal(summary.evidenceLevel, "MEASURED");
     assert.equal(summary.paired.verifiedSuccessDelta, 0);
     assert.ok(summary.paired.relativeCostReduction95?.lower !== undefined);
     assert.ok(summary.paired.relativeCostReduction95!.lower >= 0.25);
