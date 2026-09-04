@@ -11,7 +11,10 @@ const MAX_JSON_BYTES = 32 * 1024;
 const TESTING_ROOT = "/api/revenue-pilot/testing";
 const SAFE_ROUTE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
-export type RevenuePilotTestingServerOptions = Parameters<typeof createSaraServer>[1] & {
+type BaseSaraServerOptions = Parameters<typeof createSaraServer>[1];
+
+export type RevenuePilotTestingServerOptions = Omit<BaseSaraServerOptions, "stateDirectory"> & {
+  stateDirectory: string;
   revenuePilotTesting?: {
     modelClient: WorkerModelClient;
     repositoryEvidenceCollector: PublicRepositoryEvidenceCollector;
