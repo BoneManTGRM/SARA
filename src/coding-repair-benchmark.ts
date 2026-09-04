@@ -120,6 +120,8 @@ const BINDING_KEYS: Array<keyof CodingBenchmarkBindings> = [
   "authorityDigest",
 ];
 
+type CodingBenchmarkSummaryWithoutDigest = Omit<CodingBenchmarkSummary, "proofDigest">;
+
 function rounded(value: number): number {
   return Number(value.toFixed(6));
 }
@@ -169,19 +171,27 @@ function assertArm(arm: CodingBenchmarkArmResult, method: CodingBenchmarkMethod)
 function assertPair(pair: CodingBenchmarkPairReceipt): void {
   if (pair.schemaVersion !== 1) throw new Error("Benchmark pair schema version is unsupported.");
   if (!UUID_V4.test(pair.benchmarkId)) throw new Error("Benchmark id must be a UUID v4.");
-  if (!Number.isInteger(pair.pairIndex) || pair.pairIndex < 1) throw new Error("Benchmark pair index must be positive.");
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(pair.caseId)) throw new Error("Benchmark case id is malformed.");
-  if (!pair.taskFamily.trim() || pair.taskFamily.length > 128) throw new Error("Benchmark task family is malformed.");
+  if (!Number.isInteger(pair.pairIndex) || pair.pairIndex < 1) {
+    throw new Error("Benchmark pair index must be positive.");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(pair.caseId)) {
+    throw new Error("Benchmark case id is malformed.");
+  }
+  if (!pair.taskFamily.trim() || pair.taskFamily.length > 128) {
+    throw new Error("Benchmark task family is malformed.");
+  }
   if (
-    pair.order.length !== 2 ||
-    new Set(pair.order).size !== 2 ||
-    !pair.order.includes("luna") ||
-    !pair.order.includes("luna_reparodynamic")
+    pair.order.length !== 2
+    || new Set(pair.order).size !== 2
+    || !pair.order.includes("luna")
+    || !pair.order.includes("luna_reparodynamic")
   ) throw new Error("Benchmark pair order must contain each method exactly once.");
   for (const key of BINDING_KEYS) {
     if (!HEX_DIGEST.test(pair.bindings[key])) throw new Error(`Benchmark ${snakeCase(key)} is malformed.`);
   }
-  if (!Number.isFinite(Date.parse(pair.completedAt))) throw new Error("Benchmark completion timestamp is malformed.");
+  if (!Number.isFinite(Date.parse(pair.completedAt))) {
+    throw new Error("Benchmark completion timestamp is malformed.");
+  }
   assertArm(pair.normal, "luna");
   assertArm(pair.reparodynamic, "luna_reparodynamic");
 }
@@ -189,14 +199,19 @@ function assertPair(pair: CodingBenchmarkPairReceipt): void {
 function sumNullable(values: readonly (number | null)[]): { total: number | null; known: number } {
   const known = values.filter((value): value is number => value !== null);
   return {
-    total: known.length === values.length ? rounded(known.reduce((total, value) => total + value, 0)) : null,
+    total: known.length === values.length
+      ? rounded(known.reduce((total, value) => total + value, 0))
+      : null,
     known: known.length,
   };
 }
 
 function summarizeArm(arms: readonly CodingBenchmarkArmResult[]): CodingBenchmarkArmSummary {
   const verifiedComplete = arms.filter((arm) => arm.verifiedComplete).length;
-  const totalActiveExecutionMilliseconds = arms.reduce((total, arm) => total + arm.activeExecutionMilliseconds, 0);
+  const totalActiveExecutionMilliseconds = arms.reduce(
+    (total, arm) => total + arm.activeExecutionMilliseconds,
+    0,
+  );
   const costs = sumNullable(arms.map((arm) => arm.accountedCostUsd));
   const inputTokens = sumNullable(arms.map((arm) => arm.inputTokens));
   const outputTokens = sumNullable(arms.map((arm) => arm.outputTokens));
@@ -205,7 +220,9 @@ function summarizeArm(arms: readonly CodingBenchmarkArmResult[]): CodingBenchmar
     verifiedSuccessRate: rounded(verifiedComplete / arms.length),
     meanFinalScore: rounded(mean(arms.map((arm) => arm.finalScore))),
     totalActiveExecutionMilliseconds: rounded(totalActiveExecutionMilliseconds),
-    verifiedCompletionsPerActiveSecond: rounded(verifiedComplete / (totalActiveExecutionMilliseconds / 1_000)),
+    verifiedCompletionsPerActiveSecond: rounded(
+      verifiedComplete / (totalActiveExecutionMilliseconds / 1_000),
+    ),
     totalAccountedCostUsd: costs.total,
     knownCostPairs: costs.known,
     totalInputTokens: inputTokens.total,
@@ -275,6 +292,39 @@ function mixedBindingReasons(
   return [...new Set(reasons)].sort();
 }
 
+export function codingBenchmarkPairDigest(pair: CodingBenchmarkPairReceipt): string {
+  assertPair(pair);
+  return sha256(canonicalJson(pair));
+}
+
+export function codingBenchmarkSummaryProofDigest(
+  summary: CodingBenchmarkSummaryWithoutDigest,
+  pairs: readonly CodingBenchmarkPairReceipt[],
+): string {
+  const sorted = [...pairs].sort(
+    (left, right) => left.pairIndex - right.pairIndex || left.caseId.localeCompare(right.caseId),
+  );
+  return sha256(canonicalJson({
+    summary,
+    pairDigests: sorted.map(codingBenchmarkPairDigest),
+  }));
+}
+
+export function assertCodingBenchmarkSummaryProof(
+  summary: CodingBenchmarkSummary,
+  pairs: readonly CodingBenchmarkPairReceipt[],
+): void {
+  const { proofDigest, ...withoutDigest } = summary;
+  if (!HEX_DIGEST.test(proofDigest)) throw new Error("Coding benchmark summary proof digest is malformed.");
+  if (pairs.length !== summary.pairCount) {
+    throw new Error("Coding benchmark summary proof does not match its persisted pair count.");
+  }
+  const expected = codingBenchmarkSummaryProofDigest(withoutDigest, pairs);
+  if (proofDigest !== expected) {
+    throw new Error("Coding benchmark summary proof does not match persisted pair evidence.");
+  }
+}
+
 export function summarizeCodingBenchmark(input: {
   pairs: CodingBenchmarkPairReceipt[];
   expectedBindings?: Partial<CodingBenchmarkBindings>;
@@ -303,17 +353,23 @@ export function summarizeCodingBenchmark(input: {
   let evidenceLevel: CodingBenchmarkEvidenceLevel;
   if (staleReasons.length) evidenceLevel = "STALE";
   else if (livePairCount !== pairs.length) evidenceLevel = "SIMULATED";
-  else if (pairs.length >= 100 && distinctTaskClasses >= 3 && distinctTaskFamilies >= 3) evidenceLevel = "REPLICATED";
-  else if (pairs.length >= 30) evidenceLevel = "MEASURED";
-  else evidenceLevel = "LAB";
+  else if (pairs.length >= 100 && distinctTaskClasses >= 3 && distinctTaskFamilies >= 3) {
+    evidenceLevel = "REPLICATED";
+  } else if (pairs.length >= 30 && distinctTaskClasses >= 3 && distinctTaskFamilies >= 3) {
+    evidenceLevel = "MEASURED";
+  } else evidenceLevel = "LAB";
 
   const verifiedSuccessDeltas = pairs.map((pair) => (
     Number(pair.reparodynamic.verifiedComplete) - Number(pair.normal.verifiedComplete)
   ));
-  const scoreDeltas = pairs.map((pair) => pair.reparodynamic.finalScore - pair.normal.finalScore);
+  const scoreDeltas = pairs.map(
+    (pair) => pair.reparodynamic.finalScore - pair.normal.finalScore,
+  );
   const throughputDeltas = pairs.map((pair) => (
-    Number(pair.reparodynamic.verifiedComplete) / (pair.reparodynamic.activeExecutionMilliseconds / 1_000)
-    - Number(pair.normal.verifiedComplete) / (pair.normal.activeExecutionMilliseconds / 1_000)
+    Number(pair.reparodynamic.verifiedComplete)
+      / (pair.reparodynamic.activeExecutionMilliseconds / 1_000)
+    - Number(pair.normal.verifiedComplete)
+      / (pair.normal.activeExecutionMilliseconds / 1_000)
   ));
   const costReductions = pairs.flatMap((pair) => {
     const normal = pair.normal.accountedCostUsd;
@@ -336,7 +392,11 @@ export function summarizeCodingBenchmark(input: {
       { seed, metric: "verified_success" },
     ),
     finalScoreDelta: rounded(mean(scoreDeltas)),
-    finalScoreDelta95: bootstrapInterval(scoreDeltas, bootstrapSamples, { seed, metric: "final_score" }),
+    finalScoreDelta95: bootstrapInterval(
+      scoreDeltas,
+      bootstrapSamples,
+      { seed, metric: "final_score" },
+    ),
     verifiedThroughputDeltaPerSecond: rounded(mean(throughputDeltas)),
     verifiedThroughputDelta95: bootstrapInterval(
       throughputDeltas,
@@ -345,12 +405,16 @@ export function summarizeCodingBenchmark(input: {
     ),
     relativeCostReduction: costReductions.length ? rounded(mean(costReductions)) : null,
     relativeCostReduction95: costReductions.length
-      ? bootstrapInterval(costReductions, bootstrapSamples, { seed, metric: "relative_cost_reduction" })
+      ? bootstrapInterval(
+        costReductions,
+        bootstrapSamples,
+        { seed, metric: "relative_cost_reduction" },
+      )
       : null,
     costComparablePairs: costReductions.length,
   };
-  const summaryWithoutDigest = {
-    schemaVersion: 1 as const,
+  const summaryWithoutDigest: CodingBenchmarkSummaryWithoutDigest = {
+    schemaVersion: 1,
     benchmarkId: pairs[0]!.benchmarkId,
     pairCount: pairs.length,
     livePairCount,
@@ -365,10 +429,7 @@ export function summarizeCodingBenchmark(input: {
   };
   return {
     ...summaryWithoutDigest,
-    proofDigest: sha256(canonicalJson({
-      summary: summaryWithoutDigest,
-      pairDigests: pairs.map((pair) => sha256(canonicalJson(pair))),
-    })),
+    proofDigest: codingBenchmarkSummaryProofDigest(summaryWithoutDigest, pairs),
   };
 }
 
@@ -376,9 +437,11 @@ export function evaluateCodingBenchmarkPromotion(input: {
   summary: CodingBenchmarkSummary;
   currentCanaryPercent: number;
 }): CodingBenchmarkPromotionDecision {
-  if (!Number.isInteger(input.currentCanaryPercent) || input.currentCanaryPercent < 0 || input.currentCanaryPercent > 100) {
-    throw new Error("currentCanaryPercent must be an integer from 0 through 100.");
-  }
+  if (
+    !Number.isInteger(input.currentCanaryPercent)
+    || input.currentCanaryPercent < 0
+    || input.currentCanaryPercent > 100
+  ) throw new Error("currentCanaryPercent must be an integer from 0 through 100.");
   const summary = input.summary;
   const base = {
     currentCanaryPercent: input.currentCanaryPercent,
@@ -421,7 +484,7 @@ export function evaluateCodingBenchmarkPromotion(input: {
   const verifiedSuccessGainSupported = summary.paired.verifiedSuccessDelta >= 0.15
     && summary.paired.verifiedSuccessDelta95.lower > 0;
   const equivalentSuccess = summary.paired.verifiedSuccessDelta >= 0
-    && summary.paired.verifiedSuccessDelta95.lower >= -0.05;
+    && summary.paired.verifiedSuccessDelta95.lower >= 0;
   const costReductionSupported = equivalentSuccess
     && summary.paired.relativeCostReduction !== null
     && summary.paired.relativeCostReduction >= 0.25
@@ -444,7 +507,9 @@ export function evaluateCodingBenchmarkPromotion(input: {
   if (input.currentCanaryPercent === 0) recommended = 5;
   else if (input.currentCanaryPercent < 20 && summary.pairCount >= 30) recommended = 20;
   else if (input.currentCanaryPercent < 50 && summary.pairCount >= 60) recommended = 50;
-  else if (input.currentCanaryPercent < 100 && summary.evidenceLevel === "REPLICATED") recommended = 100;
+  else if (input.currentCanaryPercent < 100 && summary.evidenceLevel === "REPLICATED") {
+    recommended = 100;
+  }
   if (recommended > input.currentCanaryPercent) {
     return {
       ...base,
@@ -453,7 +518,11 @@ export function evaluateCodingBenchmarkPromotion(input: {
       reasonCodes: [...benefitReasons, "staged_canary_expansion"],
     };
   }
-  if (input.currentCanaryPercent === 100 && summary.evidenceLevel === "REPLICATED" && summary.pairCount >= 150) {
+  if (
+    input.currentCanaryPercent === 100
+    && summary.evidenceLevel === "REPLICATED"
+    && summary.pairCount >= 150
+  ) {
     return {
       ...base,
       action: "promote_default",
