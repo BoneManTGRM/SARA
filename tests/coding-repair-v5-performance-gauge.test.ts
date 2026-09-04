@@ -153,4 +153,46 @@ describe("V5 bounded performance gauge", () => {
     assert.equal(JSON.stringify(observedModelVerifications).includes("must-never-escape"), false);
     assert.equal(JSON.stringify(run).includes("must-never-escape"), false);
   });
+
+  it("discards aggregate counters outside the safe integer range", async () => {
+    const privateUnsafeOutput = "PRIVATE_UNSAFE_COUNTER_OUTPUT";
+    let verifierCalls = 0;
+    let modelCalls = 0;
+    const run = await runCodingRepairController({
+      baseline,
+      verify: async (candidate) => {
+        verifierCalls += 1;
+        return {
+          passed: true,
+          score: 1,
+          artifactDigest: digest(JSON.stringify(candidate.files)),
+          failures: [],
+          completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
+          evidenceDigests: [digest("unsafe-counter-verification")],
+          behavioralChecks: {
+            schemaVersion: 1,
+            passed: Number.MAX_SAFE_INTEGER + 1,
+            total: Number.MAX_SAFE_INTEGER + 1,
+            evidenceDigest: digest("unsafe-counter-evidence"),
+            disclosure: "aggregate_only",
+          },
+          rawBehaviorOutput: privateUnsafeOutput,
+        } as ProgramVerificationResult;
+      },
+      model: {
+        async propose() {
+          modelCalls += 1;
+          throw new Error("An already verified candidate must not invoke the model.");
+        },
+      },
+    });
+
+    assert.equal(verifierCalls, 1);
+    assert.equal(modelCalls, 0);
+    assert.equal(run.state, "VERIFIED_CANDIDATE");
+    assert.equal(run.performanceGauge.behavioralProgress, null);
+    assert.equal(run.performanceGauge.verifierExecutions, 1);
+    assert.equal(run.performanceGauge.modelCalls, 0);
+    assert.equal(JSON.stringify(run).includes(privateUnsafeOutput), false);
+  });
 });
