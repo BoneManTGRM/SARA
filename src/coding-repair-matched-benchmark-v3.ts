@@ -1,4 +1,5 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
+import { bindCodingRepairBenchmarkAuthority } from "./coding-repair-evidence.ts";
 import {
   digestCodingRepairModelAttemptLessons,
   projectCodingRepairAttemptLessonsForModel,
@@ -67,7 +68,7 @@ export async function runMatchedCodingRepairBenchmarkV3(
     learningEvidenceDigest,
     auditVerificationMilliseconds: base.auditVerificationMilliseconds,
   };
-  return {
+  const result = {
     ...structuredClone(base),
     schemaVersion: 3 as const,
     contract,
@@ -79,4 +80,5 @@ export async function runMatchedCodingRepairBenchmarkV3(
     learningEvidenceDigest,
     pairDigest: sha256(canonicalJson(evidence)),
   };
+  return bindCodingRepairBenchmarkAuthority(result);
 }
