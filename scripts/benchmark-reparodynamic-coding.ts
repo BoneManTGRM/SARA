@@ -93,7 +93,13 @@ const result = await runMatchedCodingRepairBenchmark({
   constitutionDigest,
   memoryContextDigest: memoryContext.contextDigest,
   baseline,
-  verify: verifyGenomeLabProgramCandidate,
+  verify: async (candidate) => verifyGenomeLabProgramCandidate({
+    candidate,
+    objective,
+    acceptanceCriteria,
+    constitutionDigest,
+    maximumBudgetUsd: INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd,
+  }),
   model: createLunaCodingRepairModel({ client, context }),
   limits: INITIAL_CODING_REPAIR_LIMITS,
 });
