@@ -3,7 +3,7 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import type { Capability } from "./types.ts";
 
 export const REVENUE_CAPABILITY_MIGRATION_ID = "revenue-pilot-capabilities" as const;
-export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 3 as const;
+export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 4 as const;
 
 type Definition = {
   id: string;
@@ -33,7 +33,9 @@ const DEFINITIONS: readonly Definition[] = [
     name: "Independent report verification",
     implementationFiles: ["src/revenue-pilot.ts", "src/revenue-pilot-operator.ts"],
     evidenceTests: ["tests/revenue-pilot.test.ts", "tests/revenue-pilot-operator.test.ts"],
-    limitations: ["Logical role separation is enforced; the service remains owner-reviewed."],
+    limitations: [
+      "Logical role separation is enforced; automated delivery is disclosed and requires a passing verifier.",
+    ],
   },
   {
     id: "delivery-package-generation",
@@ -43,7 +45,9 @@ const DEFINITIONS: readonly Definition[] = [
       "src/revenue-pilot-artifacts.ts",
     ],
     evidenceTests: ["tests/repository-readiness-report.test.ts", "tests/revenue-pilot-operator.test.ts"],
-    limitations: ["Package creation grants no external delivery authority."],
+    limitations: [
+      "External delivery authority is limited to the approved public-repository service and active standing mandate.",
+    ],
   },
 ] as const;
 
