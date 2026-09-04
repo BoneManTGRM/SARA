@@ -152,6 +152,8 @@ assert.equal(result.authority.repositoryMutation, false);
 assert.equal(result.authority.merge, false);
 assert.equal(result.authority.deploy, false);
 assert.equal(result.authority.promotion, false);
+assert.match(result.authorityDigest, /^[a-f0-9]{64}$/u);
+assert.match(result.evidenceEnvelopeDigest, /^[a-f0-9]{64}$/u);
 
 console.log(JSON.stringify({
   proof: "SARA_REPARODYNAMIC_INFORMATION_LEARNING_V3",
