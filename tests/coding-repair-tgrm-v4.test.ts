@@ -6,7 +6,9 @@ import {
   summarizeCodingRepairGovernanceTrend,
 } from "../src/coding-repair-tgrm-governance.ts";
 import { INITIAL_CODING_REPAIR_LIMITS } from "../src/coding-repair-policy.ts";
-import type { CodingRepairAttemptLesson } from "../src/coding-repair-types.ts";
+import { buildCodingRepairPrompt } from "../src/coding-repair-prompt.ts";
+import type { CodingRepairAttemptLesson, ProgramVerificationResult } from "../src/coding-repair-types.ts";
+import type { ProgramCandidateProposal } from "../src/types.ts";
 
 const digest = (value: string) => sha256(value);
 
@@ -97,5 +99,57 @@ describe("TGRM V4 semantic stagnation governance", () => {
     assert.equal(trend.noGainStreak, 0);
     assert.equal(trend.action, "advance");
     assert.equal(trend.allowSameTacticFamily, true);
+  });
+
+  it("projects a deterministic rethink instruction to Luna after semantic stagnation", () => {
+    const candidate: ProgramCandidateProposal = {
+      schemaVersion: 1,
+      candidateKind: "typescript_program",
+      programName: "v4 fixture",
+      summary: "fixture",
+      limitations: [],
+      files: [{ path: "src/value.ts", content: "export const value = 1;\n" }],
+    };
+    const verification: ProgramVerificationResult = {
+      passed: false,
+      score: 0.8,
+      artifactDigest: digest("artifact"),
+      failures: [{
+        kind: "behavior",
+        code: "VALUE_WRONG",
+        file: "src/value.ts",
+        line: 1,
+        column: 1,
+        evidenceDigest: digest("evidence"),
+        fingerprint: digest("failure"),
+        severity: "medium",
+        existedBeforeRepair: true,
+      }],
+      completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
+      evidenceDigests: [digest("evidence")],
+    };
+
+    const prompt = buildCodingRepairPrompt({
+      objective: "Return the correct value.",
+      acceptanceCriteria: ["Value is correct."],
+      candidate,
+      artifactDigest: verification.artifactDigest,
+      failures: verification.failures,
+      previouslyPassingChecks: ["source_policy", "syntax", "typecheck", "artifact_integrity"],
+      remainingCycles: 1,
+      remainingCostUsd: 0.1,
+      verifiedLessons: [],
+      constitutionDigest: digest("constitution"),
+      limits: INITIAL_CODING_REPAIR_LIMITS,
+      strategy: "surgical",
+      attemptLessons: [
+        lesson({ cycle: 1, proposalDigest: digest("proposal-a") }),
+        lesson({ cycle: 2, proposalDigest: digest("proposal-b"), proposedArtifactDigest: digest("proposed-b") }),
+      ],
+    });
+
+    assert(prompt.includes('"action":"rethink"'));
+    assert(prompt.includes('"allowSameTacticFamily":false'));
+    assert(prompt.includes("materially different tactic family"));
   });
 });
