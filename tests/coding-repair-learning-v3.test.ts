@@ -2,12 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { sha256 } from "../src/canonical.ts";
 import { runCodingRepairController, type CodingRepairModel } from "../src/coding-repair-controller.ts";
-import {
-  projectCodingRepairAttemptLessonsForModel,
-} from "../src/coding-repair-lessons.ts";
-import {
-  summarizeCodingRepairSourceChanges,
-} from "../src/coding-repair-source-signals.ts";
+import { projectCodingRepairAttemptLessonsForModel } from "../src/coding-repair-information-lessons.ts";
+import { summarizeCodingRepairSourceChanges } from "../src/coding-repair-source-signals.ts";
 import type { CodingFailureSignal, ProgramVerificationResult } from "../src/coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "../src/types.ts";
 
@@ -66,15 +62,29 @@ const baseline = candidate([
   "",
 ].join("\n"));
 
+function firstRepair(): string {
+  return [
+    "export function retryDelay(attempt: number, baseMs: number, capMs: number): number {",
+    "  if (!Number.isInteger(attempt) || attempt < 0) throw new RangeError('invalid');",
+    "  return baseMs * attempt;",
+    "}",
+    "",
+  ].join("\n");
+}
+
+function completeRepair(): string {
+  return [
+    "export function retryDelay(attempt: number, baseMs: number, capMs: number): number {",
+    "  if (!Number.isInteger(attempt) || attempt < 0) throw new RangeError('invalid');",
+    "  return Math.min(capMs, baseMs * 2 ** attempt);",
+    "}",
+    "",
+  ].join("\n");
+}
+
 describe("information-dense Reparodynamic learning v3", () => {
   it("summarizes source tactics deterministically without source literals or protected-test content", () => {
-    const repaired = candidate([
-      "export function retryDelay(attempt: number, baseMs: number, capMs: number): number {",
-      "  if (!Number.isInteger(attempt) || attempt < 0) throw new RangeError('invalid');",
-      "  return Math.min(capMs, baseMs * 2 ** attempt);",
-      "}",
-      "",
-    ].join("\n"));
+    const repaired = candidate(completeRepair());
     const first = summarizeCodingRepairSourceChanges({
       before: baseline,
       after: repaired,
@@ -101,6 +111,7 @@ describe("information-dense Reparodynamic learning v3", () => {
   it("feeds compact semantic failure and source-tactic evidence to the next model call", async () => {
     const observedLessons: Array<ReturnType<typeof projectCodingRepairAttemptLessonsForModel>> = [];
     let modelCalls = 0;
+
     await runCodingRepairController({
       baseline,
       verify: async (proposal) => verify(proposal),
@@ -110,22 +121,10 @@ describe("information-dense Reparodynamic learning v3", () => {
           observedLessons.push(projectCodingRepairAttemptLessonsForModel(request.attemptLessons ?? []));
           const current = request.candidate.files[0].content;
           const replacementText = modelCalls === 1
-            ? [
-              "export function retryDelay(attempt: number, baseMs: number, capMs: number): number {",
-              "  if (!Number.isInteger(attempt) || attempt < 0) throw new RangeError('invalid');",
-              "  return baseMs * attempt;",
-              "}",
-              "",
-            ].join("\n")
+            ? firstRepair()
             : modelCalls === 2
               ? current.replace("baseMs * attempt", "Math.round(baseMs * attempt)")
-              : [
-                "export function retryDelay(attempt: number, baseMs: number, capMs: number): number {",
-                "  if (!Number.isInteger(attempt) || attempt < 0) throw new RangeError('invalid');",
-                "  return Math.min(capMs, baseMs * 2 ** attempt);",
-                "}",
-                "",
-              ].join("\n");
+              : completeRepair();
           return {
             proposal: {
               schemaVersion: 1,
@@ -149,6 +148,7 @@ describe("information-dense Reparodynamic learning v3", () => {
 
     assert.equal(modelCalls, 3);
     assert.equal(observedLessons[0].length, 0);
+    assert.equal(observedLessons[1].length, 1);
     assert.equal(observedLessons[1][0].afterFailures[0].code, "RETRY_DELAY_CAP_REMAINS");
     assert(observedLessons[1][0].sourceSignals.includes("call:Number.isInteger:+1"));
     assert.equal("championArtifactDigest" in observedLessons[1][0], false);
@@ -156,7 +156,7 @@ describe("information-dense Reparodynamic learning v3", () => {
     assert.equal(JSON.stringify(observedLessons).includes(PRIVATE_LITERAL), false);
   });
 
-  it("lets a fresh held-out deterministic model use rejected tactics without more cycles or authority", async () => {
+  it("uses a rejected tactic on a fresh deterministic holdout without more cycles or authority", async () => {
     let calls = 0;
     const model: CodingRepairModel = {
       async propose(request) {
@@ -167,22 +167,10 @@ describe("information-dense Reparodynamic learning v3", () => {
           lesson.outcome === "rolled_back" && lesson.sourceSignals.includes("call:Math.round:+1")
         ));
         const replacementText = calls === 1
-          ? [
-            "export function retryDelay(attempt: number, baseMs: number, capMs: number): number {",
-            "  if (!Number.isInteger(attempt) || attempt < 0) throw new RangeError('invalid');",
-            "  return baseMs * attempt;",
-            "}",
-            "",
-          ].join("\n")
+          ? firstRepair()
           : !sawRejectedRound
             ? current.replace("baseMs * attempt", "Math.round(baseMs * attempt)")
-            : [
-              "export function retryDelay(attempt: number, baseMs: number, capMs: number): number {",
-              "  if (!Number.isInteger(attempt) || attempt < 0) throw new RangeError('invalid');",
-              "  return Math.min(capMs, baseMs * 2 ** attempt);",
-              "}",
-              "",
-            ].join("\n");
+            : completeRepair();
         return {
           proposal: {
             schemaVersion: 1,
@@ -219,7 +207,7 @@ describe("information-dense Reparodynamic learning v3", () => {
     ]);
   });
 
-  it("keeps source summaries and model projections bounded", () => {
+  it("keeps source summaries bounded", () => {
     const huge = candidate([
       "export function retryDelay(attempt: number, baseMs: number, capMs: number): number {",
       ...Array.from({ length: 80 }, (_, index) => `  Math.floor(${index});`),
@@ -232,6 +220,7 @@ describe("information-dense Reparodynamic learning v3", () => {
       after: huge,
       changedPaths: ["src/retry-delay.ts"],
     });
+    assert.equal(summaries.length, 1);
     assert(summaries[0].addedSignals.length <= 24);
   });
 });
