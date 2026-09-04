@@ -6,6 +6,7 @@ import type { CodingFailureSignal, ProgramVerificationResult } from "../src/codi
 import type { ProgramCandidateProposal } from "../src/types.ts";
 
 const digest = (value: string) => sha256(value);
+const behavioralSuiteDigest = digest("v5-proof-behavior-suite");
 const behavioralEvidenceDigest = digest("v5-proof-aggregate-behavior:1-of-4");
 
 const baseline: ProgramCandidateProposal = {
@@ -41,6 +42,7 @@ function verification(candidate: ProgramCandidateProposal): ProgramVerificationR
       schemaVersion: 1,
       passed: 1,
       total: 4,
+      suiteDigest: behavioralSuiteDigest,
       evidenceDigest: behavioralEvidenceDigest,
       disclosure: "aggregate_only",
     },
@@ -99,8 +101,18 @@ assert.equal(gauge.scoreGain, 0);
 assert.deepEqual(gauge.behavioralProgress, {
   disclosure: "aggregate_only",
   comparable: true,
-  baseline: { passed: 1, total: 4, evidenceDigest: behavioralEvidenceDigest },
-  final: { passed: 1, total: 4, evidenceDigest: behavioralEvidenceDigest },
+  baseline: {
+    passed: 1,
+    total: 4,
+    suiteDigest: behavioralSuiteDigest,
+    evidenceDigest: behavioralEvidenceDigest,
+  },
+  final: {
+    passed: 1,
+    total: 4,
+    suiteDigest: behavioralSuiteDigest,
+    evidenceDigest: behavioralEvidenceDigest,
+  },
   passedDelta: 0,
   completionRatioDelta: 0,
 });
