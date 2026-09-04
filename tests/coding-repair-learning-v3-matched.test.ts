@@ -158,6 +158,14 @@ describe("matched information-dense Reparodynamic learning v3", () => {
       result.contract.learning.canary,
       "bounded_information_dense_last_two_lessons_fed_to_model",
     );
+    assert.equal(result.contract.tgrmGovernance.loop, "measure_repair_validate");
+    assert.equal(result.contract.tgrmGovernance.driftMetric, "negative_independent_verifier_movement_only");
+    assert.equal(
+      result.contract.tgrmGovernance.energyMetric,
+      "max_file_or_changed_line_ratio_against_existing_strategy_ceiling",
+    );
+    assert.equal(result.contract.tgrmGovernance.strategyAuthority, "controller_owned_visible_evidence_only");
+    assert.equal(result.contract.tgrmGovernance.authorityEffect, "selection_only_no_ceiling_expansion");
     assert.deepEqual(result.contract.armLimits.control, result.contract.armLimits.canary);
     assert.deepEqual(result.contract.reasoningSchedule.control, result.contract.reasoningSchedule.canary);
     assert.equal(result.authority.maximumCycles, INITIAL_CODING_REPAIR_LIMITS.maximumCycles);
