@@ -69,6 +69,36 @@ export type CodingRepairAttemptOutcome =
   | "duplicate_rejected"
   | "advanced_latest_state";
 
+export type CodingRepairHypothesis =
+  | "input_validation"
+  | "exact_sum_invariant"
+  | "deterministic_ordering"
+  | "state_cleanup"
+  | "retry_safety"
+  | "cross_module_consistency"
+  | "type_contract"
+  | "syntax_integrity"
+  | "security_boundary"
+  | "behavioral_invariant";
+
+export type CodingRepairFailureSummary = {
+  kind: CodingFailureKind;
+  code: string;
+  file: string;
+  line: number;
+  severity: CodingFailureSignal["severity"];
+};
+
+export type CodingRepairSourceChangeSummary = {
+  schemaVersion: 1;
+  path: string;
+  beforeContentDigest: string;
+  afterContentDigest: string;
+  addedSignals: string[];
+  removedSignals: string[];
+  signalDigest: string;
+};
+
 export type CodingRepairAttemptLesson = {
   schemaVersion: 1;
   cycle: number;
@@ -92,6 +122,29 @@ export type CodingRepairAttemptLesson = {
   outcome: CodingRepairAttemptOutcome;
   reasonCode: string;
   rye: number;
+  beforeFailures?: CodingRepairFailureSummary[];
+  afterFailures?: CodingRepairFailureSummary[];
+  sourceChanges?: CodingRepairSourceChangeSummary[];
+  sourceChangesDigest?: string;
+};
+
+export type CodingRepairModelAttemptLesson = {
+  schemaVersion: 1;
+  cycle: number;
+  requestedStrategy: "surgical" | "deep";
+  proposalDigest: string;
+  changedPaths: string[];
+  changedLines: number;
+  scoreDelta: number;
+  lostChecks: CodingVerificationCheck[];
+  newlyReachedChecks: CodingVerificationCheck[];
+  outcome: CodingRepairAttemptOutcome;
+  reasonCode: string;
+  beforeFailures: CodingRepairFailureSummary[];
+  afterFailures: CodingRepairFailureSummary[];
+  sourceSignals: string[];
+  sourceSignalsDigest: string;
+  attemptedHypotheses: CodingRepairHypothesis[];
 };
 
 export type CodingRepairReceipt = {

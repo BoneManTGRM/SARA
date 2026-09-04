@@ -4,16 +4,23 @@ import {
   deriveCodingRepairHypotheses,
   digestCodingRepairAttemptLessons,
   digestCodingRepairHypotheses,
+  digestCodingRepairModelAttemptLessons,
+  projectCodingRepairAttemptLessonsForModel,
 } from "./coding-repair-lessons.ts";
 import type {
   CodingFailureSignal,
   CodingRepairAttemptLesson,
+  CodingRepairHypothesis,
   CodingRepairLimits,
   CodingRepairProposal,
 } from "./coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "./types.ts";
 
 export const CODING_REPAIR_OUTPUT_CONTRACT = "OUTPUT CONTRACT: SARA_CODING_REPAIR_V1";
+
+function uniqueHypotheses(values: readonly CodingRepairHypothesis[]): CodingRepairHypothesis[] {
+  return [...new Set(values)].slice(0, 6);
+}
 
 export function buildCodingRepairPrompt(input: {
   objective: string;
@@ -34,17 +41,32 @@ export function buildCodingRepairPrompt(input: {
   const maximumChangedLines = input.strategy === "surgical"
     ? input.limits.surgicalChangedLines
     : input.limits.deepChangedLines;
-  const previousAttemptLessons = boundCodingRepairAttemptLessons(input.attemptLessons ?? []);
+  const previousAttemptEvidence = boundCodingRepairAttemptLessons(input.attemptLessons ?? []);
+  const previousAttemptLessons = projectCodingRepairAttemptLessonsForModel(previousAttemptEvidence);
   const repairHypotheses = deriveCodingRepairHypotheses({
     acceptanceCriteria: input.acceptanceCriteria,
     failures: input.failures,
-    attemptLessons: previousAttemptLessons,
+    attemptLessons: previousAttemptEvidence,
   });
-  const rejectedProposalDigests = [...new Set(
-    previousAttemptLessons
-      .filter((lesson) => lesson.outcome === "rolled_back" || lesson.outcome === "duplicate_rejected")
-      .map((lesson) => lesson.proposalDigest),
-  )];
+  const rejectedAttempts = previousAttemptLessons.filter((lesson) => (
+    lesson.outcome === "rolled_back" || lesson.outcome === "duplicate_rejected"
+  ));
+  const productiveAttempts = previousAttemptLessons.filter((lesson) => (
+    lesson.outcome === "accepted_improvement"
+  ));
+  const rejectedProposalDigests = rejectedAttempts.map((lesson) => lesson.proposalDigest);
+  const productiveRepairHypotheses = uniqueHypotheses(
+    productiveAttempts.flatMap((lesson) => lesson.attemptedHypotheses),
+  );
+  const rejectedRepairHypotheses = uniqueHypotheses(
+    rejectedAttempts.flatMap((lesson) => lesson.attemptedHypotheses),
+  );
+  const rejectedSourceSignals = [...new Set(
+    rejectedAttempts.flatMap((lesson) => lesson.sourceSignals),
+  )].sort().slice(0, 24);
+  const productiveSourceSignals = [...new Set(
+    productiveAttempts.flatMap((lesson) => lesson.sourceSignals),
+  )].sort().slice(0, 24);
   const unresolvedFailureFingerprints = [...new Set(
     input.failures.map((failure) => failure.fingerprint),
   )].sort().slice(0, 8);
@@ -71,11 +93,17 @@ export function buildCodingRepairPrompt(input: {
       remainingCycles: input.remainingCycles,
       remainingCostUsd: input.remainingCostUsd,
       previousAttemptLessons,
-      previousAttemptLessonsDigest: digestCodingRepairAttemptLessons(previousAttemptLessons),
+      previousAttemptLessonsDigest: digestCodingRepairModelAttemptLessons(previousAttemptEvidence),
+      previousAttemptEvidenceDigest: digestCodingRepairAttemptLessons(previousAttemptEvidence),
       rejectedProposalDigests,
+      productiveRepairHypotheses,
+      rejectedRepairHypotheses,
+      productiveSourceSignals,
+      rejectedSourceSignals,
       repairHypotheses,
       repairHypothesesDigest: digestCodingRepairHypotheses(repairHypotheses),
       smallestSafeChange: "Prefer the smallest source-only replacement that addresses unresolved visible evidence.",
+      learningRule: "Use accepted tactics as provisional positive evidence. Treat rejected tactics as negative evidence, not absolute bans. Do not repeat the same rejected tactic combination unless the proposal materially differs and explains which unresolved visible failure it addresses.",
       rejectedPatternRule: "Do not repeat a rejected proposal for the same champion and failure fingerprint. A later proposal must materially differ and address unresolved visible evidence.",
       verifiedLessons: input.verifiedLessons,
       constitutionDigest: input.constitutionDigest,
