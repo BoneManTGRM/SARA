@@ -1,0 +1,393 @@
+name: Apply PR59 Telegram NICO integration v6
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-20260904
+    paths:
+      - .github/workflows/apply-pr59-telegram-nico-integration-v6.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: apply-pr59-telegram-nico-integration
+  cancel-in-progress: false
+
+jobs:
+  complete-negative-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out latest PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/telegram-nico-gmail-delivery
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Add remaining bounded security regressions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          oauth = Path("src/gmail-oauth-activation.ts")
+          value = oauth.read_text()
+          value = value.replace(
+              'variables: { [this.#variableName]: refreshToken },',
+              'variables: { [this.#variableName]: refreshToken, SARA_RAILWAY_PROJECT_TOKEN: "" },'
+          )
+          oauth.write_text(value)
+
+          oauth_test = Path("tests/gmail-oauth-activation.test.ts")
+          value = oauth_test.read_text().replace(
+              'assert.deepEqual(body.variables.input.variables, { SARA_GMAIL_REFRESH_TOKEN: "refresh-token-value" });',
+              'assert.deepEqual(body.variables.input.variables, { SARA_GMAIL_REFRESH_TOKEN: "refresh-token-value", SARA_RAILWAY_PROJECT_TOKEN: "" });'
+          )
+          oauth_test.write_text(value)
+
+          operator = Path("src/telegram-nico-delivery.ts")
+          value = operator.read_text()
+          old = '''    const raw = await this.#nico.getAutomatedDeliveryPackage({
+      runId: workflow.runId,
+      repositoryUrl: workflow.repositoryUrl,
+      commitSha: workflow.commitSha,
+      artifactIdentity: workflow.artifactIdentity,
+      deliveryMode: "automated",
+    });'''
+          new = '''    const packageRequest = {
+      runId: workflow.runId,
+      repositoryUrl: workflow.repositoryUrl,
+      commitSha: workflow.commitSha,
+      artifactIdentity: workflow.artifactIdentity,
+      deliveryMode: "automated",
+    };
+    const raw = this.#nico.getAutomatedDeliveryPackage.length >= 2
+      ? await this.#nico.getAutomatedDeliveryPackage(workflow.runId, workflow.artifactIdentity)
+      : await this.#nico.getAutomatedDeliveryPackage(packageRequest);'''
+          if old in value:
+              value = value.replace(old, new)
+          operator.write_text(value)
+          PY
+
+          cat > tests/telegram-nico-security-regressions.test.ts <<'TS'
+          import assert from "node:assert/strict";
+          import { createHash } from "node:crypto";
+          import { mkdtemp, rm } from "node:fs/promises";
+          import { tmpdir } from "node:os";
+          import { join } from "node:path";
+          import { afterEach, describe, it } from "node:test";
+          import { TelegramNicoDeliveryOperator } from "../src/telegram-nico-delivery.ts";
+          import { GMAIL_REPORT_SENDER } from "../src/gmail-oauth-activation.ts";
+          import { GMAIL_REPORT_RECIPIENT } from "../src/gmail-verified-report-sender.ts";
+
+          const USER = "paired-owner";
+          const USER_DIGEST = createHash("sha256").update(USER).digest("hex");
+          const REPOSITORY = "https://github.com/sindresorhus/p-map";
+          const COMMIT = "22dda61ea29037ba85af25e84bc5efba77e62f44";
+          const directories: string[] = [];
+
+          afterEach(async () => {
+            await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+          });
+
+          async function stateDirectory(): Promise<string> {
+            const directory = await mkdtemp(join(tmpdir(), "sara-telegram-nico-security-"));
+            directories.push(directory);
+            return directory;
+          }
+
+          function boundaries(options: {
+            commitSha?: string;
+            costUsd?: number;
+            authorizationAllowed?: boolean;
+            createGate?: Promise<void>;
+          } = {}) {
+            const calls = { target: 0, create: 0, get: 0, continue: 0, queue: 0, package: 0, email: 0 };
+            const artifact = {
+              artifact_schema: "nico.authorized-automated-delivery.v1",
+              artifact_id: "artifact-security-1",
+              revision: 1,
+              hash_and_size: { sha256: "0".repeat(64), size_bytes: 1 },
+            };
+            return {
+              calls,
+              targetVerifier: {
+                verify: async () => {
+                  calls.target += 1;
+                  return { repository: "sindresorhus/p-map", repositoryUrl: REPOSITORY, commitSha: COMMIT };
+                },
+              },
+              nicoOperator: {
+                createRun: async () => {
+                  calls.create += 1;
+                  if (options.createGate) await options.createGate;
+                  return {};
+                },
+                getRun: async (runId: unknown) => {
+                  calls.get += 1;
+                  return {
+                    run_id: String(runId),
+                    repository_url: REPOSITORY,
+                    commit_sha: options.commitSha ?? COMMIT,
+                    status: "complete",
+                    terminal: true,
+                    human_reviewed: false,
+                    artifact_identity: artifact,
+                    cost_usd: options.costUsd ?? 0.25,
+                  };
+                },
+                continueRun: async (runId: unknown) => {
+                  calls.continue += 1;
+                  return {
+                    run_id: String(runId), repository_url: REPOSITORY, commit_sha: COMMIT,
+                    status: "complete", terminal: true, human_reviewed: false, artifact_identity: artifact, cost_usd: 0.25,
+                  };
+                },
+                getReviewQueue: async () => { calls.queue += 1; return { unresolved_review_workload: 0 }; },
+                getAutomatedDeliveryPackage: async () => { calls.package += 1; return {}; },
+              },
+              gmailSender: {
+                send: async () => {
+                  calls.email += 1;
+                  throw new Error("must not be reached");
+                },
+              },
+              authorize: async () => options.authorizationAllowed === false
+                ? { allowed: false, code: "MANDATE_BLOCKED", reason: "The standing mandate is inactive." }
+                : { allowed: true, code: "TEST", reason: "test" },
+            };
+          }
+
+          function start(requestId: string) {
+            return {
+              requestId,
+              telegramUserId: USER,
+              action: "nico_assessment_start",
+              repository: REPOSITORY,
+              commitSha: COMMIT,
+              emailVerifiedReport: false,
+            } as const;
+          }
+
+          function build(directory: string, boundary: ReturnType<typeof boundaries>, dailyActionLimit = 10) {
+            return new TelegramNicoDeliveryOperator({
+              stateDirectory: directory,
+              expectedTelegramUserIdSha256: USER_DIGEST,
+              nicoOperator: boundary.nicoOperator,
+              targetVerifier: boundary.targetVerifier,
+              authorize: boundary.authorize,
+              gmailSender: boundary.gmailSender,
+              dailyActionLimit,
+              assessmentCostLimitUsd: 3,
+              now: () => new Date("2026-09-04T16:00:00.000Z"),
+            });
+          }
+
+          describe("Telegram NICO security regressions", () => {
+            it("rejects unsupported actions and arbitrary URLs before any boundary call", async () => {
+              const directory = await stateDirectory();
+              const boundary = boundaries();
+              const operator = build(directory, boundary);
+              await assert.rejects(() => operator.submit({ ...start("request-unsupported-1"), action: "merge" }), /not supported/);
+              await assert.rejects(() => operator.submit({ ...start("request-arbitrary-1"), repository: "https://example.com/owner/repo" }), /canonical public GitHub/);
+              assert.deepEqual(boundary.calls, { target: 0, create: 0, get: 0, continue: 0, queue: 0, package: 0, email: 0 });
+            });
+
+            it("does not perform external work when the standing authorization is denied", async () => {
+              const directory = await stateDirectory();
+              const boundary = boundaries({ authorizationAllowed: false });
+              await assert.rejects(() => build(directory, boundary).submit(start("request-denied-001")), /standing mandate is inactive/);
+              assert.deepEqual(boundary.calls, { target: 0, create: 0, get: 0, continue: 0, queue: 0, package: 0, email: 0 });
+            });
+
+            it("rejects stale run commit evidence and assessments above the exact cost limit", async () => {
+              const staleDirectory = await stateDirectory();
+              const stale = boundaries({ commitSha: "0".repeat(40) });
+              await assert.rejects(() => build(staleDirectory, stale).submit(start("request-stale-0001")), /does not match the exact requested run/);
+              assert.equal(stale.calls.queue, 0);
+              assert.equal(stale.calls.package, 0);
+              assert.equal(stale.calls.email, 0);
+
+              const costlyDirectory = await stateDirectory();
+              const costly = boundaries({ costUsd: 3.01 });
+              await assert.rejects(() => build(costlyDirectory, costly).submit(start("request-costly-001")), /exceeded the bounded assessment cost limit/);
+              assert.equal(costly.calls.package, 0);
+              assert.equal(costly.calls.email, 0);
+            });
+
+            it("enforces the durable daily action limit without starting another assessment", async () => {
+              const directory = await stateDirectory();
+              const boundary = boundaries();
+              const operator = build(directory, boundary, 1);
+              assert.equal((await operator.submit(start("request-daily-0001"))).state, "terminal");
+              await assert.rejects(() => operator.submit(start("request-daily-0002")), /daily action limit/);
+              assert.equal(boundary.calls.create, 1);
+            });
+
+            it("refuses email until the same assessment has a verified package", async () => {
+              const directory = await stateDirectory();
+              const boundary = boundaries();
+              const operator = build(directory, boundary);
+              await operator.submit(start("request-unverified-1"));
+              await assert.rejects(() => operator.submit({
+                requestId: "request-email-0001",
+                assessmentRequestId: "request-unverified-1",
+                telegramUserId: USER,
+                action: "email_verified_report",
+                reportDigest: "a".repeat(64),
+                sender: GMAIL_REPORT_SENDER,
+                recipient: GMAIL_REPORT_RECIPIENT,
+              }), /Only an independently verified NICO automated package may be emailed/);
+              assert.equal(boundary.calls.email, 0);
+            });
+
+            it("serializes concurrent replay and creates only one exact NICO run", async () => {
+              const directory = await stateDirectory();
+              let release!: () => void;
+              const gate = new Promise<void>((resolve) => { release = resolve; });
+              let started!: () => void;
+              const began = new Promise<void>((resolve) => { started = resolve; });
+              const boundary = boundaries({ createGate: gate });
+              const originalCreate = boundary.nicoOperator.createRun;
+              boundary.nicoOperator.createRun = async (...args: unknown[]) => {
+                started();
+                return originalCreate(...args);
+              };
+              const operator = build(directory, boundary);
+              const first = operator.submit(start("request-concurrent-1"));
+              await began;
+              const replay = operator.submit(start("request-concurrent-1"));
+              release();
+              const [left, right] = await Promise.all([first, replay]);
+              assert.deepEqual(right, left);
+              assert.equal(boundary.calls.create, 1);
+            });
+          });
+          TS
+
+          cat > docs/TELEGRAM_NICO_GMAIL_DELIVERY.md <<'MD'
+          # Bounded Telegram NICO and Gmail delivery
+
+          This capability is a narrow operational bridge. The existing Telegram `/luna` route remains analysis-only and does not receive tools, secrets, arbitrary URL access, or certification authority.
+
+          ## Trust boundaries
+
+          - Only the existing Telegram bridge credential plus Cody's paired Telegram identity can submit an operational schema.
+          - The accepted schemas are limited to exact-commit NICO assessment start, status, continuation, automated-package verification, and verified-report email delivery.
+          - Repository targets are canonical public GitHub repository URLs locked to a lowercase 40-character commit SHA.
+          - Accepted commands, deterministic NICO run identity, artifact identity, report digest, and delivery state are persisted before or immediately after each external boundary.
+          - NICO automated delivery requires a terminal exact-target run, zero unresolved review workload, explicit no-human-review state, exact artifact schema/hash/size identity, and independent package verification.
+          - Gmail is fixed to `sara.reparodynamics@gmail.com` as sender and `reparodynamics@gmail.com` as recipient. It cannot read mail, delete mail, alter settings, choose arbitrary recipients, or send arbitrary attachments.
+          - Provider acceptance is recorded as sent; inbox delivery is never inferred.
+          - Emergency stop, exact owner mandate, revocation, daily action limit, one-assessment concurrency, and assessment cost ceiling remain fail-closed.
+
+          ## Gmail activation
+
+          Production starts with Gmail disabled. OAuth requests only OpenID email identity plus `gmail.send`, uses PKCE and a single-use durable state, rejects every account except `sara.reparodynamics@gmail.com`, and stores the refresh token as `SARA_GMAIL_REFRESH_TOKEN` through Railway's protected variable boundary. The temporary Railway project token is cleared in the same successful installation mutation, disabling further OAuth-secret installation after restart.
+
+          No assessment report is emailed until a fresh authenticated sender-identity check succeeds immediately before Gmail submission.
+          MD
+
+      - name: Install exact dependencies
+        run: npm ci
+
+      - name: Run complete focused security suite
+        id: focused
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          node --import tsx --test \
+            tests/telegram-nico-delivery.test.ts \
+            tests/telegram-nico-delivery-workflow.test.ts \
+            tests/telegram-nico-security-regressions.test.ts \
+            tests/telegram-nico-http.test.ts \
+            tests/telegram-nico-production.test.ts \
+            tests/github-exact-target-verifier.test.ts \
+            tests/nico-automated-package-verifier.test.ts \
+            tests/gmail-oauth-activation.test.ts \
+            tests/gmail-verified-report-sender.test.ts \
+            tests/nico-operator.test.ts \
+            tests/nico-http.test.ts \
+            tests/revenue-pilot-operator.test.ts 2>&1 | tee focused.log
+
+      - name: Run strict typecheck
+        id: typecheck
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee typecheck.log
+
+      - name: Run full repository verification
+        id: verify
+        if: steps.focused.outcome == 'success' && steps.typecheck.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify 2>&1 | tee verify.log
+
+      - name: Inspect exact candidate diff
+        id: review
+        if: steps.focused.outcome == 'success' && steps.typecheck.outcome == 'success' && steps.verify.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          git diff --check
+          outside="$(git diff --name-only | awk '!/^(src|tests|docs)\// { count += 1 } END { print count + 0 }')"
+          test "$outside" -eq 0
+          ! grep -RIn --exclude-dir=node_modules --exclude='*.test.ts' 'beardedwarrior5161@gmail.com' src docs/TELEGRAM_NICO_GMAIL_DELIVERY.md
+          ! grep -RIn --exclude-dir=node_modules --exclude='*.test.ts' -E '(gmail|google).*(password|app password)' src docs/TELEGRAM_NICO_GMAIL_DELIVERY.md
+          ! grep -RIn --exclude-dir=node_modules -E 'console\.(log|error|warn).*(refreshToken|clientSecret|authorization)' src/gmail-*.ts src/telegram-nico-*.ts
+          test "$(grep -RIl 'sara.reparodynamics@gmail.com' src | wc -l)" -gt 0
+          test "$(grep -RIl 'reparodynamics@gmail.com' src | wc -l)" -gt 0
+
+      - name: Upload verification logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr59-verification-logs-v6
+          path: |
+            focused.log
+            typecheck.log
+            verify.log
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Comment fail-closed outcome
+        if: steps.focused.outcome != 'success' || steps.typecheck.outcome != 'success' || steps.verify.outcome != 'success' || steps.review.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo 'PR #59 extended security gate failed closed. No candidate commit was pushed.'
+            echo
+            echo "Focused tests: ${{ steps.focused.outcome }}"
+            echo "Typecheck: ${{ steps.typecheck.outcome }}"
+            echo "Full verify: ${{ steps.verify.outcome }}"
+            echo "Diff/security review: ${{ steps.review.outcome }}"
+          } > failure.md
+          gh pr comment 59 --body-file failure.md
+
+      - name: Enforce all gates
+        if: always()
+        run: |
+          test "${{ steps.focused.outcome }}" = "success"
+          test "${{ steps.typecheck.outcome }}" = "success"
+          test "${{ steps.verify.outcome }}" = "success"
+          test "${{ steps.review.outcome }}" = "success"
+
+      - name: Commit and push exact verified extension
+        run: |
+          git config user.name "Reparodynamics"
+          git config user.email "papadenico@yahoo.com"
+          git add src tests docs/TELEGRAM_NICO_GMAIL_DELIVERY.md
+          if git diff --cached --quiet; then
+            echo "The exact extended security candidate is already present."
+            exit 0
+          fi
+          git commit -m "Harden Telegram NICO delivery boundaries"
+          git push origin HEAD:feature/telegram-nico-gmail-delivery
