@@ -1,0 +1,10 @@
+FROM node:22.16.0-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY . .
+RUN npm run typecheck && node --import tsx proof/live-v6-comparison.ts --self-test && rm -f /tmp/sara-v6-comparison-result.json
+ENV NODE_ENV=test
+ENV SARA_BENCHMARK_COMMIT_SHA=d9a5ef84aa44b809fc8af87a027c5ad3eb059000
+USER node
+CMD ["node", "--import", "tsx", "proof/live-v6-comparison.ts", "--live", "--acknowledge-max-spend-usd=0.15"]

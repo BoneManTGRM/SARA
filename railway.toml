@@ -1,0 +1,7 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "proof/Dockerfile.v6-comparison"
+
+[deploy]
+startCommand = "node --import tsx proof/live-v6-comparison.ts --live --acknowledge-max-spend-usd=0.15"
+restartPolicyType = "NEVER"
