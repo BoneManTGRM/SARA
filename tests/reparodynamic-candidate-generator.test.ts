@@ -65,6 +65,7 @@ describe("Reparodynamic CandidateGenerator wrapper", () => {
   });
 
   it("falls back to the original proposal when CANARY cannot verify a repair", async () => {
+    const fallbacks: unknown[] = [];
     const wrapped = createReparodynamicCandidateGenerator({
       base,
       mode: "canary",
@@ -91,7 +92,29 @@ describe("Reparodynamic CandidateGenerator wrapper", () => {
           accountedCostUsd: 0.01,
         }),
       },
+      onFallback: (event) => { fallbacks.push(event); },
     });
     assert.deepEqual(await wrapped.generate(context), baseline);
+    assert.deepEqual(fallbacks, [{ mode: "canary", reasonCode: "unverified_candidate" }]);
+  });
+
+  it("falls back to the original proposal when the repair controller fails", async () => {
+    const fallbacks: unknown[] = [];
+    const wrapped = createReparodynamicCandidateGenerator({
+      base,
+      mode: "canary",
+      verify: async (candidate) => ({
+        passed: false,
+        score: 0.8,
+        artifactDigest: sha256(JSON.stringify(candidate.files)),
+        failures: [{ kind: "behavior", code: "FAILED", file: "src/value.ts", line: 1, column: 1, evidenceDigest: "e".repeat(64), fingerprint: "f".repeat(64), severity: "medium", existedBeforeRepair: true }],
+        completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
+        evidenceDigests: ["d".repeat(64)],
+      }),
+      model: { propose: async () => { throw new Error("model unavailable"); } },
+      onFallback: (event) => { fallbacks.push(event); },
+    });
+    assert.deepEqual(await wrapped.generate(context), baseline);
+    assert.deepEqual(fallbacks, [{ mode: "canary", reasonCode: "repair_controller_error" }]);
   });
 });
