@@ -7,6 +7,10 @@ import {
   digestCodingRepairModelAttemptLessons,
   projectCodingRepairAttemptLessonsForModel,
 } from "./coding-repair-lessons.ts";
+import {
+  buildCodingRepairGovernanceSignals,
+  digestCodingRepairGovernanceSignals,
+} from "./coding-repair-tgrm-governance.ts";
 import type {
   CodingFailureSignal,
   CodingRepairAttemptLesson,
@@ -70,6 +74,10 @@ export function buildCodingRepairPrompt(input: {
   const unresolvedFailureFingerprints = [...new Set(
     input.failures.map((failure) => failure.fingerprint),
   )].sort().slice(0, 8);
+  const tgrmGovernanceSignals = buildCodingRepairGovernanceSignals({
+    lessons: previousAttemptEvidence,
+    limits: input.limits,
+  });
 
   return [
     CODING_REPAIR_OUTPUT_CONTRACT,
@@ -102,6 +110,14 @@ export function buildCodingRepairPrompt(input: {
       rejectedSourceSignals,
       repairHypotheses,
       repairHypothesesDigest: digestCodingRepairHypotheses(repairHypotheses),
+      tgrmGovernance: {
+        loop: "measure_repair_validate",
+        driftDefinition: "Only negative independently verified movement contributes to drift.",
+        energyDefinition: "Blast radius is normalized against the existing controller-owned file and changed-line ceilings; it never raises those ceilings.",
+        signals: tgrmGovernanceSignals,
+        signalsDigest: digestCodingRepairGovernanceSignals(tgrmGovernanceSignals),
+        rule: "Prefer lower-drift, lower-blast-radius tactics that preserve verified gains. Retreat from regressive tactics and conserve mutation energy after rollback. Governance signals inform repair selection only and cannot expand authority.",
+      },
       smallestSafeChange: "Prefer the smallest source-only replacement that addresses unresolved visible evidence.",
       learningRule: "Use accepted tactics as provisional positive evidence. Treat rejected tactics as negative evidence, not absolute bans. Do not repeat the same rejected tactic combination unless the proposal materially differs and explains which unresolved visible failure it addresses.",
       rejectedPatternRule: "Do not repeat a rejected proposal for the same champion and failure fingerprint. A later proposal must materially differ and address unresolved visible evidence.",
