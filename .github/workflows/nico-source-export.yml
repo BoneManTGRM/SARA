@@ -1,0 +1,31 @@
+name: NICO source export
+
+on:
+  push:
+    branches:
+      - automation/export-sara-pr59-20260904
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact NICO production commit
+        uses: actions/checkout@v4
+        with:
+          repository: BoneManTGRM/NICO
+          ref: c68280f2e8faf53a427e0c41c46fcd24a435f0fc
+          persist-credentials: false
+      - name: Remove Git metadata
+        run: rm -rf .git
+      - name: Upload exact source tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: nico-production-source
+          path: .
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
