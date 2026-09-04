@@ -355,11 +355,26 @@ async function handlePublicRequest(
   }
   if (request.method === "GET" && url.pathname === "/health") {
     const status = await kernel.getStatus();
+    const now = Date.now();
+    const mandate = status.standingMandate;
+    const standingMandateActive = Boolean(
+      mandate
+      && !mandate.revokedAt
+      && Date.parse(mandate.startsAt) <= now
+      && now < Date.parse(mandate.expiresAt),
+    );
     json(response, 200, {
       ok: true,
       constitutionVerified: status.constitution.verified,
       emergencyStopped: status.emergencyStopped,
       workerConfigured: Boolean(options.runtimeStatus),
+      commerceConfigured: Boolean(options.commerce),
+      nicoConfigured: Boolean(options.nicoOperator),
+      autonomousPaidFulfillment: Boolean(
+        standingMandateActive
+        && mandate?.allowedActions.includes("fixed_service_fulfillment")
+        && mandate.allowedActions.includes("verified_report_delivery"),
+      ),
     });
     return true;
   }
