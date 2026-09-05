@@ -1,0 +1,152 @@
+name: SARA one-off production HTTP smoke
+on:
+  push:
+    branches: [verify/sara-live-http-20260905]
+    paths: [.github/workflows/sara-live-http-once.yml]
+permissions: {}
+concurrency:
+  group: sara-live-http-20260905
+  cancel-in-progress: false
+jobs:
+  live-http:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read-only production checks, no model requests
+        shell: bash
+        run: |
+          python3 - <<'PYSMOKE'
+          """One-off SARA production HTTP smoke test. No model calls or authenticated actions."""
+          from __future__ import annotations
+          import datetime as dt
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import platform
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+          
+          BASE = "https://sara-operator-production.up.railway.app"
+          EXPECTED_SOURCE = "30a7cb3c21a77b65bf7ba2c4c393897850e61eeb"
+          MAX_BYTES = 262144
+          PUBLIC_FIELDS = ("ok", "constitutionVerified", "emergencyStopped", "workerConfigured")
+          SAFE_HEADERS = ("content-type", "cache-control", "x-content-type-options", "content-security-policy", "x-frame-options", "referrer-policy", "www-authenticate", "x-railway-request-id")
+          # Deliberately fixed before execution. No favorable reruns; no redirect following.
+          CHECKS = (
+              ("health-before", "/health", None, "health"),
+              ("dashboard", "/", None, "dashboard"),
+              ("owner-status-no-token", "/api/status", None, "private"),
+              ("owner-status-invalid-token", "/api/status", "SARA-SMOKE-INVALID-NOT-A-CREDENTIAL", "private"),
+              ("owner-tools-no-token", "/api/tools", None, "private"),
+              ("owner-skills-no-token", "/api/operational-skills", None, "private"),
+              ("health-after", "/health", None, "health"),
+          )
+          
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+          
+          def utc():
+              return dt.datetime.now(dt.timezone.utc).isoformat()
+          
+          def evaluate(kind, code, headers, payload, oversized=False):
+              errors = []
+              if oversized:
+                  errors.append("response_exceeded_bounded_capture")
+              if kind == "dashboard":
+                  if code != 200: errors.append("dashboard_not_200")
+                  if "text/html" not in headers.get("content-type", ""): errors.append("dashboard_not_html")
+                  if headers.get("x-frame-options", "").upper() != "DENY": errors.append("frame_protection_missing")
+                  csp = headers.get("content-security-policy", "")
+                  if "frame-ancestors 'none'" not in csp: errors.append("csp_frame_protection_missing")
+                  if headers.get("referrer-policy") != "no-referrer": errors.append("referrer_protection_missing")
+              else:
+                  if "application/json" not in headers.get("content-type", ""): errors.append("response_not_json")
+                  if "no-store" not in headers.get("cache-control", "").lower(): errors.append("no_store_missing")
+                  try: data = json.loads(payload)
+                  except (ValueError, UnicodeError): data = None
+                  if kind == "health":
+                      if code != 200: errors.append("health_not_200")
+                      if not isinstance(data, dict): errors.append("invalid_health_json")
+                      else:
+                          for field in ("ok", "constitutionVerified", "workerConfigured"):
+                              if data.get(field) is not True: errors.append(field + "_not_true")
+                          if data.get("emergencyStopped") is not False: errors.append("emergency_stop_active_or_unknown")
+                  elif kind == "private":
+                      if code != 401: errors.append("private_endpoint_not_401")
+                      if headers.get("www-authenticate") != "Bearer": errors.append("bearer_challenge_missing")
+                      if data != {"error": "Owner authentication required."}: errors.append("unexpected_private_response")
+              if headers.get("x-content-type-options") != "nosniff": errors.append("nosniff_missing")
+              return errors
+          
+          def run(output_path):
+              started = time.perf_counter()
+              result = {"schemaVersion": 1, "kind": "live_http_smoke_not_coding_benchmark", "startedAt": utc(),
+                  "target": BASE, "expectedSourceFromRailwayMetadata": EXPECTED_SOURCE,
+                  "sourceVerifiedByHttp": False, "workflowSha": os.getenv("GITHUB_SHA"),
+                  "workflowRunId": os.getenv("GITHUB_RUN_ID"), "runAttempt": os.getenv("GITHUB_RUN_ATTEMPT"),
+                  "pythonVersion": platform.python_version(), "platform": platform.platform(),
+                  "requests": [], "providerRequestsIssuedByThisCheck": 0, "modelChargesIssuedByThisCheckUsd": 0,
+                  "priorBenchmarkUnreconciledExposureUsd": 0.15,
+                  "retries": 0, "redirectsFollowed": 0, "authenticatedActions": 0,
+                  "limitations": ["Checks HTTP responsiveness and unauthenticated boundaries only.",
+                      "Does not run SARA coding generation, authenticated verification, or paid comparison.",
+                      "No claim that prior benchmark spending was zero.",
+                      "Expected source identity is control-plane metadata, not reported by these HTTP responses."]}
+              opener = urllib.request.build_opener(NoRedirect)
+              for name, path, invalid_token, kind in CHECKS:
+                  headers = {"Accept": "text/html" if kind == "dashboard" else "application/json", "Cache-Control": "no-cache", "User-Agent": "SARA-Owner-Authorized-ReadOnly-Smoke/1"}
+                  if invalid_token: headers["Authorization"] = "Bearer " + invalid_token
+                  record = {"name": name, "path": path, "method": "GET", "startedAt": utc(),
+                      "authentication": "known-invalid-literal" if invalid_token else "none", "expectedStatus": 401 if kind == "private" else 200}
+                  request_started = time.perf_counter()
+                  try:
+                      try:
+                          response = opener.open(urllib.request.Request(BASE + path, headers=headers, method="GET"), timeout=15)
+                      except urllib.error.HTTPError as error:
+                          response = error
+                      with response:
+                          code = response.code
+                          received_headers = {k.lower(): v for k,v in response.headers.items()}
+                          payload = response.read(MAX_BYTES + 1)
+                      record.update({"status": code, "headers": {k: received_headers[k] for k in SAFE_HEADERS if k in received_headers},
+                          "responseBytesCaptured": len(payload), "responseSha256": hashlib.sha256(payload).hexdigest()})
+                      errors = evaluate(kind, code, received_headers, payload, len(payload) > MAX_BYTES)
+                      # Never persist an unexpected private response or raw HTML.
+                      if kind == "health":
+                          try:
+                              decoded = json.loads(payload)
+                              if isinstance(decoded, dict):
+                                  record["publicHealth"] = {k: decoded.get(k) if type(decoded.get(k)) is bool else None for k in PUBLIC_FIELDS}
+                          except (ValueError, UnicodeError):
+                              pass
+                      elif kind == "private" and not errors:
+                          record["safeResponse"] = {"error": "Owner authentication required."}
+                      record["errors"] = errors
+                  except Exception as error:
+                      record.update({"status": None, "errors": ["transport_or_capture_failure"], "exceptionType": type(error).__name__})
+                  record["elapsedMilliseconds"] = round((time.perf_counter() - request_started) * 1000, 3)
+                  record["passed"] = not record["errors"]
+                  result["requests"].append(record)
+                  pathlib.Path(output_path).write_text(json.dumps(result, indent=2) + "\n")
+              result.update({"completedAt": utc(), "elapsedMilliseconds": round((time.perf_counter() - started)*1000,3),
+                  "passed": all(r["passed"] for r in result["requests"]), "requestCount": len(result["requests"])})
+              pathlib.Path(output_path).write_text(json.dumps(result, indent=2) + "\n")
+              print(json.dumps(result, indent=2))
+              return 0 if result["passed"] else 1
+          
+          if __name__ == "__main__":
+              sys.exit(run("sara-http-smoke-results.json"))
+          PYSMOKE
+      - name: Preserve all HTTP outcomes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sara-live-http-${{ github.run_id }}-${{ github.run_attempt }}
+          path: sara-http-smoke-results.json
+          if-no-files-found: error
+          retention-days: 14
