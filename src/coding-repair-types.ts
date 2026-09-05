@@ -23,12 +23,19 @@ export type CodingFailureSignal = {
   existedBeforeRepair: boolean;
 };
 
+export type CodingVerificationCheck =
+  | "source_policy"
+  | "syntax"
+  | "typecheck"
+  | "behavior_tests"
+  | "artifact_integrity";
+
 export type ProgramVerificationResult = {
   passed: boolean;
   score: number;
   artifactDigest: string;
   failures: CodingFailureSignal[];
-  completedChecks: Array<"source_policy" | "syntax" | "typecheck" | "behavior_tests" | "artifact_integrity">;
+  completedChecks: CodingVerificationCheck[];
   evidenceDigests: string[];
 };
 
@@ -56,6 +63,90 @@ export type CodingRepairProposal = {
   limitations: string[];
 };
 
+export type CodingRepairAttemptOutcome =
+  | "accepted_improvement"
+  | "rolled_back"
+  | "duplicate_rejected"
+  | "advanced_latest_state";
+
+export type CodingRepairHypothesis =
+  | "input_validation"
+  | "exact_sum_invariant"
+  | "deterministic_ordering"
+  | "state_cleanup"
+  | "retry_safety"
+  | "cross_module_consistency"
+  | "type_contract"
+  | "syntax_integrity"
+  | "security_boundary"
+  | "behavioral_invariant";
+
+export type CodingRepairFailureSummary = {
+  kind: CodingFailureKind;
+  code: string;
+  file: string;
+  line: number;
+  severity: CodingFailureSignal["severity"];
+};
+
+export type CodingRepairSourceChangeSummary = {
+  schemaVersion: 1;
+  path: string;
+  beforeContentDigest: string;
+  afterContentDigest: string;
+  addedSignals: string[];
+  removedSignals: string[];
+  signalDigest: string;
+};
+
+export type CodingRepairAttemptLesson = {
+  schemaVersion: 1;
+  cycle: number;
+  requestedStrategy: "surgical" | "deep";
+  proposalDigest: string;
+  championArtifactDigest: string;
+  proposedArtifactDigest: string | null;
+  changedPaths: string[];
+  changedFiles: number;
+  changedLines: number;
+  beforeScore: number;
+  afterScore: number;
+  scoreDelta: number;
+  beforeFailureFingerprints: string[];
+  afterFailureFingerprints: string[];
+  beforeCompletedChecks: CodingVerificationCheck[];
+  afterCompletedChecks: CodingVerificationCheck[];
+  preservedChecks: CodingVerificationCheck[];
+  lostChecks: CodingVerificationCheck[];
+  newlyReachedChecks: CodingVerificationCheck[];
+  outcome: CodingRepairAttemptOutcome;
+  reasonCode: string;
+  rye: number;
+  beforeFailures?: CodingRepairFailureSummary[];
+  afterFailures?: CodingRepairFailureSummary[];
+  sourceChanges?: CodingRepairSourceChangeSummary[];
+  sourceChangesDigest?: string;
+};
+
+export type CodingRepairModelAttemptLesson = {
+  schemaVersion: 1;
+  cycle: number;
+  requestedStrategy: "surgical" | "deep";
+  proposalDigest: string;
+  changedPaths: string[];
+  changedLines: number;
+  scoreDelta: number;
+  lostChecks: CodingVerificationCheck[];
+  newlyReachedChecks: CodingVerificationCheck[];
+  outcome: CodingRepairAttemptOutcome;
+  reasonCode: string;
+  beforeFailures: CodingRepairFailureSummary[];
+  afterFailures: CodingRepairFailureSummary[];
+  sourceSignals: string[];
+  sourceSignalsDigest: string;
+  attemptedHypotheses: CodingRepairHypothesis[];
+};
+
 export type CodingRepairReceipt = {
   cycle: number;
   beforeArtifactDigest: string;
@@ -70,7 +161,7 @@ export type CodingRepairReceipt = {
   outputTokens: number;
   accountedCostUsd: number;
   rye: number;
-  outcome: "accepted_improvement" | "verified_complete" | "rolled_back" | "stopped";
+  outcome: "accepted_improvement" | "verified_complete" | "rolled_back" | "duplicate_rejected" | "stopped";
   reasonCode: string;
 };
 
@@ -93,6 +184,8 @@ export type CodingRepairRun = {
   state: "BASELINE" | "PROVISIONAL_CHAMPION" | "VERIFIED_CANDIDATE" | "STOPPED";
   verification: ProgramVerificationResult;
   receipts: CodingRepairReceipt[];
+  attemptLessons: CodingRepairAttemptLesson[];
+  attemptLessonsDigest: string;
   accountedCostUsd: number;
   elapsedMilliseconds: number;
 };
