@@ -3,10 +3,8 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { canonicalJson, sha256 } from "../src/canonical.ts";
-import {
-  assertCodingBenchmarkSourceRevision,
-  parseCodingBenchmarkCommand,
-} from "../src/coding-repair-benchmark-command.ts";
+import { parseCodingBenchmarkCommand } from "../src/coding-repair-benchmark-command.ts";
+import { verifyCodingBenchmarkSourceIdentity, type CodingBenchmarkSourceIdentityMethod } from "../src/coding-benchmark-source-identity.ts";
 import type { CodingBenchmarkCorpus } from "../src/coding-repair-benchmark-corpus.ts";
 import {
   LIVE_CODING_BENCHMARK_CORPUS,
@@ -39,9 +37,7 @@ import { OpenAIResponsesClient } from "../src/openai-worker.ts";
 const execFileAsync = promisify(execFile);
 const repositoryRoot = new URL("../", import.meta.url);
 
-async function assertExactSourceCheckout(expectedRevision: string): Promise<void> {
-  let revision: string;
-  let trackedChanges: string;
+async function assertExactSourceCheckout(expectedRevision: string): Promise<CodingBenchmarkSourceIdentityMethod> {
   try {
     const [revisionResult, statusResult] = await Promise.all([
       execFileAsync("git", ["rev-parse", "HEAD"], {
@@ -55,14 +51,19 @@ async function assertExactSourceCheckout(expectedRevision: string): Promise<void
         timeout: 5_000,
       }),
     ]);
-    revision = String(revisionResult.stdout);
-    trackedChanges = String(statusResult.stdout);
-  } catch {
-    throw new Error("The live coding benchmark could not verify its Git source checkout.");
-  }
-  assertCodingBenchmarkSourceRevision(expectedRevision, revision);
-  if (trackedChanges.trim()) {
-    throw new Error("The live coding benchmark requires a clean tracked source checkout.");
+    return verifyCodingBenchmarkSourceIdentity({
+      expectedRevision,
+      gitRevision: String(revisionResult.stdout),
+      gitTrackedChanges: String(statusResult.stdout),
+    });
+  } catch (error) {
+    if (error instanceof Error && /clean tracked source checkout|does not match|malformed/iu.test(error.message)) {
+      throw error;
+    }
+    return verifyCodingBenchmarkSourceIdentity({
+      expectedRevision,
+      railwayGitCommitSha: process.env.RAILWAY_GIT_COMMIT_SHA,
+    });
   }
 }
 
@@ -129,7 +130,7 @@ const config = parseCodingBenchmarkCommand({
   env: process.env,
   maximumCases: LIVE_CODING_BENCHMARK_CORPUS.cases.length,
 });
-await assertExactSourceCheckout(config.sourceRevision);
+const sourceIdentityMethod = await assertExactSourceCheckout(config.sourceRevision);
 const armLimits = {
   ...structuredClone(INITIAL_CODING_REPAIR_LIMITS),
   maximumModelSpendUsd: config.maximumModelSpendUsdPerArm,
@@ -175,6 +176,7 @@ const bindings: CodingBenchmarkBindings = {
     architecture: process.arch,
     typescript: ts.version,
     benchmarkRuntimeSchemaVersion: 2,
+    sourceIdentityMethod,
   })),
   authorityDigest: config.authorityDigest,
 };
