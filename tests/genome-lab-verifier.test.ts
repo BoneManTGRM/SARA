@@ -56,7 +56,9 @@ describe("Genome Lab structured verifier", () => {
     const failed = await verifyGenomeLabProgramCandidate({ candidate: executable("export const value: number = 1;\n"), ...context });
     const passed = await verifyGenomeLabProgramCandidate({ candidate: executable("export const value: number = 42;\n"), ...context });
     assert.equal(failed.passed, false);
-    assert(failed.failures.some((failure) => failure.code === "GENOME_LAB_RUNTIME_FAILURE"));
+    const behaviorFailure = failed.failures.find((failure) => failure.code === "GENOME_LAB_RUNTIME_FAILURE");
+    assert(behaviorFailure);
+    assert.equal(behaviorFailure.file, "");
     assert.equal(passed.passed, true);
     assert(passed.completedChecks.includes("behavior_tests"));
   });

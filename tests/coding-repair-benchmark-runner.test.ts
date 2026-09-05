@@ -103,7 +103,7 @@ const context = {
 };
 
 describe("matched identical-Luna coding benchmark runner", () => {
-  it("records a one-pass normal arm and a bounded Reparodynamic arm independently", async () => {
+  it("records correct-first completion in both bounded arms independently", async () => {
     const normal = await runCodingBenchmarkArm({
       method: "luna",
       benchmarkCase,
@@ -142,7 +142,7 @@ describe("matched identical-Luna coding benchmark runner", () => {
     assert.deepEqual(pair.order, ["luna_reparodynamic", "luna"]);
     assert.deepEqual(observedMethods, pair.order);
     assert.equal(pair.normal.verifiedComplete, false);
-    assert.equal(pair.normal.cycles, 1);
+    assert.equal(pair.normal.cycles, 3);
     assert.equal(pair.reparodynamic.verifiedComplete, true);
     assert.equal(pair.reparodynamic.cycles, 2);
     assert.equal(pair.reparodynamic.rollbacks, 1);

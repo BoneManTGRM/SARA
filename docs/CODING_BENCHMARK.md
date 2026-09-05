@@ -8,14 +8,16 @@ PR #52 was an older SHADOW-only foundation and is closed as superseded. It must 
 
 Reparodynamics is already active for bounded coding repair when `SARA_REPARODYNAMIC_CODING_MODE=canary`. The remaining SHADOW boundary applies to the resulting repository mutation: generated code still cannot merge, deploy, or promote itself.
 
-This measurement layer does not rebuild that integration. It determines whether the existing Reparodynamic controller produces a reproducible improvement over the same Luna repair worker without the controller.
+This measurement layer does not rebuild that integration. It compares the existing Reparodynamic controller with a conventional bounded patch-and-memory loop on the same SARA framework. Both deliberately share policy, lesson representation and prompt machinery. This is not an all-Reparodynamics-off control or evidence of a unique framework-wide advantage.
 
 ## Matched comparison
 
 Each frozen case runs two independently recorded arms against the same starting program, objective, acceptance criteria, Luna route and implementation, verifier, environment, authority, and spend limits:
 
-1. `luna`: one bounded Luna repair proposal followed by deterministic verification.
+1. `luna`: up to three bounded proposals in a conventional best-so-far patch-and-memory loop, with last-two failure lessons, exact duplicate protection, monotonic champion retention and rollback.
 2. `luna_reparodynamic`: the same Luna repair contract under the existing controller, with up to three bounded Test → Detect → Repair → Verify cycles, monotonic champion retention, and rollback.
+
+Both arms independently reverify the retained final artifact, including an already-clean starting artifact. An unstable final result is recorded as unfinished. The same finite spend ceiling, safe integer call/file/line limits and protected paths are snapshotted before callbacks. Cases, contexts and bindings are also snapshotted before the first arm. Unspecified execution is `simulated`, never implicitly live.
 
 Arm order alternates by pair index to reduce ordering bias. A failed or interrupted arm is preserved rather than selectively removed or silently rerun. The paired result is finalized only after both immutable arm receipts exist and exactly match the pair.
 
@@ -34,7 +36,7 @@ Every pair is bound to digests for:
 - runtime environment and toolchain
 - target-bound owner authority
 
-Receipts are written before the next paid arm begins. Identical retries are idempotent. Conflicting, orphaned, cherry-picked, or tampered evidence is rejected. An interrupted benchmark resumes only the missing arm or pair.
+Receipts are written before the next paid arm begins. Identical receipt writes are idempotent; this does not authorize repeating a model request. Conflicting, orphaned, cherry-picked, or tampered evidence is rejected. The live CLI first consumes a private durable one-use execution claim for the entire experiment. Successful and interrupted invocations cannot resume paid work. A missing receipt may represent an already-charged request and never authorizes a rerun. Read-only evidence loading remains available. Retain the same private local state directory: privileged deletion, copied ledgers and network filesystems are outside this guard's guarantees.
 
 ## Generated analysis
 
@@ -46,7 +48,7 @@ SARA generates aggregate normal-versus-Reparodynamic metrics and deterministic m
 - relative active-time reduction
 - relative cost reduction when both costs are known
 
-The proof digest binds the summary to the complete set of persisted pair digests. Mixed or changed source, corpus, model, controller, policy, verifier, environment, or authority bindings make the evidence `STALE`.
+The proof digest binds the summary to the complete set of persisted pair digests. Historical one-proposal controls remain historical and must not be relabeled or pooled with this retry-and-memory control. Mixed or changed source, corpus, model, controller, policy, verifier, environment, or authority bindings make the evidence `STALE`.
 
 ## Evidence levels
 
@@ -66,7 +68,7 @@ This layer only emits a recommendation. It never changes the production environm
 
 It recommends immediate rollback to SHADOW if critical regressions increase or a verified-success decrease is statistically supported. It holds on stale, simulated, LAB, or inconclusive evidence.
 
-A staged canary expansion requires current `MEASURED` or `REPLICATED` evidence and at least one of these supported benefits:
+A staged canary expansion requires current `MEASURED` or `REPLICATED` evidence, at least 80% treatment verified success, no increase in noncritical regressions, and at least one of these supported benefits:
 
 - at least a 15 percentage-point verified-success increase with a positive lower 95% confidence bound;
 - at least a 25% active-time reduction at equivalent verified success, with a lower 95% confidence bound of at least 25%; or
@@ -82,17 +84,17 @@ The full no-spend evidence chain is part of `npm run verify`:
 npm run proof:coding-benchmark
 ```
 
-This exercises matched execution, per-arm persistence, pair completion, summary generation, promotion hold, snapshot persistence, proof binding, and crash-resume loading without calling a model.
+This exercises matched execution, per-arm persistence, pair completion, summary generation, promotion hold, snapshot persistence, proof binding, and read-only recovery loading without calling a model. Separate execution-guard tests use real local subprocesses to check concurrent admission and termination before receipt persistence. These tests make no provider requests.
 
 ## Explicit live LAB run
 
-The live runner is manual and fail-closed. A ten-case run has a maximum authorized cap of $3.00 because each of two arms may consume up to $0.15 per case. The actual accounted cost may be lower.
+The live runner is manual, single-use and fail-closed. Run it only with a new exact-source owner grant. This code integration does not issue a grant or replay any historical one. A ten-case run has a maximum authorized cap of $3.00 because each of two arms may consume up to $0.15 per case. The actual accounted cost may be lower.
 
 ```sh
 OPENAI_API_KEY='<credential>' \
 SARA_CODING_BENCHMARK_AUTHORITY_SHA256='<exact-target-approval-digest>' \
 SARA_CODING_BENCHMARK_SOURCE_REVISION='<immutable-git-revision>' \
-npm run benchmark:coding:live -- \
+npm run benchmark:coding:evidence:live -- \
   --acknowledge-lab-only \
   --benchmark-id '<uuid-v4>' \
   --max-spend-usd 3.00 \
@@ -105,3 +107,5 @@ npm run benchmark:coding:live -- \
 The command also verifies that Git `HEAD` equals the bound revision and that tracked source files are clean. It refuses to start without the explicit live flag supplied by the package script, LAB-only acknowledgement, exact target digest, model credential, complete-pair budget, and valid case bounds. It stops before the next arm if the cap would be exceeded. Unknown spend is preserved as evidence and blocks further paid execution.
 
 Do not interpret a successful ten-case run as a general multiplier. Its honest result is LAB evidence from an internally authored synthetic corpus, followed by a `hold` recommendation.
+
+The older `benchmark:coding:live` entrypoint and its allocation fixture remain unchanged; they are not this evidence protocol and are not silently repurposed.

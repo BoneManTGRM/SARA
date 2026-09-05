@@ -142,10 +142,10 @@ function snakeCase(value: string): string {
 }
 
 function assertCount(value: number, field: string): void {
-  if (!Number.isInteger(value) || value < 0) throw new Error(`${field} must be a non-negative integer.`);
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${field} must be a non-negative integer.`);
 }
 
-function assertArm(arm: CodingBenchmarkArmResult, method: CodingBenchmarkMethod): void {
+export function assertCodingBenchmarkArmResult(arm: CodingBenchmarkArmResult, method: CodingBenchmarkMethod): void {
   if ([arm.verifiedComplete, arm.regression, arm.criticalRegression].some(value => typeof value !== "boolean")) {
     throw new Error("Benchmark completion and regression flags must be boolean.");
   }
@@ -202,8 +202,8 @@ function assertPair(pair: CodingBenchmarkPairReceipt): void {
   if (!Number.isFinite(Date.parse(pair.completedAt))) {
     throw new Error("Benchmark completion timestamp is malformed.");
   }
-  assertArm(pair.normal, "luna");
-  assertArm(pair.reparodynamic, "luna_reparodynamic");
+  assertCodingBenchmarkArmResult(pair.normal, "luna");
+  assertCodingBenchmarkArmResult(pair.reparodynamic, "luna_reparodynamic");
 }
 
 function sumNullable(values: readonly (number | null)[]): { total: number | null; known: number } {

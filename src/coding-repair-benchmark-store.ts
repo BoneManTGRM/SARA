@@ -1,8 +1,9 @@
-import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import {
   assertCodingBenchmarkSummaryProof,
+  assertCodingBenchmarkArmResult,
   codingBenchmarkPairDigest,
   evaluateCodingBenchmarkPromotion,
   summarizeCodingBenchmark,
@@ -130,34 +131,7 @@ function assertArmResult(result: CodingBenchmarkArmResult): void {
   if (result.method !== "luna" && result.method !== "luna_reparodynamic") {
     throw new Error("Benchmark arm method is invalid.");
   }
-  if (!Number.isFinite(result.finalScore) || result.finalScore < 0 || result.finalScore > 1) {
-    throw new Error("Benchmark arm score is invalid.");
-  }
-  if (!Number.isFinite(result.activeExecutionMilliseconds) || result.activeExecutionMilliseconds <= 0) {
-    throw new Error("Benchmark arm runtime is invalid.");
-  }
-  if (
-    result.accountedCostUsd !== null
-    && (!Number.isFinite(result.accountedCostUsd) || result.accountedCostUsd < 0)
-  ) throw new Error("Benchmark arm cost is invalid.");
-  for (const value of [result.inputTokens, result.outputTokens]) {
-    if (value !== null && (!Number.isInteger(value) || value < 0)) {
-      throw new Error("Benchmark arm token accounting is invalid.");
-    }
-  }
-  for (const value of [result.cycles, result.rollbacks, result.changedFiles, result.changedLines]) {
-    if (!Number.isInteger(value) || value < 0) throw new Error("Benchmark arm count is invalid.");
-  }
-  if (!Number.isFinite(result.rye) || result.rye < 0) {
-    throw new Error("Benchmark arm RYE is invalid.");
-  }
-  if (!HEX_DIGEST.test(result.finalArtifactDigest)) {
-    throw new Error("Benchmark arm artifact digest is invalid.");
-  }
-  if (
-    !result.verifierEvidenceDigests.length
-    || result.verifierEvidenceDigests.some((digest) => !HEX_DIGEST.test(digest))
-  ) throw new Error("Benchmark arm verifier evidence is invalid.");
+  assertCodingBenchmarkArmResult(result, result.method);
 }
 
 function assertArmReceipt(receipt: CodingBenchmarkArmReceipt): void {
@@ -577,4 +551,47 @@ export function missingCodingBenchmarkArms(
   return (["luna", "luna_reparodynamic"] as const).filter(
     (method) => !completed.has(method),
   );
+}
+
+/**
+ * Irreversibly consumes one private, durable benchmark execution slot before any
+ * provider work. An interrupted run may be inspected, but cannot spend again.
+ * Retain this same owner-private local filesystem; deletion, copied state and
+ * network filesystems are not supported as an exactly-once authority boundary.
+ */
+export async function withCodingBenchmarkExecution<T>(input: {
+  stateDirectory: string;
+  manifest: CodingBenchmarkManifest;
+  execute(): Promise<T>;
+}): Promise<T> {
+  const manifest = structuredClone(input.manifest);
+  assertManifest(manifest);
+  const progress = await loadCodingBenchmarkProgress({ stateDirectory: input.stateDirectory, benchmarkId: manifest.benchmarkId });
+  if (canonicalJson(manifest) !== canonicalJson(progress.manifest)) throw new Error("Benchmark execution manifest bindings do not match.");
+  if (progress.armReceipts.length || progress.pairs.length || progress.snapshots.length) {
+    throw new Error("Benchmark execution is consumed or contains historical evidence; do not resume paid work.");
+  }
+  const directory = benchmarkDirectory(input.stateDirectory, manifest.benchmarkId);
+  let handle;
+  try {
+    handle = await open(join(directory, "execution-claim.json"), "wx", 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error("Benchmark execution was already claimed; interrupted or completed experiments cannot be rerun.");
+    }
+    throw error;
+  }
+  try {
+    await handle.writeFile(`${JSON.stringify({ schemaVersion: 1, benchmarkId: manifest.benchmarkId,
+      authorityDigest: manifest.bindings.authorityDigest, manifestDigest: sha256(canonicalJson(manifest)),
+      claimedAt: new Date().toISOString() })}\n`, "utf8");
+    await handle.sync();
+  } finally { await handle.close(); }
+  // Persist directory entries, including newly initialized benchmark parents.
+  for (const path of [directory, join(input.stateDirectory, "coding-repair-benchmarks"), input.stateDirectory]) {
+    const parent = await open(path, "r");
+    try { await parent.sync(); } finally { await parent.close(); }
+  }
+  // Never delete or reset the claim, including when execute() throws.
+  return input.execute();
 }

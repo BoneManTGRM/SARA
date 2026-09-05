@@ -1,4 +1,6 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
+import { digestCodingRepairProposal } from "./coding-repair-artifacts.ts";
+import { boundCodingRepairAttemptLessons, buildCodingRepairAttemptLesson, passingVerificationChecks } from "./coding-repair-lessons.ts";
 import { runCodingRepairController, type CodingRepairModel } from "./coding-repair-controller.ts";
 import {
   chooseCodingRepairStrategy,
@@ -7,6 +9,7 @@ import {
 } from "./coding-repair-policy.ts";
 import { validateCodingRepairProposal } from "./coding-repair-prompt.ts";
 import type {
+  CodingRepairAttemptLesson,
   CodingRepairLimits,
   CodingRepairProposal,
   ProgramVerificationResult,
@@ -38,6 +41,9 @@ const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const HEX_DIGEST = /^[a-f0-9]{64}$/u;
 
 function assertBenchmarkCase(benchmarkCase: CodingBenchmarkCase, context: CodingBenchmarkContext): void {
+  if (!["synthetic", "reconstructed_sara", "licensed_public"].includes(benchmarkCase.taskClass)) {
+    throw new Error("Coding benchmark task class is unsupported.");
+  }
   if (benchmarkCase.schemaVersion !== 1) {
     throw new Error("Coding benchmark case schema version is unsupported.");
   }
@@ -138,119 +144,96 @@ function cleanBaselineResult(
   };
 }
 
-async function runNormalArm(input: {
+type ArmInput = {
   baseline: ProgramCandidateProposal;
   baselineVerification: ProgramVerificationResult;
   verify(candidate: ProgramCandidateProposal): Promise<ProgramVerificationResult>;
   model: CodingRepairModel;
   limits: CodingRepairLimits;
   started: number;
-}): Promise<CodingBenchmarkArmResult> {
-  const target = input.baselineVerification.failures[0];
-  if (!target) {
-    return {
-      ...cleanBaselineResult("luna", input.baselineVerification, elapsedSince(input.started)),
-      verifiedComplete: false,
-      failureCode: "missing_failure_signal",
-    };
+};
+type ArmOutcome = { result: CodingBenchmarkArmResult; candidate: ProgramCandidateProposal; verification: ProgramVerificationResult };
+
+// A conventional best-so-far patch-and-memory control. Shared lessons and policy
+// deliberately give it the same information and authority as the treatment.
+// This is a conservative controller comparison, not "all Reparodynamics off".
+async function runNormalArm(input: ArmInput): Promise<ArmOutcome> {
+  let champion = structuredClone(input.baseline);
+  let verification = structuredClone(input.baselineVerification);
+  let lessons: CodingRepairAttemptLesson[] = [];
+  const attempted = new Set<string>();
+  const recurrence = new Map<string, number>();
+  const result = { ...cleanBaselineResult("luna", verification, 0), verifiedComplete: false };
+  let ryeSum = 0;
+  for (let cycle = 1; cycle <= input.limits.maximumCycles; cycle++) {
+    const target = verification.failures[0];
+    if (!target) { result.failureCode = "missing_failure_signal"; break; }
+    const seen = (recurrence.get(target.fingerprint) ?? 0) + 1;
+    recurrence.set(target.fingerprint, seen);
+    const decision = chooseCodingRepairStrategy({ failures: verification.failures,
+      cycle: cycle - 1, spentUsd: result.accountedCostUsd!, recurrence: seen, limits: input.limits });
+    if (decision.strategy === "stop") { result.failureCode = decision.reasonCode; break; }
+    const strategy = decision.strategy === "luna_deep" ? "deep" : "surgical";
+    const response = await input.model.propose({ candidate: structuredClone(champion),
+      verification: structuredClone(verification), strategy, cycle,
+      remainingCostUsd: decision.remainingCostUsd, attemptLessons: structuredClone(lessons) });
+    result.cycles++;
+    result.accountedCostUsd! += response.accountedCostUsd;
+    result.inputTokens! += response.inputTokens;
+    result.outputTokens! += response.outputTokens;
+    validateCodingRepairProposal({ proposal: response.proposal, candidate: champion,
+      artifactDigest: verification.artifactDigest,
+      failureFingerprints: new Set(verification.failures.map(failure => failure.fingerprint)),
+      limits: input.limits, expectedStrategy: strategy });
+    const applied = applyProposal(champion, response.proposal);
+    const lineLimit = strategy === "surgical" ? input.limits.surgicalChangedLines : input.limits.deepChangedLines;
+    if (applied.changedLines > lineLimit) throw new Error("Normal benchmark changed-line limit exceeded.");
+    result.changedFiles += response.proposal.changes.length;
+    result.changedLines += applied.changedLines;
+    const proposalDigest = digestCodingRepairProposal(response.proposal);
+    const key = sha256(canonicalJson({ championArtifactDigest: verification.artifactDigest,
+      failureFingerprint: target.fingerprint, proposalDigest }));
+    const duplicate = attempted.has(key);
+    attempted.add(key);
+    const verificationStarted = performance.now();
+    const next = duplicate ? verification : await input.verify(applied.candidate);
+    const passing = new Set(passingVerificationChecks(next));
+    const regression = passingVerificationChecks(verification).some(check => !passing.has(check))
+      || next.failures.some(failure => failure.severity === "critical"
+        || ["security", "timeout", "unknown"].includes(failure.kind));
+    const improved = !duplicate && next.score > verification.score && !regression;
+    const accepted = !duplicate && (next.passed || improved);
+    const outcome = duplicate ? "duplicate_rejected" : next.passed ? "verified_complete"
+      : improved ? "accepted_improvement" : "rolled_back";
+    const reasonCode = duplicate ? "duplicate_proposal" : accepted
+      ? next.passed ? "verified_clean" : "monotonic_improvement" : "regression_or_no_progress";
+    const rye = duplicate ? 0 : repairYieldPerEnergy({ verificationGain: next.score - verification.score,
+      costUsd: response.accountedCostUsd, changedLines: applied.changedLines,
+      verificationMilliseconds: performance.now() - verificationStarted });
+    ryeSum += rye;
+    if (outcome === "rolled_back") result.rollbacks++;
+    if (!next.passed) lessons = boundCodingRepairAttemptLessons([...lessons, buildCodingRepairAttemptLesson({
+      cycle, requestedStrategy: strategy, proposalDigest, championArtifactDigest: verification.artifactDigest,
+      proposedArtifactDigest: duplicate ? null : next.artifactDigest,
+      changedPaths: response.proposal.changes.map(change => change.path),
+      changedFiles: response.proposal.changes.length, changedLines: applied.changedLines,
+      before: verification, after: next, beforeCandidate: champion, afterCandidate: applied.candidate,
+      outcome: outcome === "verified_complete" ? "accepted_improvement" : outcome, reasonCode, rye,
+    })]);
+    result.failureCode = accepted && next.passed ? null : reasonCode;
+    if (accepted) { champion = applied.candidate; verification = next; }
+    if (verification.passed) break;
   }
-  const decision = chooseCodingRepairStrategy({
-    failures: input.baselineVerification.failures,
-    cycle: 0,
-    spentUsd: 0,
-    recurrence: 1,
-    limits: input.limits,
-  });
-  if (decision.strategy === "stop") {
-    return {
-      method: "luna",
-      verifiedComplete: false,
-      finalScore: input.baselineVerification.score,
-      activeExecutionMilliseconds: elapsedSince(input.started),
-      accountedCostUsd: 0,
-      inputTokens: 0,
-      outputTokens: 0,
-      cycles: 0,
-      rollbacks: 0,
-      changedFiles: 0,
-      changedLines: 0,
-      rye: 0,
-      regression: false,
-      criticalRegression: false,
-      failureCode: decision.reasonCode,
-      finalArtifactDigest: input.baselineVerification.artifactDigest,
-      verifierEvidenceDigests: input.baselineVerification.evidenceDigests,
-    };
-  }
-  const strategy = decision.strategy === "luna_deep" ? "deep" : "surgical";
-  const response = await input.model.propose({
-    candidate: structuredClone(input.baseline),
-    verification: structuredClone(input.baselineVerification),
-    strategy,
-    cycle: 1,
-    remainingCostUsd: decision.remainingCostUsd,
-  });
-  if (
-    !Number.isFinite(response.accountedCostUsd)
-    || response.accountedCostUsd < 0
-    || response.accountedCostUsd > decision.remainingCostUsd
-  ) throw new Error("Normal Luna benchmark arm exceeded or malformed its accounted cost.");
-  validateCodingRepairProposal({
-    proposal: response.proposal,
-    candidate: input.baseline,
-    artifactDigest: input.baselineVerification.artifactDigest,
-    failureFingerprints: new Set(input.baselineVerification.failures.map((failure) => failure.fingerprint)),
-    limits: input.limits,
-  });
-  const applied = applyProposal(input.baseline, response.proposal);
-  const lineLimit = strategy === "surgical"
-    ? input.limits.surgicalChangedLines
-    : input.limits.deepChangedLines;
-  if (applied.changedLines > lineLimit) {
-    throw new Error("Normal Luna benchmark arm exceeded its changed-line limit.");
-  }
-  const verificationStarted = performance.now();
-  const finalVerification = await input.verify(applied.candidate);
-  const verificationMilliseconds = performance.now() - verificationStarted;
-  const regression = hasRegression(input.baselineVerification, finalVerification);
-  return {
-    method: "luna",
-    verifiedComplete: finalVerification.passed,
-    finalScore: finalVerification.score,
-    activeExecutionMilliseconds: elapsedSince(input.started),
-    accountedCostUsd: response.accountedCostUsd,
-    inputTokens: response.inputTokens,
-    outputTokens: response.outputTokens,
-    cycles: 1,
-    rollbacks: 0,
-    changedFiles: response.proposal.changes.length,
-    changedLines: applied.changedLines,
-    rye: repairYieldPerEnergy({
-      verificationGain: finalVerification.score - input.baselineVerification.score,
-      costUsd: response.accountedCostUsd,
-      changedLines: applied.changedLines,
-      verificationMilliseconds,
-    }),
-    regression,
-    criticalRegression: hasCriticalRegression(input.baselineVerification, finalVerification),
-    failureCode: finalVerification.passed
-      ? null
-      : regression
-        ? "regression"
-        : finalVerification.failures[0]?.code ?? "verification_failed",
-    finalArtifactDigest: finalVerification.artifactDigest,
-    verifierEvidenceDigests: finalVerification.evidenceDigests,
-  };
+  return { candidate: champion, verification, result: { ...result,
+    verifiedComplete: verification.passed, finalScore: verification.score,
+    finalArtifactDigest: verification.artifactDigest, verifierEvidenceDigests: verification.evidenceDigests,
+    regression: hasRegression(input.baselineVerification, verification),
+    criticalRegression: hasCriticalRegression(input.baselineVerification, verification),
+    rye: result.cycles ? ryeSum / result.cycles : 0, activeExecutionMilliseconds: elapsedSince(input.started),
+  } };
 }
 
-async function runReparodynamicArm(input: {
-  baseline: ProgramCandidateProposal;
-  baselineVerification: ProgramVerificationResult;
-  verify(candidate: ProgramCandidateProposal): Promise<ProgramVerificationResult>;
-  model: CodingRepairModel;
-  limits: CodingRepairLimits;
-  started: number;
-}): Promise<CodingBenchmarkArmResult> {
+async function runReparodynamicArm(input: ArmInput): Promise<ArmOutcome> {
   const baselineDigest = sha256(canonicalJson(input.baseline));
   let servedBaseline = false;
   const run = await runCodingRepairController({
@@ -270,7 +253,7 @@ async function runReparodynamicArm(input: {
     ? receiptsWithModel.reduce((total, receipt) => total + receipt.rye, 0) / receiptsWithModel.length
     : 0;
   const regression = hasRegression(run.baselineVerification, run.verification);
-  return {
+  return { candidate: run.champion, verification: run.verification, result: {
     method: "luna_reparodynamic",
     verifiedComplete: run.state === "VERIFIED_CANDIDATE" && run.verification.passed,
     finalScore: run.verification.score,
@@ -278,7 +261,7 @@ async function runReparodynamicArm(input: {
     accountedCostUsd: run.accountedCostUsd,
     inputTokens: run.receipts.reduce((total, receipt) => total + receipt.inputTokens, 0),
     outputTokens: run.receipts.reduce((total, receipt) => total + receipt.outputTokens, 0),
-    cycles: run.receipts.length,
+    cycles: receiptsWithModel.length,
     rollbacks: run.receipts.filter((receipt) => receipt.outcome === "rolled_back").length,
     changedFiles: run.receipts.reduce((total, receipt) => total + receipt.changedFiles, 0),
     changedLines: run.receipts.reduce((total, receipt) => total + receipt.changedLines, 0),
@@ -292,7 +275,37 @@ async function runReparodynamicArm(input: {
         ?? "verification_failed",
     finalArtifactDigest: run.verification.artifactDigest,
     verifierEvidenceDigests: run.verification.evidenceDigests,
-  };
+  } };
+}
+
+// Capture the ceiling once, including its nested array; caller mutations cannot
+// enlarge an already-admitted arm or the second arm of a pair.
+const BENCHMARK_LIMIT_CEILING = structuredClone(INITIAL_CODING_REPAIR_LIMITS);
+function snapshotLimits(supplied: CodingRepairLimits = BENCHMARK_LIMIT_CEILING): CodingRepairLimits {
+  const limits = structuredClone(supplied);
+  for (const key of ["maximumCycles", "surgicalFiles", "surgicalChangedLines", "deepFiles", "deepChangedLines"] as const) {
+    if (!Number.isSafeInteger(limits[key]) || limits[key] < 1 || limits[key] > BENCHMARK_LIMIT_CEILING[key]) {
+      throw new Error("Coding benchmark limits must not expand the admitted integer ceilings.");
+    }
+  }
+  if (!Number.isFinite(limits.maximumModelSpendUsd) || limits.maximumModelSpendUsd <= 0
+      || limits.maximumModelSpendUsd > BENCHMARK_LIMIT_CEILING.maximumModelSpendUsd) {
+    throw new Error("Coding benchmark spend limit must not expand the admitted ceiling.");
+  }
+  if (!Array.isArray(limits.protectedPaths) || limits.protectedPaths.some(path => typeof path !== "string" || !path.trim())
+      || BENCHMARK_LIMIT_CEILING.protectedPaths.some(path => !limits.protectedPaths.includes(path))) {
+    throw new Error("Coding benchmark protected paths must not be removed.");
+  }
+  Object.freeze(limits.protectedPaths);
+  return Object.freeze(limits);
+}
+
+// Evidence IDs can include run-specific attestations. Compare stable outcomes,
+// then retain both sets of evidence instead of requiring identical timing IDs.
+function stableOutcome(verification: ProgramVerificationResult): string {
+  return canonicalJson({ artifactDigest: verification.artifactDigest, passed: verification.passed,
+    score: verification.score, checks: [...verification.completedChecks].sort(),
+    failures: verification.failures.map(({ kind, code, file, severity }) => ({ kind, code, file, severity })) });
 }
 
 export async function runCodingBenchmarkArm(input: {
@@ -303,60 +316,60 @@ export async function runCodingBenchmarkArm(input: {
   model: CodingRepairModel;
   limits?: CodingRepairLimits;
 }): Promise<CodingBenchmarkArmResult> {
-  assertBenchmarkCase(input.benchmarkCase, input.context);
+  const method = input.method;
+  if (method !== "luna" && method !== "luna_reparodynamic") throw new Error("Coding benchmark method is unsupported.");
+  const benchmarkCase = structuredClone(input.benchmarkCase);
+  const context = structuredClone(input.context);
+  const limits = snapshotLimits(input.limits);
+  assertBenchmarkCase(benchmarkCase, context);
   const started = performance.now();
-  const baseline = structuredClone(input.benchmarkCase.baseline);
-  const baselineVerification = await input.verify(structuredClone(baseline));
-  if (baselineVerification.passed) {
-    return cleanBaselineResult(input.method, baselineVerification, elapsedSince(started));
-  }
+  const baseline = benchmarkCase.baseline;
+  const verify = async (candidate: ProgramCandidateProposal) => structuredClone(await input.verify(structuredClone(candidate)));
+  const baselineVerification = await verify(baseline);
   let modelCalls = 0;
-  const trackedModel: CodingRepairModel = {
-    propose: async (request) => {
-      modelCalls += 1;
-      return input.model.propose(request);
-    },
-  };
-  try {
-    if (input.method === "luna") {
-      return await runNormalArm({
-        baseline,
-        baselineVerification,
-        verify: input.verify,
-        model: trackedModel,
-        limits: input.limits ?? INITIAL_CODING_REPAIR_LIMITS,
-        started,
-      });
+  let accounted = 0;
+  const trackedModel: CodingRepairModel = { propose: async (request) => {
+    if (modelCalls >= limits.maximumCycles) throw new Error("Coding benchmark model call limit exceeded.");
+    const available = Math.min(request.remainingCostUsd, limits.maximumModelSpendUsd - accounted);
+    modelCalls++; // Count before the provider, including failed requests.
+    const response = await input.model.propose(structuredClone({ ...request, remainingCostUsd: available }));
+    if (!Number.isFinite(response.accountedCostUsd) || response.accountedCostUsd < 0
+        || response.accountedCostUsd > available) throw new Error("Coding benchmark cost enforcement failed.");
+    if (![response.inputTokens, response.outputTokens].every(count => Number.isSafeInteger(count) && count >= 0)) {
+      throw new Error("Coding benchmark token accounting is malformed.");
     }
-    return await runReparodynamicArm({
-      baseline,
-      baselineVerification,
-      verify: input.verify,
-      model: trackedModel,
-      limits: input.limits ?? INITIAL_CODING_REPAIR_LIMITS,
-      started,
-    });
+    accounted += response.accountedCostUsd;
+    return structuredClone(response);
+  } };
+  let outcome: ArmOutcome;
+  try {
+    outcome = baselineVerification.passed
+      ? { candidate: baseline, verification: baselineVerification,
+          result: cleanBaselineResult(method, baselineVerification, elapsedSince(started)) }
+      : await (method === "luna" ? runNormalArm : runReparodynamicArm)({
+          baseline, baselineVerification, verify, model: trackedModel, limits, started });
   } catch (error) {
     const costFailure = error instanceof Error && /cost|budget/iu.test(error.message);
-    return {
-      method: input.method,
-      verifiedComplete: false,
-      finalScore: baselineVerification.score,
-      activeExecutionMilliseconds: elapsedSince(started),
-      accountedCostUsd: null,
-      inputTokens: null,
-      outputTokens: null,
-      cycles: modelCalls,
-      rollbacks: 0,
-      changedFiles: 0,
-      changedLines: 0,
-      rye: 0,
-      regression: false,
-      criticalRegression: false,
-      failureCode: costFailure ? "cost_enforcement_failed" : "arm_execution_failed",
-      finalArtifactDigest: baselineVerification.artifactDigest,
-      verifierEvidenceDigests: baselineVerification.evidenceDigests,
-    };
+    return { ...cleanBaselineResult(method, baselineVerification, elapsedSince(started)),
+      verifiedComplete: false, accountedCostUsd: modelCalls ? null : 0,
+      inputTokens: modelCalls ? null : 0, outputTokens: modelCalls ? null : 0,
+      cycles: modelCalls, failureCode: costFailure ? "cost_enforcement_failed" : "arm_execution_failed" };
+  }
+  // Every returned candidate, including a clean baseline, gets a fresh final
+  // acceptance check. No previous PASS substitutes for this independent run.
+  try {
+    const final = await verify(outcome.candidate);
+    const stable = stableOutcome(final) === stableOutcome(outcome.verification);
+    return { ...outcome.result, activeExecutionMilliseconds: elapsedSince(started),
+      verifiedComplete: stable && outcome.result.verifiedComplete && final.passed,
+      finalScore: final.score, finalArtifactDigest: final.artifactDigest,
+      regression: hasRegression(baselineVerification, final),
+      criticalRegression: hasCriticalRegression(baselineVerification, final),
+      verifierEvidenceDigests: [...new Set([...outcome.result.verifierEvidenceDigests, ...final.evidenceDigests])],
+      failureCode: stable ? outcome.result.failureCode : "post_verification_failed" };
+  } catch {
+    return { ...outcome.result, verifiedComplete: false, failureCode: "post_verification_failed",
+      activeExecutionMilliseconds: elapsedSince(started) };
   }
 }
 
@@ -369,7 +382,9 @@ function assertRunIdentity(input: {
   if (!Number.isInteger(input.pairIndex) || input.pairIndex < 1 || input.pairIndex > 9_999) {
     throw new Error("Coding benchmark pair index is malformed.");
   }
-  if (Object.values(input.bindings).some((digest) => !HEX_DIGEST.test(digest))) {
+  const keys = ["sourceCommit", "corpusDigest", "modelDigest", "controllerDigest", "policyDigest", "verifierDigest", "environmentDigest", "authorityDigest"].sort();
+  if (canonicalJson(Object.keys(input.bindings).sort()) !== canonicalJson(keys)
+      || Object.values(input.bindings).some((digest) => typeof digest !== "string" || !HEX_DIGEST.test(digest))) {
     throw new Error("Coding benchmark bindings are malformed.");
   }
 }
@@ -387,7 +402,13 @@ export async function runMatchedCodingBenchmarkCase(input: {
   onArm?: (receipt: CodingBenchmarkArmReceipt) => Promise<void> | void;
   completedAt?: () => string;
 }): Promise<CodingBenchmarkPairReceipt> {
+  input = { ...input, benchmarkCase: structuredClone(input.benchmarkCase),
+    context: structuredClone(input.context), bindings: structuredClone(input.bindings), limits: snapshotLimits(input.limits) };
   assertRunIdentity(input);
+  assertBenchmarkCase(input.benchmarkCase, input.context);
+  if (input.executionKind !== undefined && input.executionKind !== "live" && input.executionKind !== "simulated") {
+    throw new Error("Coding benchmark execution kind is unsupported.");
+  }
   const completedAt = input.completedAt ?? (() => new Date().toISOString());
   const order: [CodingBenchmarkMethod, CodingBenchmarkMethod] = input.pairIndex % 2 === 0
     ? ["luna", "luna_reparodynamic"]
@@ -421,7 +442,7 @@ export async function runMatchedCodingBenchmarkCase(input: {
     caseId: input.benchmarkCase.caseId,
     taskClass: input.benchmarkCase.taskClass,
     taskFamily: input.benchmarkCase.taskFamily,
-    executionKind: input.executionKind ?? "live",
+    executionKind: input.executionKind ?? "simulated",
     order,
     bindings: structuredClone(input.bindings),
     normal: results.get("luna")!,

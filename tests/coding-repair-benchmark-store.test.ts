@@ -275,3 +275,18 @@ it("rejects a legacy partial snapshot on reload even with consistent content has
     await assert.rejects(loadCodingBenchmarkProgress({stateDirectory,benchmarkId}), /entire frozen benchmark corpus/);
   } finally { await rm(stateDirectory,{recursive:true,force:true}); }
 });
+
+it("rejects non-boolean outcome flags and unsafe counters at the arm persistence boundary", async () => {
+  const stateDirectory = await temporaryState();
+  try {
+    await initializeCodingBenchmarkStore({ stateDirectory, manifest });
+    for (const field of ["verifiedComplete", "regression", "criticalRegression"] as const) {
+      const receipt = armReceipt("luna");
+      (receipt.result as unknown as Record<string, unknown>)[field] = "false";
+      await assert.rejects(persistCodingBenchmarkArmReceipt({ stateDirectory, receipt }), /boolean/iu);
+    }
+    const receipt = armReceipt("luna"); receipt.result.inputTokens = Number.MAX_SAFE_INTEGER + 1;
+    await assert.rejects(persistCodingBenchmarkArmReceipt({ stateDirectory, receipt }), /integer/iu);
+    assert.equal((await loadCodingBenchmarkProgress({ stateDirectory, benchmarkId })).armReceipts.length, 0);
+  } finally { await rm(stateDirectory, { recursive: true, force: true }); }
+});
