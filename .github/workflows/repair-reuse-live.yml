@@ -2,7 +2,7 @@ name: SARA one-shot empirical repair reuse
 on:
   push:
     branches: [experiment/v8-live-inventory-comparison]
-    paths: [.github/sara/activate-repair-reuse-01.json]
+    paths: [.github/sara/recover-repair-reuse-launch-01.json]
 permissions:
   contents: read
 jobs:
@@ -25,58 +25,77 @@ jobs:
         with:
           node-version: '22.16.0'
       - run: npm ci --ignore-scripts
-      - name: Verify the already-completed exact-source engineering gates
+      - name: Verify source gates and the prior zero-provider launch failure
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import json,os,urllib.request
+          import json,os,urllib.request,urllib.error,hashlib,zipfile,io
           root='https://api.github.com/repos/BoneManTGRM/SARA'
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'}
           def get(path):
-            req=urllib.request.Request(root+path,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
-            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+            with urllib.request.urlopen(urllib.request.Request(root+path,headers=headers),timeout=30) as r:return json.load(r)
           for run in [33945497888,33945497846,33945497917]:
             d=get('/actions/runs/'+str(run))
-            assert d['head_sha']==os.environ['SOURCE_COMMIT'] and d['status']=='completed' and d['conclusion']=='success', 'ENGINEERING_GATE_NOT_GREEN'
+            assert d['head_sha']==os.environ['SOURCE_COMMIT'] and d['status']=='completed' and d['conclusion']=='success','ENGINEERING_GATE_NOT_GREEN'
           checks=get('/commits/'+os.environ['SOURCE_COMMIT']+'/check-runs?per_page=100')['check_runs']
           assert any(c['name']=='Exact-head CodeQL' and c['status']=='completed' and c['conclusion']=='success' for c in checks),'CODEQL_NOT_GREEN'
-          print('Exact source, completed full verification, mechanism proof and CodeQL confirmed.')
+          prior=get('/actions/runs/33945741305');assert prior['status']=='completed' and prior['conclusion']=='failure'
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self,req,fp,code,msg,hdrs,newurl):return None
+          try:
+            urllib.request.build_opener(NoRedirect).open(urllib.request.Request(root+'/actions/artifacts/9963263817/zip',headers=headers),timeout=30)
+            raise RuntimeError('EXPECTED_SIGNED_ARTIFACT_REDIRECT')
+          except urllib.error.HTTPError as e:
+            assert e.code==302
+            location=e.headers['Location'];assert location.startswith('https://')
+          # Follow GitHub's signed archive URL without forwarding the GitHub credential.
+          with urllib.request.urlopen(location,timeout=30) as r:data=r.read(2000001)
+          assert hashlib.sha256(data).hexdigest()=='41faef602ffb107a0930521fe44517a5e2169f8489b81a51e7fb522d548406d6'
+          with zipfile.ZipFile(io.BytesIO(data)) as z:
+            assert sorted(z.namelist())==['claim.json','commit.txt','contract.json','execution.log','source.sha256','source.tar.gz']
+            old=json.loads(z.read('claim.json'));error=z.read('execution.log').decode()
+            assert old['runId']=='33945741305' and old['commit']==os.environ['SOURCE_COMMIT']
+            assert 'repair-reuse-benchmark.ts:49:59' in error and old['triggerCommit'] in error and 'AssertionError' in error
+          os.makedirs('live-evidence',exist_ok=True)
+          open('live-evidence/prior-failed-launch.zip','wb').write(data)
+          print('Prior launch stopped at source identity before audit/model requests; old claim retained unchanged.')
           PY
       - name: Prepare the source-bound contract without model access
         env:
-          GITHUB_SHA: 2d1c5b19c33e5e07a3baeb8766a84e4d36a235de
           SARA_EVIDENCE_DIRECTORY: live-evidence
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
-          node --import tsx proof/repair-reuse-benchmark.ts --plan > live-evidence-plan.json
-      - name: Atomically consume this experiment before any provider request
+          env GITHUB_SHA="$SOURCE_COMMIT" node --import tsx proof/repair-reuse-benchmark.ts --plan > live-evidence-plan.json
+      - name: Create one recovery claim while preserving the original consumed claim
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
           import json,os,base64,urllib.request,datetime
           plan=json.load(open('live-evidence-plan.json'))
-          claim={'schemaVersion':1,'experiment':'sara-exact-repair-reuse-01','contractDigest':plan['contractDigest'],'commit':os.environ['SOURCE_COMMIT'],'triggerCommit':os.environ['GITHUB_SHA'],'runId':os.environ['GITHUB_RUN_ID'],'maximumPhysicalCalls':6,'maximumCostUsd':0.15,'claimedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'authorization':'Owner explicitly requested actual SARA repair-reuse evaluation and evidence; no production activation.'}
-          raw=json.dumps(claim,sort_keys=True).encode()
-          body={'message':'Consume the one-shot SARA empirical repair-reuse grant','branch':'experiment/repair-reuse-claims','content':base64.b64encode(raw).decode()}
-          url='https://api.github.com/repos/BoneManTGRM/SARA/contents/.github/sara/claims/repair-reuse-empirical-01.json'
+          claim={'schemaVersion':1,'experiment':'sara-exact-repair-reuse-01','contractDigest':plan['contractDigest'],'commit':os.environ['SOURCE_COMMIT'],'triggerCommit':os.environ['GITHUB_SHA'],'runId':os.environ['GITHUB_RUN_ID'],'maximumPhysicalCalls':6,'maximumCostUsd':0.15,'claimedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'authorization':'Owner requested completion; deterministic launch repair after proved zero-provider failure, no benchmark changes or selected outcomes.','recoveryOfRun':'33945741305','previousProviderCalls':0,'previousClaimCommit':'72f2bd2d1ee37db7bf6d36c046caaa9d0152cee0','invalidationType':'PRE_PROVIDER_SOURCE_ENVIRONMENT_MISMATCH'}
+          body={'message':'Record one source-pin launch recovery; preserve original claim','branch':'experiment/repair-reuse-claims','content':base64.b64encode(json.dumps(claim,sort_keys=True).encode()).decode()}
+          url='https://api.github.com/repos/BoneManTGRM/SARA/contents/.github/sara/claims/repair-reuse-empirical-01-launch-fix.json'
           request=urllib.request.Request(url,data=json.dumps(body).encode(),method='PUT',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'})
-          # No sha, no overwrite, no retry, no refund. Existing/uncertain claims deny execution.
           with urllib.request.urlopen(request,timeout=30) as r:
             assert r.status==201,'CLAIM_NOT_CREATED'
             receipt=json.load(r)
           claim['claimCommit']=receipt['commit']['sha']
           open('live-evidence/claim.json','w').write(json.dumps(claim,indent=2))
-          print('One-shot grant consumed; claim commit '+claim['claimCommit'])
+          print('Create-only recovery claim: '+claim['claimCommit'])
           PY
       - name: Execute actual SARA components with real Cloudflare model calls
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          GITHUB_SHA: 2d1c5b19c33e5e07a3baeb8766a84e4d36a235de
           SARA_EVIDENCE_DIRECTORY: live-evidence
           SARA_CLAIM_FILE: live-evidence/claim.json
-        run: node --import tsx proof/repair-reuse-benchmark.ts --live > live-evidence/execution.log 2>&1
+        run: |
+          # The checked-out source, not the trigger commit, is the child source identity.
+          # The real trigger SHA and run ID remain separately recorded in claim.json.
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          env GITHUB_SHA="$SOURCE_COMMIT" node --import tsx proof/repair-reuse-benchmark.ts --live > live-evidence/execution.log 2>&1
       - name: Preserve source and evidence, including incomplete runs
         if: always()
         run: |
