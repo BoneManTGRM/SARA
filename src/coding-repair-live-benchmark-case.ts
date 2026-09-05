@@ -1,7 +1,7 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
 import type { CodingBenchmarkCorpus } from "./coding-repair-benchmark-corpus.ts";
 import { verifyGenomeLabProgramCandidate } from "./genome-lab-verifier.ts";
-import type { ProgramVerificationResult } from "./coding-repair-types.ts";
+import type { CodingFailureSignal, ProgramVerificationResult } from "./coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "./types.ts";
 
 export type ProtectedBenchmarkFile = Readonly<{
@@ -129,7 +129,7 @@ export const LIVE_CODING_BENCHMARK_CORPUS: CodingBenchmarkCorpus = Object.freeze
   ],
   limitations: [
     "This is one internally authored bounded TypeScript task and cannot establish a general coding multiplier.",
-    "Protected acceptance tests are verifier-owned and excluded from the model-visible candidate.",
+    "Protected acceptance tests are verifier-owned and excluded from the model-visible candidate and repair feedback.",
     "The matched comparison isolates controller behavior within shared SARA infrastructure; it is not all Reparodynamics versus none.",
   ],
 });
@@ -157,6 +157,45 @@ function assertModelWritableCandidate(candidate: ProgramCandidateProposal): void
   if (expected.size) throw new Error("Live benchmark candidate omitted a frozen writable file.");
 }
 
+function sanitizeProtectedVerifierFailures(result: ProgramVerificationResult): ProgramVerificationResult {
+  const protectedFailures = result.failures.filter((failure) => failure.file.startsWith("tests/"));
+  if (!protectedFailures.length) return result;
+  const evidenceDigest = sha256(canonicalJson({
+    artifactDigest: result.artifactDigest,
+    code: "PROTECTED_ACCEPTANCE_FAILURE",
+    protectedFailureCount: protectedFailures.length,
+  }));
+  const genericFailure: CodingFailureSignal = {
+    kind: "behavior",
+    code: "PROTECTED_ACCEPTANCE_FAILURE",
+    file: "",
+    line: 0,
+    column: 0,
+    evidenceDigest,
+    fingerprint: sha256(canonicalJson({
+      code: "PROTECTED_ACCEPTANCE_FAILURE",
+      artifactDigest: result.artifactDigest,
+    })),
+    severity: "high",
+    existedBeforeRepair: true,
+  };
+  return {
+    ...result,
+    failures: [
+      ...result.failures.filter((failure) => !failure.file.startsWith("tests/")),
+      genericFailure,
+    ],
+    evidenceDigests: [
+      ...new Set([
+        ...result.failures
+          .filter((failure) => !failure.file.startsWith("tests/"))
+          .map((failure) => failure.evidenceDigest),
+        evidenceDigest,
+      ]),
+    ],
+  };
+}
+
 export async function verifyLiveCodingBenchmarkCandidate(input: {
   candidate: ProgramCandidateProposal;
   objective: string;
@@ -175,11 +214,11 @@ export async function verifyLiveCodingBenchmarkCandidate(input: {
       })),
     ],
   };
-  return verifyGenomeLabProgramCandidate({
+  return sanitizeProtectedVerifierFailures(await verifyGenomeLabProgramCandidate({
     candidate: candidateWithProtectedTests,
     objective: input.objective,
     acceptanceCriteria: input.acceptanceCriteria,
     constitutionDigest: input.constitutionDigest,
     maximumBudgetUsd: input.maximumBudgetUsd,
-  });
+  }));
 }
