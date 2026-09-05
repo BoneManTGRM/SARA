@@ -584,6 +584,7 @@ export async function withCodingBenchmarkExecution<T>(input: {
   try {
     await handle.writeFile(`${JSON.stringify({ schemaVersion: 1, benchmarkId: manifest.benchmarkId,
       authorityDigest: manifest.bindings.authorityDigest, manifestDigest: sha256(canonicalJson(manifest)),
+      reservedUsd: manifest.maximumSpendUsd, reservationStatus: "held_until_reconciled",
       claimedAt: new Date().toISOString() })}\n`, "utf8");
     await handle.sync();
   } finally { await handle.close(); }
