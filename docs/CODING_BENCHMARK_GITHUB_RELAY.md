@@ -76,3 +76,19 @@ Require full exact-candidate CI, CodeQL and integrated review before merging.
 
 Primary implementation references: GitHub OpenID Connect reference and its
 published issuer metadata at `https://token.actions.githubusercontent.com/.well-known/openid-configuration`.
+
+## Real issuer compatibility correction
+
+The first live transport proof (33996630519) received 401 on readiness and stopped
+before POST. Its failure is retained. A separate issuer-only diagnostic
+(33996944716) made no SARA or model requests and established the concrete cause:
+GitHub supplied `job_workflow_ref` and `job_workflow_sha` even for this inline job,
+with values equal to the same fixed workflow path and exact source revision. The
+original verifier rejected any presence of either field, before fetching keys.
+
+Admission now accepts their joint absence or their exact matching self-workflow
+pair. Partial, malformed, mismatched or other reusable-workflow pairs still deny
+before key retrieval. All other issuer, signature, immutable identity, source,
+event, expiry, route and original spending-hold checks remain unchanged. Seven
+additional regressions retain the positive reproduction and six denied variants.
+No historical spending is resolved by this authentication correction.
