@@ -13,9 +13,11 @@ import type {ProgramCandidateProposal} from '../src/types.ts';
 import type {WorkerModelClient} from '../src/model-router.ts';
 import {baseline,reference,good,broken,mutations,objective,acceptanceCriteria,protectedTests,assertionCount} from './v7-live-fixture.ts';
 import {evaluatePair} from './v7-live-evaluation.ts';
+import {assertOfflineRecovery,describeBenchmarkFailure,type BenchmarkStage} from './v7-failure-diagnostics.ts';
 
 const SOURCE='b451a41dc7add73613c0580a9b101ddd390a93a6';
 const LIMIT=0.15,ARM_PHYSICAL_LIMIT=LIMIT/2,MAX_CALLS=6;
+assertOfflineRecovery(process.argv);
 const selfTest=process.argv.includes('--self-test');
 const allWrong=process.argv.includes('--all-wrong');
 assert(!allWrong||selfTest,'all-wrong is a self-test only option');
@@ -119,36 +121,41 @@ function modelClient():WorkerModelClient{
 const arms:Array<Record<string,any>>=[];
 for(const arm of contract.armOrder){
  activeArm=arm;const compact=arm==='compact_first';
- const start=performance.now();let verificationMs=0,modelMs=0,attemptedModelCalls=0;
+ const start=performance.now();let verificationMs=0,modelMs=0,attemptedModelCalls=0,verificationCalls=0;
+ const stage:{value:BenchmarkStage}={value:'baseline_verification'};
  const receipts:CodingRepairReceipt[]=[];const requests:Array<Record<string,unknown>>=[];
  const adapter=createLunaCodingRepairModel({client:modelClient(),context,compactRepairContinuations:compact,experimentalCompactFirstProposal:compact});
- const timedVerify=async(c:ProgramCandidateProposal)=>{const t=performance.now();try{return await verify(c);}finally{verificationMs+=performance.now()-t;}};
+ const timedVerify=async(c:ProgramCandidateProposal,finalAudit=false)=>{
+  stage.value=finalAudit?'final_verification':verificationCalls===0?'baseline_verification':'candidate_verification';
+  verificationCalls++;const t=performance.now();try{return await verify(c);}finally{verificationMs+=performance.now()-t;}
+ };
  let result:Record<string,any>;
  try{
   const run=await runCodingRepairController({baseline:structuredClone(baseline),limits:INITIAL_CODING_REPAIR_LIMITS,verify:timedVerify,
    onReceipt:r=>{receipts.push(structuredClone(r));emit('ARM_RECEIPT',{arm,receipt:r});},model:{
     async propose(request){
-     currentCycle=request.cycle;attemptedModelCalls++;const t=performance.now();const inputDigest=sha256(canonicalJson(request));
+     stage.value='model_request';currentCycle=request.cycle;attemptedModelCalls++;const t=performance.now();const inputDigest=sha256(canonicalJson(request));
      try{const output=await adapter.propose({...request,remainingCostUsd:Math.min(request.remainingCostUsd,0.03)});
-      requests.push({cycle:request.cycle,inputDigest,proposalDigest:sha256(canonicalJson(output.proposal)),elapsedMilliseconds:performance.now()-t});return output;
+      stage.value='candidate_validation';requests.push({cycle:request.cycle,inputDigest,proposalDigest:sha256(canonicalJson(output.proposal)),elapsedMilliseconds:performance.now()-t});return output;
      }finally{modelMs+=performance.now()-t;}
     }}});
-  const post=await timedVerify(run.champion);
+  const post=await timedVerify(run.champion,true);
   assert.equal(canonicalJson(post),canonicalJson(run.verification),'independent verification disagrees');
   result={arm,verifiedComplete:post.passed,score:post.score,timeMs:performance.now()-start,modelMilliseconds:modelMs,verificationMilliseconds:verificationMs,
    attemptedModelCalls,logicalModelCalls:requests.length,inputTokens:receipts.reduce((s,r)=>s+r.inputTokens,0),outputTokens:receipts.reduce((s,r)=>s+r.outputTokens,0),
    accountedCostUsd:run.accountedCostUsd,artifactDigest:post.artifactDigest,receipts,attemptLessons:run.attemptLessons,requests,state:run.state,
-   finalSource:run.champion.files.filter(f=>f.path.startsWith('src/')),error:null};
- }catch(error){result={arm,verifiedComplete:false,score:null,timeMs:performance.now()-start,modelMilliseconds:modelMs,verificationMilliseconds:verificationMs,
-  attemptedModelCalls,receipts,requests,finalSource:null,error:error instanceof Error?error.name:'Error'};}
+   finalSource:run.champion.files.filter(f=>f.path.startsWith('src/')),error:null,failure:null};
+ }catch(error){const failure=describeBenchmarkFailure(error,stage.value);result={arm,verifiedComplete:false,score:null,timeMs:performance.now()-start,modelMilliseconds:modelMs,verificationMilliseconds:verificationMs,
+  attemptedModelCalls,receipts,requests,finalSource:null,error:failure.code,failure};}
  const billing=physical.filter(r=>r.arm===arm);
  result.costUsd=selfTest?result.accountedCostUsd??null:billing.every(r=>r.costUsd!==null)?billing.reduce((s,r)=>s+r.costUsd!,0):null;
- result.costUpperBoundUsd=sumUpper(arm);result.changedLines=receipts.reduce((s,r)=>s+r.changedLines,0);
+ result.costUpperBoundUsd=sumUpper(arm);
+ result.changedLines=result.error&&requests.length>receipts.length?null:receipts.reduce((s,r)=>s+r.changedLines,0);
  result.rollbacks=receipts.filter(r=>r.outcome==='rolled_back').length;
  result.acceptedImprovements=receipts.filter(r=>r.outcome==='accepted_improvement').length;
  result.duplicateRejections=receipts.filter(r=>r.outcome==='duplicate_rejected').length;
  result.ryeTotal=receipts.reduce((s,r)=>s+r.rye,0);
- arms.push(result);emit('ARM_COMPLETE',{arm,verifiedComplete:result.verifiedComplete,score:result.score,error:result.error});
+ arms.push(result);emit('ARM_COMPLETE',{arm,verifiedComplete:result.verifiedComplete,score:result.score,error:result.error,failure:result.failure});
 }
 const control=arms.find(a=>a.arm==='full_replacement')!,canary=arms.find(a=>a.arm==='compact_first')!;
 const evaluation=evaluatePair(control as any,canary as any);

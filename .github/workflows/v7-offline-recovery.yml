@@ -1,0 +1,61 @@
+name: V7 offline recovery checks
+on:
+  pull_request:
+    branches: [experiment/v7-live-first-comparison]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/v7-offline-diagnostics'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - run: npm run verify > verification.log 2>&1
+      - run: node --import tsx proof/live-v7-comparison.ts --self-test > self-test.log
+      - run: node --import tsx proof/live-v7-comparison.ts --self-test --all-wrong > all-wrong.log
+      - run: npm run proof:http > http-repeat.log
+      - name: Preserve exact-head evidence
+        if: always()
+        run: |
+          git rev-parse HEAD > commit.txt
+          git archive --format=tar.gz HEAD > source.tar.gz
+          sha256sum source.tar.gz > source.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v7-offline-recovery-${{ github.event.pull_request.head.sha }}
+          path: |
+            commit.txt
+            source.tar.gz
+            source.sha256
+            verification.log
+            self-test.log
+            all-wrong.log
+            http-repeat.log
+          if-no-files-found: error
+  security:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/v7-offline-diagnostics'
+    name: Exact-head CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
