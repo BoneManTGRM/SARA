@@ -1,3 +1,4 @@
+import { codingRepairCandidateDigest } from "../src/experimental-v5/coding-repair-verification.ts";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { sha256 } from "../src/canonical.ts";
@@ -6,7 +7,7 @@ import { INITIAL_CODING_REPAIR_LIMITS } from "../src/coding-repair-policy.ts";
 import type { ProgramVerificationResult } from "../src/experimental-v5/coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "../src/types.ts";
 const baseline: ProgramCandidateProposal = { schemaVersion: 1, candidateKind: "typescript_program", programName: "admission", summary: "offline", limitations: [], files: [{ path: "src/value.ts", content: "export const value = 0;\n" }] };
-const result = (c: ProgramCandidateProposal): ProgramVerificationResult => ({ passed: false, score: 0.5, artifactDigest: sha256(JSON.stringify(c.files)), completedChecks: ["source_policy", "syntax", "typecheck", "artifact_integrity"], evidenceDigests: [sha256("fixture")], failures: [{ kind: "behavior", code: "WRONG", file: "src/value.ts", line: 1, column: 1, severity: "medium", existedBeforeRepair: true, evidenceDigest: sha256("evidence"), fingerprint: sha256("failure") }] });
+const result = (c: ProgramCandidateProposal): ProgramVerificationResult => ({ passed: false, score: 0.5, artifactDigest: codingRepairCandidateDigest(c), completedChecks: ["source_policy", "syntax", "typecheck", "artifact_integrity"], evidenceDigests: [sha256("fixture")], failures: [{ kind: "behavior", code: "WRONG", file: "src/value.ts", line: 1, column: 1, severity: "medium", existedBeforeRepair: true, evidenceDigest: sha256("evidence"), fingerprint: sha256("failure") }] });
 for (const patch of [{ maximumCycles: 4 }, { protectedPaths: [] }]) it(`rejects authority expansion before verification: ${JSON.stringify(patch)}`, async () => {
   let calls = 0;
   await assert.rejects(runCodingRepairController({ baseline, limits: { ...INITIAL_CODING_REPAIR_LIMITS, ...patch }, verify: async c => { calls++; return result(c); }, model: { propose: async () => { throw Error("must not call"); } } }), /limit|protect/iu);

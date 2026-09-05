@@ -33,6 +33,8 @@ export async function claimBenchmarkRun(input: {
   if (grant.experimentId === "41267154-ba42-496a-bb79-1656898ac716") throw new Error("RETIRED_CONTRACT");
   if (RETIRED.has(grant.contractDigest) || RETIRED.has(observed.contractDigest)) throw new Error("RETIRED_CONTRACT");
   if (
+    ![grant.experimentId, grant.contractDigest, grant.implementationCommit, grant.deploymentId,
+      observed.contractDigest, observed.implementationCommit, observed.deploymentId].every(value => typeof value === "string") ||
     !/^[a-z0-9][a-z0-9-]{0,79}$/u.test(grant.experimentId) ||
     !/^[a-f0-9]{64}$/u.test(grant.contractDigest) || !/^[a-f0-9]{40}$/u.test(grant.implementationCommit) ||
     !UUID.test(grant.deploymentId) || !Number.isSafeInteger(grant.expiresAt) || !Number.isSafeInteger(now) ||

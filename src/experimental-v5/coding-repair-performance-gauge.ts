@@ -1,3 +1,4 @@
+import { assertCodingRepairVerification } from "./coding-repair-verification.ts";
 import { canonicalJson, sha256 } from "../canonical.ts";
 import type {
   CodingBehavioralCheckSummary,
@@ -51,11 +52,7 @@ function knownBehavioralChecks(
 export function sanitizeCodingRepairVerification(
   verification: ProgramVerificationResult,
 ): ProgramVerificationResult {
-  if (typeof verification.passed !== "boolean" || !Number.isFinite(verification.score)
-      || verification.score < 0 || verification.score > 1 || !Array.isArray(verification.failures)
-      || (verification.passed && (verification.score !== 1 || verification.failures.length !== 0))) {
-    throw new Error("Invalid coding repair verification result.");
-  }
+  assertCodingRepairVerification(verification);
   const behavioralChecks = knownBehavioralChecks(verification);
   return {
     passed: verification.passed,

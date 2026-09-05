@@ -150,6 +150,11 @@ export function buildCodingRepairPrompt(input: {
   ].join("\n");
 }
 
+function exactFields(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value) &&
+    Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
+}
+
 export function validateCodingRepairProposal(input: {
   proposal: CodingRepairProposal;
   candidate: ProgramCandidateProposal;
@@ -159,6 +164,13 @@ export function validateCodingRepairProposal(input: {
   expectedStrategy: "surgical" | "deep";
 }): void {
   const { proposal, candidate, artifactDigest, failureFingerprints, limits, expectedStrategy } = input;
+  if (!exactFields(proposal, ["schemaVersion", "baseArtifactDigest", "failureFingerprint", "strategy", "changes", "limitations"]) ||
+      !Array.isArray(proposal.changes) || !Array.isArray(proposal.limitations) ||
+      Array.from(proposal.changes).some(change => !exactFields(change, ["path", "expectedContentDigest", "replacementText"]) ||
+        typeof change.path !== "string" || typeof change.expectedContentDigest !== "string" || typeof change.replacementText !== "string") ||
+      Array.from(proposal.limitations).some(item => typeof item !== "string")) {
+    throw new Error("Coding repair proposal failed the strict output contract.");
+  }
   if (proposal.schemaVersion !== 1) throw new Error("Coding repair schema version is unsupported.");
   if (proposal.baseArtifactDigest !== artifactDigest) throw new Error("Coding repair proposal targets a stale artifact.");
   if (!failureFingerprints.has(proposal.failureFingerprint)) throw new Error("Coding repair proposal targets an unknown failure.");
@@ -179,6 +191,9 @@ export function validateCodingRepairProposal(input: {
     }
     if (sha256(current) !== change.expectedContentDigest) {
       throw new Error("Coding repair proposal contains a stale file digest.");
+    }
+    if (Buffer.byteLength(change.replacementText, "utf8") > 16 * 1024) {
+      throw new Error("Coding repair proposal failed the strict output contract.");
     }
     if (!change.replacementText.trim()) throw new Error("Coding repair replacement cannot be empty.");
     seen.add(change.path);

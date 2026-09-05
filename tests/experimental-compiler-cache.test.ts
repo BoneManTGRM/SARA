@@ -12,13 +12,15 @@ function candidate(value = '42'): ProgramCandidateProposal {
  {path:'tests/value.test.ts',content:'import {value} from "../src/index.ts";\nif(value !== 42) throw new Error("expected 42");\n'}]};
 }
 const context={objective:'Return 42',acceptanceCriteria:['The exported value is the number 42.'],constitutionDigest:'a'.repeat(64)};
-test('reuses unchanged external declaration parsing, but performs each behavioral check afresh',async()=>{
+test('deduplicates immutable declaration text, but parses and checks each candidate afresh',async()=>{
  const cache=new ExperimentalCompilerCache();let calls=0;
  const input={candidate:candidate(),experimentalCompilerCache:cache,behaviorCheck:async()=>{calls++;return [];}};
  assert((await verifyProgramCandidate(input)).passed);
  assert((await verifyProgramCandidate(input)).passed);
  assert.equal(calls,2);
- assert(cache.snapshot().hits>0,'unchanged external declaration parse work must be reused');
+ assert(cache.snapshot().hits>0,'unchanged external declaration text must be deduplicated');
+ assert.equal(cache.snapshot().reuseKind,'immutable_declaration_text');
+ assert(cache.snapshot().freshParses>=cache.snapshot().hits);
 });
 test('full cached verifier still rejects wrong behavior and changed types between passing candidates',async()=>{
  const cache=new ExperimentalCompilerCache();
@@ -34,13 +36,13 @@ test('full cached verifier still rejects wrong behavior and changed types betwee
 import {mkdtemp,mkdir,writeFile,rm,unlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-test('same-length dependency changes, missing files, fresh requests and options invalidate parse reuse',async()=>{
+test('same-length dependency changes, missing files, fresh requests and options retain fresh parsing',async()=>{
  const root=await mkdtemp(join(tmpdir(),'sara-declaration-cache-'));
  const dir=join(root,'node_modules','fixture');await mkdir(dir,{recursive:true});const p=join(dir,'index.d.ts');
  const cache=new ExperimentalCompilerCache();const host=cache.createHost({target:ts.ScriptTarget.ES2022});
  try{
   await writeFile(p,'export const value: number;\n');const a=host.getSourceFile(p,ts.ScriptTarget.ES2022)!;
-  assert.equal(host.getSourceFile(p,ts.ScriptTarget.ES2022),a);
+  assert.notEqual(host.getSourceFile(p,ts.ScriptTarget.ES2022),a);
   await writeFile(p,'export const value: string;\n');const b=host.getSourceFile(p,ts.ScriptTarget.ES2022)!;
   assert.notEqual(a,b);assert(b.text.includes('string'));
   assert.notEqual(host.getSourceFile(p,ts.ScriptTarget.ES2022,undefined,true),b);

@@ -7,14 +7,14 @@ Its consumed contract is
 
 ## Integrated capabilities
 
-`ExperimentalCompilerCache` reuses bounded, content-keyed external declaration
-parsing only. Every call still creates a fresh Program/checker, and behavioral
-verification still executes afresh. The original explicit optional cache
-parameters are integrated; omitting them keeps the ordinary implementation.
-No production or frozen benchmark caller constructs or passes a cache. There
-is no environment toggle, package upgrade or diagnostic/PASS-result cache.
-Mutable compiler AST reuse is still experimental, not a general security or
-semantic-equivalence guarantee. Capacity bounds retained text, not heap size.
+`ExperimentalCompilerCache` now retains bounded, content-keyed immutable external
+declaration text only. The post-merge corrective review reproduced unsafe mutable
+AST reuse and callback-context collisions, so parsed SourceFile objects are no
+longer shared. Every request is parsed afresh with its current options; every call
+still creates a fresh Program/checker and executes behavioral verification afresh.
+Omitting the optional parameter keeps the ordinary implementation. No production
+or frozen benchmark caller constructs or passes a cache. A text-cache hit is not
+a parse saving or performance claim. See `POST_MERGE_CORRECTIVE_REVIEW.md`.
 
 `GuardedRepairMemory` retains exact-source, scope-bound, verified recipes with
 quarantine and fresh-verification requirements. It remains an in-memory proof

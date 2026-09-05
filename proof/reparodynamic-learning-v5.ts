@@ -1,3 +1,4 @@
+import { codingRepairCandidateDigest } from "../src/experimental-v5/coding-repair-verification.ts";
 import assert from "node:assert/strict";
 import { sha256 } from "../src/canonical.ts";
 import { runCodingRepairController } from "../src/experimental-v5/coding-repair-controller.ts";
@@ -34,7 +35,7 @@ function verification(candidate: ProgramCandidateProposal): ProgramVerificationR
   return {
     passed: false,
     score: 0.8,
-    artifactDigest: digest(JSON.stringify(candidate.files)),
+    artifactDigest: codingRepairCandidateDigest(candidate),
     failures: [failure],
     completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
     evidenceDigests: [digest("v5-proof-verifier-evidence")],

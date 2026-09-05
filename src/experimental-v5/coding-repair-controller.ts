@@ -1,3 +1,4 @@
+import { codingRepairCandidateDigest } from "./coding-repair-verification.ts";
 import { CodingRepairRejectedAttemptError } from "../coding-repair-rejection.ts";
 import { canonicalJson, sha256 } from "../canonical.ts";
 import { assertReceiptChain, digestCodingRepairProposal } from "../coding-repair-artifacts.ts";
@@ -159,8 +160,13 @@ export async function runCodingRepairController(input: {
   const onReceipt = input.onReceipt;
   let verifierExecutions = 0;
   const verifyCandidate = async (candidate: ProgramCandidateProposal): Promise<ProgramVerificationResult> => {
+    const expectedDigest = codingRepairCandidateDigest(candidate);
     verifierExecutions += 1;
-    return sanitizeCodingRepairVerification(await verify(structuredClone(candidate)));
+    const result = sanitizeCodingRepairVerification(await verify(structuredClone(candidate)));
+    if (result.artifactDigest !== expectedDigest) {
+      throw new Error("Coding repair verification targets another artifact.");
+    }
+    return result;
   };
   let champion = structuredClone(baseline);
   let verification = await verifyCandidate(champion);
@@ -225,14 +231,14 @@ export async function runCodingRepairController(input: {
     }
 
     const modelStrategy = decision.strategy === "luna_deep" ? "deep" : "surgical";
-    const response = await propose({
+    const response = structuredClone(await propose({
       candidate: structuredClone(champion),
       verification: structuredClone(verification),
       strategy: modelStrategy,
       cycle,
       remainingCostUsd: decision.remainingCostUsd,
       attemptLessons: structuredClone(attemptLessons),
-    });
+    }));
     let applied: ReturnType<typeof applyProposal>;
     try {
       if (
@@ -371,7 +377,17 @@ export async function runCodingRepairController(input: {
 
     const beforeVerification = verification;
     const started = performance.now();
-    const nextVerification = await verifyCandidate(applied.candidate);
+    let nextVerification: ProgramVerificationResult;
+    try {
+      nextVerification = await verifyCandidate(applied.candidate);
+    } catch (error) {
+      // A bad verifier response must not erase the already accounted model use.
+      throw new CodingRepairRejectedAttemptError({
+        error, cycle, retainedArtifactDigest: beforeVerification.artifactDigest,
+        proposalDigest, inputTokens: response.inputTokens, outputTokens: response.outputTokens,
+        accountedCostUsd: response.accountedCostUsd, knownRunSpendUsd: accountedCostUsd,
+      });
+    }
     const verificationMilliseconds = performance.now() - started;
     const improved = nextVerification.score > beforeVerification.score && !hasRegression(beforeVerification, nextVerification);
     const outcome: CodingRepairReceipt["outcome"] = nextVerification.passed
