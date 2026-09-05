@@ -1,0 +1,39 @@
+name: SARA open PR source review capture
+on:
+  push:
+    branches: [review/sara-open-pr-integration-20260905]
+    paths: [.github/workflows/open-pr-review-capture.yml]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1 && github.run_number == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 0103cf266f052b8f9c14c4123280560902a77aca
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Capture exact source history, without executing project code
+        run: |
+          set -euo pipefail
+          git fetch --unshallow --no-tags origin 0103cf266f052b8f9c14c4123280560902a77aca
+          git fetch --no-tags origin e07fe3e3965a8fea6d43efb3767e01595a7cecc9 23014289921e671f249ac62f598dbc831ceb6905 a59facdfbaf05f35d8a4e0c87c5758cb5c003d76
+          git update-ref refs/heads/review-main 0103cf266f052b8f9c14c4123280560902a77aca
+          git update-ref refs/heads/review-pr70 e07fe3e3965a8fea6d43efb3767e01595a7cecc9
+          git update-ref refs/heads/review-pr90 23014289921e671f249ac62f598dbc831ceb6905
+          git update-ref refs/heads/review-pr93 a59facdfbaf05f35d8a4e0c87c5758cb5c003d76
+          mkdir -p /tmp/sara-pr-source
+          git bundle create /tmp/sara-pr-source/source.bundle refs/heads/review-main refs/heads/review-pr70 refs/heads/review-pr90 refs/heads/review-pr93
+          git bundle verify /tmp/sara-pr-source/source.bundle
+          git show-ref refs/heads/review-main refs/heads/review-pr70 refs/heads/review-pr90 refs/heads/review-pr93 > /tmp/sara-pr-source/refs.txt
+          cd /tmp/sara-pr-source
+          sha256sum source.bundle refs.txt > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-open-pr-source-history
+          path: /tmp/sara-pr-source
+          retention-days: 7
+          if-no-files-found: error
