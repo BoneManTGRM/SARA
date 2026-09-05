@@ -89,6 +89,39 @@ describe("conservative matched retry-and-memory benchmark", () => {
       assert.equal(result.failureCode, "post_verification_failed");
       assert.equal(result.accountedCostUsd, 0.01);
     });
+    it(`${method}: keeps three repair opportunities inside the same lower arm ceiling`, async () => {
+      const requests: Parameters<CodingRepairModel["propose"]>[0][] = [];
+      const underlying = model([2, 3, 42], requests);
+      const result = await runCodingBenchmarkArm({ method, ...fixture(),
+        limits: { ...INITIAL_CODING_REPAIR_LIMITS, maximumModelSpendUsd: 0.075 },
+        verify: async candidate => verify(candidate), model: { propose: async request => ({
+          ...await underlying.propose(request), accountedCostUsd: 0.02,
+        }) } });
+      assert.equal(result.verifiedComplete, true);
+      assert.equal(result.cycles, 3);
+      assert.equal(result.accountedCostUsd, 0.06);
+      assert.equal(requests.length, 3);
+      for (const [index, request] of requests.entries()) {
+        assert.ok(Math.abs(request.remainingCostUsd - (0.075 - index * 0.02)) < 1e-12);
+      }
+    });
+    it(`${method}: stops an incorrect lower-budget arm without spending its sibling allocation`, async () => {
+      const requests: Parameters<CodingRepairModel["propose"]>[0][] = [];
+      const underlying = model([2, 42], requests);
+      let verifications = 0;
+      const result = await runCodingBenchmarkArm({ method, ...fixture(),
+        limits: { ...INITIAL_CODING_REPAIR_LIMITS, maximumModelSpendUsd: 0.075 },
+        verify: async candidate => { verifications++; return verify(candidate); },
+        model: { propose: async request => ({
+          ...await underlying.propose(request), accountedCostUsd: 0.075,
+        }) } });
+      assert.equal(result.verifiedComplete, false);
+      assert.equal(result.accountedCostUsd, 0.075);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0]!.remainingCostUsd, 0.075);
+      assert.equal(verifications, 3, "baseline, failed proposal, fresh retained artifact");
+      assert.ok(result.verifierEvidenceDigests.length > 0);
+    });
     it(`${method}: rejects larger budgets and cycle limits before any callback`, async () => {
       for (const limits of [
         { ...INITIAL_CODING_REPAIR_LIMITS, maximumCycles: 4 },

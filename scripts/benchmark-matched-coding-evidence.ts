@@ -130,6 +130,10 @@ const config = parseCodingBenchmarkCommand({
   maximumCases: INITIAL_CODING_BENCHMARK_CORPUS.cases.length,
 });
 await assertExactSourceCheckout(config.sourceRevision);
+const armLimits = {
+  ...structuredClone(INITIAL_CODING_REPAIR_LIMITS),
+  maximumModelSpendUsd: config.maximumModelSpendUsdPerArm,
+};
 const corpus = selectedCorpus(config.caseCount);
 const corpusDigest = codingBenchmarkCorpusDigest(corpus);
 const constitutionSource = await readFile(
@@ -216,7 +220,7 @@ for (let index = 0; index < corpus.cases.length; index += 1) {
     if (!missing.has(method)) continue;
     const spentUsd = knownSpend(progress.armReceipts);
     if (
-      spentUsd + INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd
+      spentUsd + armLimits.maximumModelSpendUsd
       > config.maximumSpendUsd + 1e-9
     ) {
       throw new Error(
@@ -232,10 +236,10 @@ for (let index = 0; index < corpus.cases.length; index += 1) {
         objective: benchmarkCase.objective,
         acceptanceCriteria: benchmarkCase.acceptanceCriteria,
         constitutionDigest,
-        maximumBudgetUsd: INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd,
+        maximumBudgetUsd: armLimits.maximumModelSpendUsd,
       }),
       model: createLunaCodingRepairModel({ client, context }),
-      limits: INITIAL_CODING_REPAIR_LIMITS,
+      limits: armLimits,
     });
     const receipt: CodingBenchmarkArmReceipt = {
       schemaVersion: 1,

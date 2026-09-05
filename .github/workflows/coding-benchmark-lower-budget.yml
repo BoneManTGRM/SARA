@@ -1,0 +1,78 @@
+name: Coding benchmark lower-budget exact-source verification
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.head_ref == 'fix/live-benchmark-equal-arm-budget'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EVIDENCE_DIR: ${{ github.workspace }}/verification-evidence
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Bind source and environment
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p "$EVIDENCE_DIR"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          git rev-parse HEAD > "$EVIDENCE_DIR/commit.txt"
+          git rev-parse 'HEAD^{tree}' > "$EVIDENCE_DIR/tree.txt"
+          node --version > "$EVIDENCE_DIR/node-version.txt"
+          date -u +%FT%TZ > "$EVIDENCE_DIR/started-at.txt"
+          git archive HEAD | gzip -n > "$EVIDENCE_DIR/source.tar.gz"
+          sha256sum "$EVIDENCE_DIR/source.tar.gz" > "$EVIDENCE_DIR/source.sha256"
+      - name: Install committed dependencies without lifecycle scripts
+        run: |
+          set -o pipefail
+          npm ci --ignore-scripts 2>&1 | tee "$EVIDENCE_DIR/install.log"
+          npm ls --depth=0 > "$EVIDENCE_DIR/dependency-versions.txt"
+      - name: Full credential-free verification
+        run: |
+          set +e
+          npm run verify 2>&1 | tee "$EVIDENCE_DIR/verification.log"
+          status=${PIPESTATUS[0]}
+          echo "$status" > "$EVIDENCE_DIR/verification-exit.txt"
+          date -u +%FT%TZ > "$EVIDENCE_DIR/finished-at.txt"
+          exit "$status"
+      - name: Retain source, failures and verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coding-budget-${{ github.event.pull_request.head.sha }}
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: error
+  codeql:
+    if: github.head_ref == 'fix/live-benchmark-equal-arm-budget'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: coding-benchmark-lower-budget-exact-head
