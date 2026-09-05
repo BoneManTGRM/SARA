@@ -20,6 +20,12 @@ test("atomic claim admits only one concurrent launch and survives a new invocati
  const changed=input(d);changed.grant.deploymentId="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";changed.observed.deploymentId=changed.grant.deploymentId;
  await assert.rejects(()=>claimBenchmarkRun(changed),/ALREADY_CLAIMED/u);
 }));
+test("renaming an experiment cannot replay the same contract",()=>directoryTest(async d=>{
+ const first=input(d);await claimBenchmarkRun(first);
+ const renamed=input(d);renamed.grant.experimentId="renamed-experiment";
+ await assert.rejects(()=>claimBenchmarkRun(renamed),/ALREADY_CLAIMED/u);
+ assert.equal((await readdir(d)).length,1);
+}));
 test("an incomplete claim still blocks rather than granting a replay",()=>directoryTest(async d=>{
  const {writeFile}=await import("node:fs/promises");const {canonicalJson,sha256}=await import("../src/canonical.ts");
  const x=input(d);const key=sha256(canonicalJson({schemaVersion:1,experimentId:x.grant.experimentId}));
