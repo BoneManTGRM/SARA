@@ -1,0 +1,8 @@
+FROM node:22.16.0-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY . .
+RUN npm run typecheck && node --import tsx proof/live-v7-comparison.ts
+LABEL sara.implementation="b451a41dc7add73613c0580a9b101ddd390a93a6"
+CMD ["node","--import","tsx","proof/live-v7-comparison.ts"]
