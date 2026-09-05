@@ -1,0 +1,37 @@
+name: SARA captured-repair dependability audit
+on:
+  push:
+    branches: [proof/v8-captured-dependability]
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.repository == 'BoneManTGRM/SARA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - name: Replay captured verified repair with original verifier and added runtime checks
+        run: |
+          mkdir -p captured-reuse-evidence
+          node --import tsx proof/audit-v8-captured-reuse.mjs > captured-reuse-evidence/execution.log 2>&1
+      - name: Archive exact source and evidence
+        if: always()
+        run: |
+          mkdir -p captured-reuse-evidence
+          git rev-parse HEAD > captured-reuse-evidence/commit.txt
+          git archive --format=tar.gz HEAD > captured-reuse-evidence/source.tar.gz
+          sha256sum captured-reuse-evidence/source.tar.gz > captured-reuse-evidence/source.sha256
+          cp proof/captured-v8-full.json captured-reuse-evidence/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-captured-reuse-${{ github.sha }}
+          path: captured-reuse-evidence
+          if-no-files-found: error
