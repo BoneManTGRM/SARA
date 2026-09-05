@@ -13,6 +13,11 @@ export type BenchmarkRunGrant = {
   deploymentId: string; expiresAt: number; maximumPhysicalSpendUsd: number;
 };
 
+export function benchmarkClaimKey(contractDigest: string): string {
+  if (!/^[a-f0-9]{64}$/u.test(contractDigest)) throw new Error("INVALID_CONTRACT_DIGEST");
+  return sha256(canonicalJson({ schemaVersion: 2, contractDigest }));
+}
+
 /**
  * Owner-side launcher gate, NOT candidate or Railway-container authorization.
  * The trusted supervisor supplies a separately authorized grant and an existing,
@@ -42,15 +47,14 @@ export async function claimBenchmarkRun(input: {
   if (!input.ledgerDirectory || !isAbsolute(input.ledgerDirectory)) throw new Error("LEDGER_REQUIRED");
   if (process.env.RAILWAY_DEPLOYMENT_ID) throw new Error("EXTERNAL_SUPERVISOR_REQUIRED");
   const directory = resolve(input.ledgerDirectory);
-  // The parent creates and retains this ledger. Refuse links and permissive directories.
   let directorySafe = false;
   try {
     const stat = await lstat(directory);
     directorySafe = stat.isDirectory() && !stat.isSymbolicLink() && (stat.mode & 0o077) === 0 && await realpath(directory) === directory;
   } catch { /* Missing or unreadable ledgers deny admission. */ }
   if (!directorySafe) throw new Error("LEDGER_UNAVAILABLE");
-  // Key on experiment, not deployment: replacing a deployment cannot reset its allowance.
-  const key = sha256(canonicalJson({ schemaVersion: 1, experimentId: grant.experimentId }));
+  // Contract identity, not a caller-selected experiment/deployment label, owns the one-shot claim.
+  const key = benchmarkClaimKey(grant.contractDigest);
   let claim;
   try { claim = await open(join(directory, `${key}.json`), "wx", 0o600); }
   catch (error) {
@@ -58,8 +62,7 @@ export async function claimBenchmarkRun(input: {
     throw new Error("LEDGER_UNAVAILABLE");
   }
   try {
-    // Whitelist fields; never persist caller extras or credentials.
-    const record = { schemaVersion:1, experimentId:grant.experimentId, contractDigest:grant.contractDigest,
+    const record = { schemaVersion:2, experimentId:grant.experimentId, contractDigest:grant.contractDigest,
       implementationCommit:grant.implementationCommit, deploymentId:grant.deploymentId,
       maximumPhysicalSpendUsd:grant.maximumPhysicalSpendUsd, claimedAt:now, expiresAt:grant.expiresAt };
     await claim.writeFile(canonicalJson(record));
