@@ -35,13 +35,20 @@ export function createLunaCodingRepairModel(input: {
   client: WorkerModelClient;
   context: Parameters<CandidateGenerator["generate"]>[0];
   compactRepairContinuations?: boolean;
+  /** Experiment only. Changes the first-call contract; never enabled by existing callers. */
+  experimentalCompactFirstProposal?: boolean;
 }): CodingRepairModel {
+  if (input.experimentalCompactFirstProposal === true && input.compactRepairContinuations !== true) {
+    throw new Error("experimentalCompactFirstProposal requires compactRepairContinuations.");
+  }
   return {
     async propose(request) {
       const maximumTaskCostUsd = Math.floor(request.remainingCostUsd * 100) / 100;
       if (maximumTaskCostUsd < 0.01) throw new Error("Insufficient remaining coding repair budget.");
-      // First proposals stay byte-for-byte on the existing neutral replacement contract.
-      const compactEdits = input.compactRepairContinuations === true && request.cycle > 1;
+      // Existing callers retain their byte-identical first request. A distinct experiment
+      // may test compact output from cycle one; old matched contracts must not enable it.
+      const compactEdits = input.compactRepairContinuations === true &&
+        (request.cycle > 1 || input.experimentalCompactFirstProposal === true);
       const prompt = buildCodingRepairPrompt({
         compactEdits,
         objective: input.context.objective,
