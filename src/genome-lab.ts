@@ -222,7 +222,7 @@ function isProgramCandidate(proposal: CandidateProposal): proposal is ProgramCan
   return "candidateKind" in proposal && proposal.candidateKind === "typescript_program";
 }
 
-function validateProgramCandidateProposal(proposal: ProgramCandidateProposal): void {
+export function validateProgramCandidateStructure(proposal: ProgramCandidateProposal): void {
   if (proposal.schemaVersion !== 1) throw new Error("Program candidate schema version is unsupported.");
   if (!/^[A-Za-z][A-Za-z0-9 _-]{1,63}$/u.test(proposal.programName)) {
     throw new Error("Program name must be 2–64 safe display characters.");
@@ -351,7 +351,7 @@ async function buildVerifiedProgramCandidate(
   genomeLabRoot: string,
   candidateId: string,
 ): Promise<GeneratedSkillCandidate> {
-  validateProgramCandidateProposal(proposal);
+  validateProgramCandidateStructure(proposal);
   const allPaths = new Set(proposal.files.map((file) => file.path));
   for (const file of proposal.files) assertBoundedProgramSource(file.path, file.content, allPaths);
 

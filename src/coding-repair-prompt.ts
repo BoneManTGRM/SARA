@@ -1,3 +1,4 @@
+import { CODING_REPAIR_EDITS_OUTPUT_CONTRACT } from "./coding-repair-edits.ts";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import {
   boundCodingRepairAttemptLessons,
@@ -41,6 +42,7 @@ export function buildCodingRepairPrompt(input: {
   limits: CodingRepairLimits;
   strategy: "surgical" | "deep";
   attemptLessons?: readonly CodingRepairAttemptLesson[];
+  compactEdits?: boolean;
 }): string {
   const maximumFiles = input.strategy === "surgical" ? input.limits.surgicalFiles : input.limits.deepFiles;
   const maximumChangedLines = input.strategy === "surgical"
@@ -90,8 +92,10 @@ export function buildCodingRepairPrompt(input: {
       : "Follow the bounded governance trend while preserving the current champion and every existing authority ceiling.";
 
   return [
-    CODING_REPAIR_OUTPUT_CONTRACT,
-    "Return one JSON object only. Propose a bounded replacement for listed candidate files; do not claim verification.",
+    input.compactEdits ? CODING_REPAIR_EDITS_OUTPUT_CONTRACT : CODING_REPAIR_OUTPUT_CONTRACT,
+    input.compactEdits
+      ? "Return one JSON object only. For each changed file return path, expectedContentDigest, and edits [{find,replace}] instead of replacementText. Each nonempty literal find must match exactly once in the original file. All edits apply simultaneously to the original, cannot overlap, and at most eight are allowed per file. Preserve unchanged source verbatim. Keep schemaVersion, baseArtifactDigest, failureFingerprint, strategy, and limitations. Do not claim verification."
+      : "Return one JSON object only. Propose a bounded replacement for listed candidate files; do not claim verification.",
     canonicalJson({
       objective: input.objective,
       acceptanceCriteria: input.acceptanceCriteria,

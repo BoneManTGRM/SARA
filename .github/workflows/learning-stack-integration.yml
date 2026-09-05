@@ -1,0 +1,72 @@
+name: SARA learning stack integration
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/matched-reparodynamic-benchmark'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - name: Confirm protected integration boundaries and ancestry
+        run: |
+          git diff --exit-code 9f88a9e27cd01aae0935f785e903735a4d23566d HEAD -- src/main.ts src/server.ts src/kernel.ts src/store.ts src/policy.ts scripts/start-runtime.ts railway.json constitution package-lock.json
+          git merge-base --is-ancestor 9f88a9e27cd01aae0935f785e903735a4d23566d HEAD
+          git merge-base --is-ancestor b451a41dc7add73613c0580a9b101ddd390a93a6 HEAD
+          git diff --check
+      - name: Full repository verification
+        run: |
+          set +e
+          npm run verify > verification.log 2>&1
+          code=$?
+          printf '%s\n' "$code" > verification-exit.txt
+          exit "$code"
+      - name: All V7 scripted representation cases
+        run: node --import tsx proof/reparodynamic-first-edits-v7.ts > v7-proof.jsonl 2>&1
+      - name: Archive exact source and all partial evidence
+        if: always()
+        run: |
+          git rev-parse HEAD > commit.txt
+          git archive --format=tar.gz HEAD > source.tar.gz
+          sha256sum source.tar.gz > source.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-learning-stack-${{ github.event.pull_request.head.sha }}
+          path: |
+            verification.log
+            verification-exit.txt
+            v7-proof.jsonl
+            commit.txt
+            source.tar.gz
+            source.sha256
+          if-no-files-found: error
+  security:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/matched-reparodynamic-benchmark'
+    name: Exact-source CodeQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4

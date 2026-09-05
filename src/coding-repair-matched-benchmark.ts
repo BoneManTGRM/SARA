@@ -273,6 +273,9 @@ export async function runMatchedCodingRepairBenchmark(input: {
 
   const controlStarted = performance.now();
   const controlBaselineVerification = await input.verify(structuredClone(input.baseline));
+  if (controlBaselineVerification.failures.some(failure => failure.kind === "policy" && failure.code === "GENOME_LAB_INVALID_STRUCTURE")) {
+    throw new Error("Matched benchmark baseline has invalid candidate structure.");
+  }
   let controlCandidate = structuredClone(input.baseline);
   let controlVerification = structuredClone(controlBaselineVerification);
   let controlAccountedCostUsd = 0;

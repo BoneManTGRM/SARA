@@ -1,3 +1,4 @@
+import { CODING_REPAIR_EDITS_JSON_SCHEMA, CODING_REPAIR_EDITS_OUTPUT_CONTRACT } from "./coding-repair-edits.ts";
 import type { WorkerModelClient } from "./model-router.ts";
 
 const SAFE_RESPONSE_STATUSES = new Set([
@@ -124,6 +125,9 @@ const CODING_REPAIR_JSON_SCHEMA = {
 } as const;
 
 function responseTextFormat(prompt: string): OpenAITextFormat | undefined {
+  if (prompt.startsWith(CODING_REPAIR_EDITS_OUTPUT_CONTRACT)) {
+    return { format: { type: "json_schema", name: "sara_coding_repair_edits_v1", strict: true, schema: CODING_REPAIR_EDITS_JSON_SCHEMA } };
+  }
   if (prompt.includes(CODING_REPAIR_CONTRACT)) {
     return {
       format: {
