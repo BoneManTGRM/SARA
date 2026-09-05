@@ -47,7 +47,8 @@ function claimsMatch(c: Record<string, unknown>, p: Permit, milliseconds: number
     && c.event_name === "push" && c.run_attempt === "1" && c.runner_environment === "github-hosted"
     && typeof c.run_id === "string" && /^[1-9][0-9]{0,19}$/u.test(c.run_id)
     && (c.head_ref === "" || c.head_ref === undefined) && (c.base_ref === "" || c.base_ref === undefined)
-    && c.job_workflow_ref === undefined && c.job_workflow_sha === undefined
+    && ((c.job_workflow_ref === undefined && c.job_workflow_sha === undefined)
+      || (c.job_workflow_ref === RELAY_WORKFLOW && c.job_workflow_sha === p.workflowRevision))
     && integer(c.iat) && integer(c.nbf) && integer(c.exp) && c.nbf <= c.iat
     && c.iat <= seconds + 30 && c.nbf <= seconds && c.exp > seconds
     && c.exp > c.iat && c.exp - c.iat <= 600 && c.iat - c.nbf <= 600;
