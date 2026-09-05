@@ -1,3 +1,4 @@
+import {validateV8Approval,type Identity} from './v8-process-approval.ts';
 import {spawn,type ChildProcessWithoutNullStreams} from 'node:child_process';
 import {open} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -56,6 +57,24 @@ export async function runSupervisedBenchmark(input:SupervisorInput):Promise<Reco
  if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600_000)throw Error('INVALID_TIMEOUT');
  // This claim is flushed BEFORE even invoking SSH. A disconnect, uncertainty, or crash consumes it.
  await claimBenchmarkRun({ledgerDirectory:input.ledgerDirectory,grant:input.grant,observed:{contractDigest:input.contract.digest,implementationCommit:input.grant.implementationCommit,deploymentId:input.grant.deploymentId},now:input.now});
+ return runBenchmarkSession(input,timeoutMs);
+}
+const consumedProcessClaims=new Set<string>();
+/** Owner-written GitHub grant: one exact random process challenge, never a restartable deployment flag. */
+export async function runProcessApprovedBenchmark(input:SupervisorInput,approval:unknown,identity:Identity):Promise<Record<string,any>>{
+ validateV8Approval(approval,identity,input.now);
+ if(input.mode!=='live'||!input.contract.paidAllowed||input.contract.caseId!==approval.caseId||input.contract.digest!==approval.contractDigest||
+    input.grant.experimentId!==approval.caseId||input.grant.contractDigest!==approval.contractDigest||
+    input.grant.implementationCommit!==approval.implementationCommit||input.grant.deploymentId!==approval.deploymentId||
+    input.grant.maximumPhysicalSpendUsd!==approval.maximumPhysicalSpendUsd||input.grant.expiresAt!==approval.expiresAt)throw Error('APPROVAL_CONTRACT_MISMATCH');
+ const timeoutMs=input.timeoutMs??600_000;
+ if(!Number.isSafeInteger(timeoutMs)||timeoutMs<100||timeoutMs>600_000)throw Error('INVALID_TIMEOUT');
+ const key=sha256(canonicalJson(identity));
+ if(consumedProcessClaims.has(key))throw Error('PROCESS_APPROVAL_ALREADY_CONSUMED');
+ consumedProcessClaims.add(key);
+ return runBenchmarkSession(input,timeoutMs);
+}
+async function runBenchmarkSession(input:SupervisorInput,timeoutMs:number):Promise<Record<string,any>>{
  const auditKey=sha256(canonicalJson({schemaVersion:1,experimentId:input.grant.experimentId}));
  const audit=await open(join(input.ledgerDirectory,`${auditKey}.events.ndjson`),'wx',0o600);
  let sequence=0,previousDigest='0'.repeat(64);
@@ -86,7 +105,7 @@ export async function runSupervisedBenchmark(input:SupervisorInput):Promise<Reco
   const reader=frames(child.stdout)[Symbol.asyncIterator]();
   const first=await reader.next();const ready=first.value;
   if(first.done||ready.type!=='ready'||ready.contractDigest!==input.contract.digest||ready.implementationCommit!==input.grant.implementationCommit||ready.deploymentId!==input.grant.deploymentId)throw Error('WORKER_IDENTITY_MISMATCH');
-  await sendFrame(child.stdin,{type:'start',contractDigest:input.contract.digest});
+  await sendFrame(child.stdin,{type:'start',contractDigest:input.contract.digest,mode:input.mode});
   let client:WorkerModelClient|undefined;
   const counted=new Map<string,number>();
   let result:Record<string,unknown>|undefined;
@@ -103,7 +122,7 @@ export async function runSupervisedBenchmark(input:SupervisorInput):Promise<Reco
    const arm=frame.arm as keyof typeof armCalls;
    if(!Object.hasOwn(armCalls,arm)||!Number.isInteger(frame.cycle)||frame.cycle<1||frame.cycle>3)throw Error('INVALID_ARM_OR_CYCLE');
    const prompt=frame.prompt;
-   if(typeof prompt!=='string'||!prompt.trim()||Buffer.byteLength(prompt)>120_000||prompt.includes('PRIVATE_V7_QUEUE_ORACLE'))throw Error('PROMPT_BOUNDARY');
+   if(typeof prompt!=='string'||!prompt.trim()||Buffer.byteLength(prompt)>120_000||/PRIVATE_(?:V7_QUEUE|V8_INVENTORY)_ORACLE/u.test(prompt))throw Error('PROMPT_BOUNDARY');
    const promptDigest=sha256(prompt),key=`${arm}:${frame.cycle}:${promptDigest}`;
    let value:unknown;
    if(frame.type==='count'){

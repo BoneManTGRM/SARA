@@ -2,15 +2,18 @@ import {frames,sendFrame} from './benchmark-supervisor.ts';
 import {loadSupervisedContract} from './supervised-benchmark-contract.ts';
 import type {WorkerModelClient} from '../src/model-router.ts';
 let reader:AsyncIterator<Record<string,any>>|undefined,nextId=1;
-export async function initializeWorker(){
+let evidenceMode:'offline'|'live'='offline';
+export const workerEvidenceMode=()=>evidenceMode;
+export async function initializeWorker(loadContract:()=>Promise<{digest:string}>=loadSupervisedContract){
  if(process.env.OPENAI_API_KEY?.trim())throw Error('WORKER_PROVIDER_KEY_FORBIDDEN');
- const contract=await loadSupervisedContract();
+ const contract=await loadContract();
  reader=frames(process.stdin)[Symbol.asyncIterator]();
  await sendFrame(process.stdout,{type:'ready',contractDigest:contract.digest,implementationCommit:process.env.RAILWAY_GIT_COMMIT_SHA??null,deploymentId:process.env.RAILWAY_DEPLOYMENT_ID??null});
  let timer:NodeJS.Timeout|undefined;
  try{
   const start=await Promise.race([reader.next(),new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(Error('OWNER_CHANNEL_REQUIRED')),5000);})]);
   if(start.done||start.value.type!=='start'||start.value.contractDigest!==contract.digest)throw Error('OWNER_CHANNEL_REQUIRED');
+  evidenceMode=start.value.mode==='live'?'live':'offline';
  }finally{if(timer)clearTimeout(timer);}
  // The reviewed worker has no direct provider client. This is defense in depth, not an OS sandbox.
  globalThis.fetch=async()=>{throw Error('WORKER_DIRECT_NETWORK_FORBIDDEN');};

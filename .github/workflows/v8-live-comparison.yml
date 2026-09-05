@@ -18,9 +18,31 @@ jobs:
         with:
           node-version: '22.16.0'
       - run: npm ci --ignore-scripts
-      - run: npm run verify
-      - run: node --import tsx proof/live-v8-comparison.ts --self-test
-      - run: npm run proof:http
+      - run: npm run verify > verification.log 2>&1
+      - run: node --import tsx proof/live-v8-comparison.ts --self-test > self-test.log
+      - run: node --import tsx proof/live-v8-comparison.ts --self-test --all-wrong > all-wrong.log
+      - run: npm run proof:http > http-repeat.log 2>&1
+      - run: node --import tsx proof/v8-railway-supervisor.ts --preflight > supervision-contract.json
+      - name: Preserve exact-head source
+        if: always()
+        run: |
+          git rev-parse HEAD > commit.txt
+          git archive --format=tar.gz HEAD > source.tar.gz
+          sha256sum source.tar.gz > source.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v8-preflight-${{ github.event.pull_request.head.sha }}
+          path: |
+            verification.log
+            self-test.log
+            all-wrong.log
+            http-repeat.log
+            supervision-contract.json
+            commit.txt
+            source.tar.gz
+            source.sha256
+          if-no-files-found: error
   security:
     if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/v8-live-inventory-comparison'
     name: Exact-head CodeQL
