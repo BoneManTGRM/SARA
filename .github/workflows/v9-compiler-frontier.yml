@@ -22,7 +22,7 @@ jobs:
       - run: npm run verify > verification.log 2>&1
       - name: Matched compiler and guarded-repair measurement
         env:
-          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
+          SARA_RESEARCH_SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
         run: node --import tsx proof/compiler-cache-frontier.ts > compiler-frontier.log 2>&1
       - name: Preserve source and all partial evidence
         if: always()
