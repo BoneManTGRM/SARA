@@ -2,33 +2,62 @@ name: One-use authenticated benchmark connection proof
 on:
   push:
     branches: [verify/coding-benchmark-owner-relay-20260905]
-    paths:
-      - .github/workflows/coding-benchmark-owner-relay.yml
-      - scripts/probe-coding-benchmark-owner-relay.py
+    paths: [.github/workflows/coding-benchmark-owner-relay.yml]
 permissions:
   contents: read
   id-token: write
 jobs:
-  prove-connection-without-paid-execution:
-    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 1
+  diagnose-issuer-without-SARA-requests:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 2
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: a8ef0213cd7d173772cc41e76d35b6df3d3cb09e
           persist-credentials: false
-      - name: Verify exact probe and exercise existing authenticated rejection path
-        env:
-          EXPECTED_RUNTIME: a8ef0213cd7d173772cc41e76d35b6df3d3cb09e
-          PYTHONOPTIMIZE: '0'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Record only public issuer metadata and verify with the unchanged authenticator
         run: |
-          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo 'a3720c2e77a95c0004f73f6e51a1df829a5dd6b29ba3cdf6c31bf0bbc177689f  scripts/probe-coding-benchmark-owner-relay.py' | sha256sum -c -
-          python3 scripts/probe-coding-benchmark-owner-relay.py
+          test "$(git rev-parse HEAD)" = a8ef0213cd7d173772cc41e76d35b6df3d3cb09e
+          python3 - <<'PY'
+          import base64,json,os,pathlib,subprocess,time,urllib.request
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self,req,fp,code,msg,headers,newurl): return None
+          out=pathlib.Path('/tmp/sara-issuer-diagnostic');out.mkdir()
+          url=os.environ['ACTIONS_ID_TOKEN_REQUEST_URL']+'&audience=https%3A%2F%2Fsara-operator-production.up.railway.app%2Fapi%2Fcoding-benchmark'
+          assert url.startswith('https://')
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
+          with urllib.request.build_opener(NoRedirect()).open(req,timeout=15) as response:
+              token=json.loads(response.read(32768))['value']
+          assert isinstance(token,str) and len(token)<24000
+          parts=token.split('.')
+          def dec(s): return json.loads(base64.urlsafe_b64decode(s+'='*((-len(s))%4)))
+          c=dec(parts[1]);h=dec(parts[0])
+          allowed=['iss','aud','sub','repository','repository_id','repository_owner','repository_owner_id','actor_id','ref','ref_type','workflow_ref','workflow_sha','sha','event_name','run_attempt','run_id','runner_environment','iat','nbf','exp','head_ref','base_ref','job_workflow_ref','job_workflow_sha']
+          payload={'sourceRevision':'a8ef0213cd7d173772cc41e76d35b6df3d3cb09e','claims':{k:c[k] for k in allowed if k in c},'header':{k:h[k] for k in ['alg','typ','kid'] if k in h},'headerFieldNames':sorted(h),'httpRequestsToSARA':0,'modelRequests':0}
+          (out/'issuer.json').write_text(json.dumps(payload,indent=2)+'\n')
+          js='''import {createCodingBenchmarkRelayAuthenticator,RELAY_PERMIT_KEY} from './src/coding-benchmark-github-relay.ts';
+          let token='';for await (const chunk of process.stdin)token+=chunk;
+          const seconds=Math.floor(Date.now()/1000), runtime='a8ef0213cd7d173772cc41e76d35b6df3d3cb09e';
+          const p={schemaVersion:1,benchmarkId:'41267154-ba42-496a-bb79-1656898ac716',runtimeRevision:runtime,workflowRevision:process.env.GITHUB_SHA,notBefore:seconds-1,expiresAt:seconds+300};
+          let requests=[];
+          const auth=createCodingBenchmarkRelayAuthenticator({fetchImpl:async(url,init)=>{const response=await fetch(url,init);requests.push({url:String(url),status:response.status});return response;}});
+          const identity=await auth(token,{RAILWAY_GIT_COMMIT_SHA:runtime,[RELAY_PERMIT_KEY]:JSON.stringify(p)});
+          console.log(JSON.stringify({accepted:identity!==null,identity,publicSigningKeyRequests:requests,httpRequestsToSARA:0,modelRequests:0}));'''
+          result=subprocess.run(['node','--import','tsx','--input-type=module','-e',js],input=token,text=True,capture_output=True,timeout=20,env={k:v for k,v in os.environ.items() if k not in ['ACTIONS_ID_TOKEN_REQUEST_TOKEN','ACTIONS_ID_TOKEN_REQUEST_URL','GITHUB_TOKEN','GH_TOKEN']})
+          assert result.returncode==0
+          value=json.loads(result.stdout)
+          (out/'validator-result.json').write_text(json.dumps(value,indent=2)+'\n')
+          print(json.dumps(value))
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sara-authenticated-benchmark-connection-${{ github.run_id }}-1
-          path: /tmp/sara-relay-live-proof
+          name: sara-issuer-contract-diagnostic-${{ github.run_id }}-1
+          path: /tmp/sara-issuer-diagnostic
           if-no-files-found: error
           retention-days: 7
