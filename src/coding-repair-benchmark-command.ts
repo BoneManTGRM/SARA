@@ -6,6 +6,7 @@ export type CodingBenchmarkCommandConfig = {
   acknowledgeLabOnly: true;
   benchmarkId: string;
   maximumSpendUsd: number;
+  maximumModelSpendUsdPerArm: number;
   currentCanaryPercent: number;
   caseCount: number;
   stateDirectory: string;
@@ -18,13 +19,18 @@ export type CodingBenchmarkAuthorityInput = {
   benchmarkId: string;
   sourceRevision: string;
   maximumSpendUsd: number;
+  maximumModelSpendUsdPerArm?: number;
   currentCanaryPercent: number;
   caseCount: number;
 };
 
+const MAXIMUM_ARM_SPEND_USD = INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd;
+const USD_MICROS = 1_000_000;
+
 const VALUE_ARGUMENTS = new Set([
   "--benchmark-id",
   "--max-spend-usd",
+  "--max-arm-spend-usd",
   "--current-canary-percent",
   "--case-count",
   "--state-directory",
@@ -52,6 +58,22 @@ function parseMoney(value: string | undefined): number {
   return parsed;
 }
 
+function validatedArmSpend(value: number = MAXIMUM_ARM_SPEND_USD): number {
+  if (!Number.isFinite(value) || value <= 0 || value > MAXIMUM_ARM_SPEND_USD
+      || Math.round(value * USD_MICROS) / USD_MICROS !== value) {
+    throw new Error("Benchmark arm spend must be positive, at most $0.15, and use at most six decimal places.");
+  }
+  return value;
+}
+
+function parseArmSpend(value: string | undefined): number {
+  if (value === undefined) return MAXIMUM_ARM_SPEND_USD;
+  if (!/^\d+(?:\.\d{1,6})?$/u.test(value)) {
+    throw new Error("--max-arm-spend-usd must be a decimal amount with at most six decimal places.");
+  }
+  return validatedArmSpend(Number(value));
+}
+
 export function codingBenchmarkAuthorityDigest(
   input: CodingBenchmarkAuthorityInput,
 ): string {
@@ -70,6 +92,7 @@ export function codingBenchmarkAuthorityDigest(
   if (!Number.isInteger(input.caseCount) || input.caseCount < 1 || input.caseCount > 100) {
     throw new Error("Benchmark authority case count is malformed.");
   }
+  const maximumModelSpendUsdPerArm = validatedArmSpend(input.maximumModelSpendUsdPerArm);
   return sha256(canonicalJson({
     schemaVersion: 1,
     action: "run_live_reparodynamic_coding_benchmark",
@@ -79,7 +102,7 @@ export function codingBenchmarkAuthorityDigest(
     maximumSpendUsd: input.maximumSpendUsd,
     currentCanaryPercent: input.currentCanaryPercent,
     caseCount: input.caseCount,
-    maximumModelSpendUsdPerArm: INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd,
+    maximumModelSpendUsdPerArm,
   }));
 }
 
@@ -151,12 +174,14 @@ export function parseCodingBenchmarkCommand(input: {
     throw new Error("--current-canary-percent must be from 0 through 100.");
   }
   const maximumSpendUsd = parseMoney(values.get("--max-spend-usd"));
-  const minimumSpendUsd = Number((
-    caseCount * 2 * INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd
-  ).toFixed(2));
-  if (maximumSpendUsd < minimumSpendUsd) {
+  const maximumModelSpendUsdPerArm = parseArmSpend(values.get("--max-arm-spend-usd"));
+  // Compare integer micro-dollars. Rounding $0.152 down to cents would admit
+  // two $0.076 arms under a $0.15 total, despite insufficient reservations.
+  const minimumSpendMicros = caseCount * 2 * Math.round(maximumModelSpendUsdPerArm * USD_MICROS);
+  const minimumSpendUsd = minimumSpendMicros / USD_MICROS;
+  if (Math.round(maximumSpendUsd * USD_MICROS) < minimumSpendMicros) {
     throw new Error(
-      `--max-spend-usd must be at least $${minimumSpendUsd.toFixed(2)} for ${caseCount} complete matched pairs.`,
+      `--max-spend-usd must be at least $${minimumSpendUsd.toFixed(6)} for ${caseCount} complete matched pairs.`,
     );
   }
   const stateDirectory = values.get("--state-directory") ?? ".sara-state";
@@ -181,6 +206,7 @@ export function parseCodingBenchmarkCommand(input: {
     benchmarkId,
     sourceRevision,
     maximumSpendUsd,
+    maximumModelSpendUsdPerArm,
     currentCanaryPercent,
     caseCount,
   });
@@ -198,6 +224,7 @@ export function parseCodingBenchmarkCommand(input: {
     acknowledgeLabOnly: true,
     benchmarkId,
     maximumSpendUsd,
+    maximumModelSpendUsdPerArm,
     currentCanaryPercent,
     caseCount,
     stateDirectory,
