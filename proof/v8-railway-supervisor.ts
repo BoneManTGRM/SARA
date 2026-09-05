@@ -42,7 +42,7 @@ try{
  const deadline=Date.now()+1_200_000;
  while(Date.now()<deadline){
   let response:Response|undefined;
-  try{response=await fetch(approvalUrl+'?process='+identity.nonce+'&poll='+Date.now(),{redirect:'error',cache:'no-store',signal:AbortSignal.timeout(10000)});}catch{/* bounded read-only polling */}
+  try{response=await fetch(approvalUrl+'?process='+identity.nonce+'&poll='+Date.now(),{redirect:'error',headers:{'Cache-Control':'no-cache'},signal:AbortSignal.timeout(10000)});}catch{/* bounded read-only polling */}
   if(response?.ok){
    const text=await response.text();if(Buffer.byteLength(text)>16384)throw Error('APPROVAL_TOO_LARGE');
    approval=JSON.parse(text);validateV8Approval(approval,identity,Date.now());break;
