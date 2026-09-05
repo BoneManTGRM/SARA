@@ -21,6 +21,7 @@
   "proof/v7-live-evaluation.ts": "83f6e800be9bec6a7f56debb38ed4fea2dcedf2671a225b775702fb28a798821",
   "proof/v7-live-fixture.ts": "e878bd05b85f427ee74b7976ad2bad7f0e635689d0aba0312f2fc3c2413df900",
   "proof/v7-protected-test-source.ts": "4472fab265859928a9e101d67857ca76df354a44c367cd2ca4719bcca7d4d1d6",
+  "proof/v8-process-approval.ts": "47559cfba13a5d09fe09ecce849bdcb1ae5cdaf1341ddfa41ff4fa655aea0bfb",
   "scripts/launch-supervised-benchmark.ts": "74ffd8fc248fa6eb0abbaf0488c0d538119bac9b44ace0289918770b0b55110d",
   "src/authorized-readiness-delivery.ts": "ef44f8e3f6671f74be3dc8c4d6cc4dcd58535d2fab732d327de8512974dbb51c",
   "src/autonomous-paid-mandate-bootstrap.ts": "405c7419a44cf8f9d51fffeca62973d7d680e59bc517765b3174e779670e4be7",
@@ -49,10 +50,11 @@
   "src/constitution.ts": "6745a7584a841fa9a100dfdf6cffb4da3bc8aee5b6234b21b698cbae63001454",
   "src/dashboard.ts": "c6fe4b5ab8f9f82ddb23890f51881dd6f1288f624ab8940f4ba3f55be206024d",
   "src/economics.ts": "3195bbd0e7549adf1dfef07a6520b6613c056511e5827008e85654acf100cf15",
+  "src/experimental-compiler-cache.ts": "b00ba81034477c29b17fda89f48c535fe637dc78ea08f8ddfd05929e6dbfbd6d",
   "src/founding-pilot.ts": "eac65e818e1ff6726e6e723938d44e08a7c4e6c530374171bdb4b7365c8fd036",
   "src/gemini-worker.ts": "4f1d55010b2d4ab31fbfb19fab8dbf04fa91d5ca9785aa985c8f6ae338e210e8",
-  "src/genome-lab-verifier.ts": "a66c76b929e01a8e41221265c373389270fd75235d99c544b865d632772915b9",
-  "src/genome-lab.ts": "c406c1e27c2d1fd9b0c282296a813bce43df9342d46bef24821eb1179ef32a51",
+  "src/genome-lab-verifier.ts": "6e9684821dc4471e041e6aef2d39b33edd315ff8de7ac622c2fbb031c3073bba",
+  "src/genome-lab.ts": "a47019ae94dc3bd695b2139b17dd9f0fbab16730388d75aea2cf0a0e949e4420",
   "src/github-draft-publisher.ts": "6a88cf8501a569629785f6e15698e2ea71b47e6830d824edcd7853ed7b42c4b7",
   "src/handoff.ts": "095f48233b715218621219f58602cd6d1c54ca6eb5a53fc9661fb317caa4912c",
   "src/kernel.ts": "5a8b43f02dec91fd13bd389fd685fed6f9242dbe699e4e600bf7f96d30b513bb",
@@ -98,6 +100,5 @@
   "tgrm/sample.ts": "7ff9d468180c6320f4f54efd20a04ee4ce6658bd65999c8c8a19217b33aac99e",
   "tgrm/types.ts": "3aff2ce52999df74c8dae672a5263b187871cf8955fa6343301068dea03158e9",
   "tgrm/verify.ts": "19dcc946863b258782beb0a5833e82e978e95107473da62ff64cafe81f7a82ce",
-  "tsconfig.json": "d3ae9c6b901cd5bb73637d624b01116af21708ea7dc74a8ea89f791d4512ae5a",
-  "proof/v8-process-approval.ts": "47559cfba13a5d09fe09ecce849bdcb1ae5cdaf1341ddfa41ff4fa655aea0bfb"
+  "tsconfig.json": "d3ae9c6b901cd5bb73637d624b01116af21708ea7dc74a8ea89f791d4512ae5a"
 }
