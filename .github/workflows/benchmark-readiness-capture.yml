@@ -1,0 +1,38 @@
+name: Benchmark readiness source capture
+on:
+  push:
+    branches: [fix/coding-benchmark-readiness-20260905]
+    paths: [.github/workflows/benchmark-readiness-capture.yml]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1 && github.run_number == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 30a7cb3c21a77b65bf7ba2c4c393897850e61eeb
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install exact lockfile without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Archive only source and dependencies
+        run: |
+          mkdir -p /tmp/sara-capture
+          git rev-parse HEAD > /tmp/sara-capture/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-capture/tree.txt
+          node --version > /tmp/sara-capture/node-version.txt
+          git archive --format=tar.gz HEAD > /tmp/sara-capture/source.tar.gz
+          tar -czf /tmp/sara-capture/dependencies.tar.gz node_modules
+          cd /tmp/sara-capture
+          sha256sum source.tar.gz dependencies.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-benchmark-readiness-source
+          path: /tmp/sara-capture
+          if-no-files-found: error
+          retention-days: 7
