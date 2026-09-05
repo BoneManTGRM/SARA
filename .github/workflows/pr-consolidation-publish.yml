@@ -1,0 +1,61 @@
+name: SARA reviewed PR consolidation publish
+on:
+  push:
+    branches: [audit/pr-consolidation-source-20260905]
+    paths: [.github/workflows/pr-consolidation-publish.yml]
+permissions:
+  contents: write
+jobs:
+  publish:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1 && github.run_number == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 0103cf266f052b8f9c14c4123280560902a77aca
+          fetch-depth: 1
+      - name: Reconstruct exactly the locally reviewed tree
+        env:
+          BUILDER_COMMIT: 1b97518b2563c690f5b6ef573db780f44d3b1841
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --unshallow origin main:refs/capture/main experiment/reparodynamic-learning-v5:refs/capture/pr70 experiment/benchmark-rejection-replay-safety:refs/capture/pr90 experiment/v8-live-inventory-comparison:refs/capture/pr93 audit/pr-consolidation-fixtures-20260905:refs/capture/fixtures audit/pr-consolidation-source-20260905:refs/capture/builder
+          test "$(git rev-parse refs/capture/main)" = 0103cf266f052b8f9c14c4123280560902a77aca
+          test "$(git rev-parse refs/capture/pr70)" = e07fe3e3965a8fea6d43efb3767e01595a7cecc9
+          test "$(git rev-parse refs/capture/pr90)" = 23014289921e671f249ac62f598dbc831ceb6905
+          test "$(git rev-parse refs/capture/pr93)" = a59facdfbaf05f35d8a4e0c87c5758cb5c003d76
+          test "$(git rev-parse refs/capture/fixtures)" = 75f6e04ef40dc3f6c8a8835f60469a8c5f067aff
+          git show "$BUILDER_COMMIT:.github/scripts/build-pr-consolidation.py" > /tmp/build-pr-consolidation.py
+          python /tmp/build-pr-consolidation.py 75f6e04ef40dc3f6c8a8835f60469a8c5f067aff
+          test "$(git write-tree)" = b95834d559ade04c882aa9500016e9a8ac4fc378
+          git diff --cached --check
+      - name: Create only a new review branch and archive the exact candidate
+        run: |
+          set -euo pipefail
+          BRANCH=integration/pr-consolidation-reviewed-20260905
+          test -z "$(git ls-remote --heads origin "refs/heads/$BRANCH")"
+          test "$(git ls-remote --heads origin refs/heads/main | cut -f1)" = 0103cf266f052b8f9c14c4123280560902a77aca
+          for entry in 'experiment/reparodynamic-learning-v5 e07fe3e3965a8fea6d43efb3767e01595a7cecc9' 'experiment/benchmark-rejection-replay-safety 23014289921e671f249ac62f598dbc831ceb6905' 'experiment/v8-live-inventory-comparison a59facdfbaf05f35d8a4e0c87c5758cb5c003d76'; do
+            set -- $entry
+            test "$(git ls-remote --heads origin "refs/heads/$1" | cut -f1)" = "$2"
+          done
+          git config user.name 'SARA Integration Review'
+          git config user.email 'noreply@users.noreply.github.com'
+          SHA=$(git commit-tree b95834d559ade04c882aa9500016e9a8ac4fc378 -p 0103cf266f052b8f9c14c4123280560902a77aca -p e07fe3e3965a8fea6d43efb3767e01595a7cecc9 -p 23014289921e671f249ac62f598dbc831ceb6905 -p a59facdfbaf05f35d8a4e0c87c5758cb5c003d76 -m 'Consolidate reviewed SARA experiments while preserving production benchmark safety' -m 'Preserve the three original PR histories with selective current-main integration, not old launcher activation. Isolate causal V5, retain safe diagnostics and guarded recipe/cache mechanisms, repair eleven regression boundaries. Frozen task/controllers/grant hold and production defaults unchanged. Local focused tests 76 passing and typecheck; full exact-candidate CI and CodeQL are still required. No paid call, deployment or NICO change.')
+          git update-ref refs/heads/assembled "$SHA"
+          git push --force-with-lease="refs/heads/$BRANCH:" origin "$SHA:refs/heads/$BRANCH"
+          mkdir -p /tmp/sara-integration-evidence
+          printf '%s\n' "$SHA" > /tmp/sara-integration-evidence/commit.txt
+          git rev-parse "$SHA^{tree}" > /tmp/sara-integration-evidence/tree.txt
+          git diff 0103cf266f052b8f9c14c4123280560902a77aca "$SHA" > /tmp/sara-integration-evidence/integrated.patch
+          git archive --format=tar.gz "$SHA" > /tmp/sara-integration-evidence/source.tar.gz
+          git bundle create /tmp/sara-integration-evidence/candidate.bundle refs/heads/assembled
+          cd /tmp/sara-integration-evidence
+          sha256sum source.tar.gz candidate.bundle integrated.patch > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-reviewed-pr-integration
+          path: /tmp/sara-integration-evidence
+          if-no-files-found: error
+          retention-days: 14
