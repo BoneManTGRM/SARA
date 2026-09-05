@@ -44,6 +44,7 @@ describe("live coding benchmark command", () => {
     assert.equal(parsed.acknowledgeLabOnly, true);
     assert.equal(parsed.benchmarkId, benchmarkId);
     assert.equal(parsed.maximumSpendUsd, 3);
+    assert.equal(parsed.maximumModelSpendUsdPerArm, 0.15);
     assert.equal(parsed.currentCanaryPercent, 5);
     assert.equal(parsed.caseCount, 10);
     assert.equal(parsed.stateDirectory, ".sara-state");
@@ -100,14 +101,20 @@ describe("live coding benchmark command", () => {
     );
   });
 
-  it("requires enough cap for the maximum two-arm spend and rejects unknown arguments", () => {
+  it("rejects an arm-budget expansion and unknown arguments", () => {
     assert.throws(
       () => parseCodingBenchmarkCommand({
-        args: validArguments.map((argument) => argument === "3.00" ? "2.99" : argument),
-        env: validEnvironment,
+        args: validArguments.map((argument) => argument === "3.00" ? "3.01" : argument),
+        env: {
+          ...validEnvironment,
+          SARA_CODING_BENCHMARK_AUTHORITY_SHA256: codingBenchmarkAuthorityDigest({
+            ...authorityInput,
+            maximumSpendUsd: 3.01,
+          }),
+        },
         maximumCases: 10,
       }),
-      /at least \$3\.00/,
+      /per-arm ceiling/,
     );
     assert.throws(
       () => parseCodingBenchmarkCommand({
@@ -147,6 +154,20 @@ describe("live coding benchmark command", () => {
       },
       maximumCases: 1,
     });
-    assert.equal((parsed as { maximumModelSpendUsdPerArm?: number }).maximumModelSpendUsdPerArm, 0.075);
+    assert.equal(parsed.maximumModelSpendUsdPerArm, 0.075);
+  });
+
+  it("fails closed when equal partitioning would leave less than one cent per arm", () => {
+    const tinyAuthority = {
+      benchmarkId,
+      sourceRevision,
+      maximumSpendUsd: 0.15,
+      currentCanaryPercent: 5,
+      caseCount: 10,
+    };
+    assert.throws(
+      () => codingBenchmarkAuthorityDigest(tinyAuthority),
+      /at least \$0\.01/,
+    );
   });
 });
