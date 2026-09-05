@@ -1,0 +1,182 @@
+diff --git a/src/coding-repair-benchmark-store.ts b/src/coding-repair-benchmark-store.ts
+index 1d36fc1..3baf686 100644
+--- a/src/coding-repair-benchmark-store.ts
++++ b/src/coding-repair-benchmark-store.ts
+@@ -4,6 +4,7 @@ import { canonicalJson, sha256 } from "./canonical.ts";
+ import {
+   assertCodingBenchmarkSummaryProof,
+   codingBenchmarkPairDigest,
++  evaluateCodingBenchmarkPromotion,
+   summarizeCodingBenchmark,
+   type CodingBenchmarkArmResult,
+   type CodingBenchmarkBindings,
+@@ -385,6 +386,9 @@ export async function persistCodingBenchmarkEvidenceSnapshot(input: {
+     stateDirectory: input.stateDirectory,
+     benchmarkId: input.summary.benchmarkId,
+   });
++  if (progress.pairs.length !== progress.manifest.caseIds.length) {
++    throw new Error("An evidence snapshot requires the entire frozen benchmark corpus.");
++  }
+   if (input.decision.proofDigest !== input.summary.proofDigest) {
+     throw new Error("Benchmark decision is not bound to its summary proof.");
+   }
+@@ -401,6 +405,11 @@ export async function persistCodingBenchmarkEvidenceSnapshot(input: {
+     throw new Error("Benchmark summary must include every currently persisted complete pair.");
+   }
+   assertCodingBenchmarkSummaryProof(input.summary, progress.pairs);
++  const expectedDecision = evaluateCodingBenchmarkPromotion({summary: input.summary,
++    currentCanaryPercent: progress.manifest.currentCanaryPercent});
++  if (canonicalJson(input.decision) !== canonicalJson(expectedDecision)) {
++    throw new Error("Benchmark decision does not match the deterministic recommendation.");
++  }
+   const snapshot: CodingBenchmarkEvidenceSnapshot = {
+     schemaVersion: 1,
+     benchmarkId: input.summary.benchmarkId,
+@@ -435,6 +444,9 @@ function assertSnapshot(input: {
+   pairByDigest: Map<string, CodingBenchmarkPairReceipt>;
+ }): void {
+   const { snapshot, filename, manifest, pairByDigest } = input;
++  if (snapshot.summary.pairCount !== manifest.caseIds.length || snapshot.pairDigests.length !== manifest.caseIds.length) {
++    throw new Error("An evidence snapshot requires the entire frozen benchmark corpus.");
++  }
+   if (
+     snapshot.schemaVersion !== 1
+     || snapshot.benchmarkId !== manifest.benchmarkId
+@@ -458,6 +470,11 @@ function assertSnapshot(input: {
+     return pair;
+   });
+   assertCodingBenchmarkSummaryProof(snapshot.summary, pairs);
++  const expectedDecision = evaluateCodingBenchmarkPromotion({summary: snapshot.summary,
++    currentCanaryPercent: manifest.currentCanaryPercent});
++  if (canonicalJson(snapshot.decision) !== canonicalJson(expectedDecision)) {
++    throw new Error("Persisted decision does not match the deterministic recommendation.");
++  }
+ }
+ 
+ export async function loadCodingBenchmarkProgress(input: {
+diff --git a/src/coding-repair-benchmark.ts b/src/coding-repair-benchmark.ts
+index d331bf2..8020fad 100644
+--- a/src/coding-repair-benchmark.ts
++++ b/src/coding-repair-benchmark.ts
+@@ -146,6 +146,9 @@ function assertCount(value: number, field: string): void {
+ }
+ 
+ function assertArm(arm: CodingBenchmarkArmResult, method: CodingBenchmarkMethod): void {
++  if ([arm.verifiedComplete, arm.regression, arm.criticalRegression].some(value => typeof value !== "boolean")) {
++    throw new Error("Benchmark completion and regression flags must be boolean.");
++  }
+   if (arm.method !== method) throw new Error(`Benchmark arm method must be ${method}.`);
+   if (!Number.isFinite(arm.finalScore) || arm.finalScore < 0 || arm.finalScore > 1) {
+     throw new Error("Benchmark final score must be within 0 and 1.");
+@@ -207,7 +210,7 @@ function sumNullable(values: readonly (number | null)[]): { total: number | null
+   const known = values.filter((value): value is number => value !== null);
+   return {
+     total: known.length === values.length
+-      ? rounded(known.reduce((total, value) => total + value, 0))
++      ? known.reduce((total, value) => total + value, 0)
+       : null,
+     known: known.length,
+   };
+@@ -525,6 +528,16 @@ export function evaluateCodingBenchmarkPromotion(input: {
+       reasonCodes: ["no_supported_major_benefit"],
+     };
+   }
++  // Relative speed cannot justify promoting unsuccessful or regressing work.
++  if (summary.reparodynamic.verifiedSuccessRate < 0.8) {
++    return {...base, action: "hold", recommendedCanaryPercent: input.currentCanaryPercent,
++      reasonCodes: ["verified_quality_floor_not_met"]};
++  }
++  if (summary.reparodynamic.regressions > summary.normal.regressions) {
++    return {...base, action: "hold", recommendedCanaryPercent: input.currentCanaryPercent,
++      reasonCodes: ["noncritical_regression_increase"]};
++  }
++
+   const benefitReasons = [
+     ...(verifiedSuccessGainSupported ? ["verified_success_gain_supported"] : []),
+     ...(timeReductionSupported ? ["equivalent_success_time_reduction_supported"] : []),
+diff --git a/tests/coding-repair-benchmark-store.test.ts b/tests/coding-repair-benchmark-store.test.ts
+index 56ed16a..dc4a329 100644
+--- a/tests/coding-repair-benchmark-store.test.ts
++++ b/tests/coding-repair-benchmark-store.test.ts
+@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
+ import { describe, it } from "node:test";
++import { canonicalJson, sha256 } from "../src/canonical.ts";
+ import {
+   evaluateCodingBenchmarkPromotion,
+   summarizeCodingBenchmark,
+@@ -245,3 +246,32 @@ describe("coding benchmark evidence store", () => {
+     }
+   });
+ });
++
++
++it("rejects a caller-forged expansion decision even when its summary digest matches", async () => {
++  const stateDirectory = await temporaryState();
++  try {
++    await initializeCodingBenchmarkStore({stateDirectory, manifest});
++    await persistBothArms(stateDirectory);
++    await persistCodingBenchmarkPairReceipt({stateDirectory, pair: pair()});
++    const summary = summarizeCodingBenchmark({pairs: [pair()], bootstrapSamples: 500});
++    const decision = evaluateCodingBenchmarkPromotion({summary, currentCanaryPercent: 5});
++    await assert.rejects(persistCodingBenchmarkEvidenceSnapshot({stateDirectory, summary,
++      decision: {...decision, action: "promote_default", recommendedCanaryPercent: 100}}), /deterministic recommendation/);
++  } finally { await rm(stateDirectory, {recursive:true, force:true}); }
++});
++
++it("rejects a legacy partial snapshot on reload even with consistent content hashes", async () => {
++  const stateDirectory = await temporaryState();
++  try {
++    await initializeCodingBenchmarkStore({stateDirectory, manifest: {...manifest, caseIds: ["case-001", "case-002"]}});
++    await persistBothArms(stateDirectory);
++    await persistCodingBenchmarkPairReceipt({stateDirectory, pair: pair()});
++    const summary = summarizeCodingBenchmark({pairs:[pair()], bootstrapSamples:500});
++    const decision = evaluateCodingBenchmarkPromotion({summary, currentCanaryPercent:5});
++    const payload = {schemaVersion:1,benchmarkId,pairDigests:[sha256(canonicalJson(pair()))],summary,decision};
++    const envelope = {schemaVersion:1,kind:"snapshot",payload,payloadDigest:sha256(canonicalJson(payload))};
++    await writeFile(join(stateDirectory,"coding-repair-benchmarks",benchmarkId,"snapshots",summary.proofDigest+".json"),JSON.stringify(envelope));
++    await assert.rejects(loadCodingBenchmarkProgress({stateDirectory,benchmarkId}), /entire frozen benchmark corpus/);
++  } finally { await rm(stateDirectory,{recursive:true,force:true}); }
++});
+diff --git a/tests/coding-repair-benchmark.test.ts b/tests/coding-repair-benchmark.test.ts
+index 1f99e41..28d9425 100644
+--- a/tests/coding-repair-benchmark.test.ts
++++ b/tests/coding-repair-benchmark.test.ts
+@@ -107,12 +107,14 @@ describe("matched Reparodynamic coding benchmark", () => {
+   it("measures a supported success lift and opens only the next canary stage", () => {
+     const pairs = Array.from({ length: 30 }, (_, index) => materialPair({
+       index: index + 1,
+-      normalSuccess: index < 6,
+-      reparodynamicSuccess: index < 12,
++      // Keep the original +20-point lift, now satisfying the required 80% floor.
++      normalSuccess: index < 18,
++      reparodynamicSuccess: index < 24,
+     }));
+     const summary = summarizeCodingBenchmark({ pairs, bootstrapSamples: 4_000 });
+     assert.equal(summary.evidenceLevel, "MEASURED");
+     assert.equal(summary.paired.verifiedSuccessDelta, 0.2);
++    assert.equal(summary.reparodynamic.verifiedSuccessRate, 0.8);
+     assert.ok(summary.paired.verifiedSuccessDelta95.lower > 0);
+ 
+     const decision = evaluateCodingBenchmarkPromotion({ summary, currentCanaryPercent: 5 });
+@@ -220,3 +222,19 @@ describe("matched Reparodynamic coding benchmark", () => {
+     assert.ok(decision.reasonCodes.includes("critical_regression_increase"));
+   });
+ });
++
++
++it("rejects non-boolean completion and regression flags instead of counting truthiness", () => {
++  for (const field of ["verifiedComplete", "regression", "criticalRegression"] as const) {
++    const p = pair({index:1,normalSuccess:true,reparodynamicSuccess:true});
++    (p.reparodynamic as unknown as Record<string,unknown>)[field] = "yes";
++    assert.throws(()=>summarizeCodingBenchmark({pairs:[p],bootstrapSamples:500}), /boolean/);
++  }
++});
++
++it("retains positive sub-micro costs in aggregate evidence", () => {
++  const p=pair({index:1,normalSuccess:true,reparodynamicSuccess:true,normalCostUsd:0.0000004,reparodynamicCostUsd:0.0000002});
++  const summary=summarizeCodingBenchmark({pairs:[p],bootstrapSamples:500});
++  assert.equal(summary.normal.totalAccountedCostUsd,0.0000004);
++  assert.equal(summary.reparodynamic.totalAccountedCostUsd,0.0000002);
++});
