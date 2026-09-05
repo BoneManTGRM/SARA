@@ -1,0 +1,61 @@
+name: Additional benchmark one-use source transfer
+on:
+  push:
+    branches: [maintenance/additional-benchmark-transfer-20260905]
+    paths: [.github/workflows/additional-benchmark-source-transfer.yml]
+permissions:
+  contents: write
+jobs:
+  transfer:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1 && github.run_number == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 9fa4945bd8becab34ee536ce86dc45d6c8a5bd43
+          persist-credentials: true
+      - name: Verify and publish exact source only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64,gzip,hashlib,json,os,pathlib,subprocess,urllib.request
+          def git(*args): return subprocess.check_output(['git',*args],text=True).strip()
+          assert git('rev-parse','HEAD')=='9fa4945bd8becab34ee536ce86dc45d6c8a5bd43'
+          assert git('rev-parse','HEAD^{tree}')=='10f14cb83dafdf43b18b6dc268fe5756de1b9eec'
+          pieces=[]
+          for sha in ['f22356be2b0e270f1aa1e465088d4592b0efd979','dfc8a9356f5a5de708f4d11b286c055fd7dfa74f','82cb88a015023c48e10751be144cd5631a7dd169']:
+              url='https://api.github.com/repos/BoneManTGRM/SARA/git/blobs/'+sha
+              request=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+              with urllib.request.urlopen(request,timeout=30) as response: value=json.loads(response.read(32768))
+              data=base64.b64decode(value['content'])
+              assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()==sha
+              pieces.append(data)
+          packed=base64.b64decode(b''.join(pieces),validate=True)
+          assert hashlib.sha256(packed).hexdigest()=='118da57b69e28e90f6a49331ea944f55dc1d29d38e3eba46ca18f5e0df6cee94'
+          patch=gzip.decompress(packed)
+          assert hashlib.sha256(patch).hexdigest()=='21bff7fcb744cd8cf9277facfbbc6d6861b14ccf1cd0a0c0093099ecd68a4400'
+          out=pathlib.Path('/tmp/sara-additional-source');out.mkdir()
+          (out/'grant2.patch').write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(out/'grant2.patch')],check=True)
+          subprocess.run(['git','apply','--index',str(out/'grant2.patch')],check=True)
+          expected={'scripts/benchmark-matched-coding-evidence.ts','src/coding-benchmark-readiness.ts','src/coding-benchmark-github-relay.ts','src/coding-benchmark-owner.ts','src/coding-benchmark-audit.ts','src/coding-repair-live-benchmark-case.ts','src/coding-benchmark-free-windows.ts','tests/coding-benchmark-github-relay.test.ts','tests/coding-benchmark-additional-grant.test.ts','tests/coding-benchmark-free-windows.test.ts','docs/CODING_BENCHMARK_ADDITIONAL_GRANT.md'}
+          assert set(git('diff','--cached','--name-only').splitlines())==expected
+          tree=git('write-tree');assert tree=='bee6fd90769a2846b6c6fe81de7be6656084b1e5'
+          subprocess.run(['git','config','user.name','SARA owner-authorized source transfer'],check=True)
+          subprocess.run(['git','config','user.email','235159333+BoneManTGRM@users.noreply.github.com'],check=True)
+          subprocess.run(['git','commit','-m','Register one additional matched coding task while retaining the original spending hold'],check=True)
+          commit=git('rev-parse','HEAD')
+          (out/'source.json').write_text(json.dumps({'commit':commit,'tree':tree,'base':'9fa4945bd8becab34ee536ce86dc45d6c8a5bd43','grantId':'33d94c9a-0de6-41d9-a843-fe9880994242','applicationExecution':False,'modelRequests':0},indent=2)+'\n')
+          subprocess.run(['git','archive','--format=tar.gz','--prefix=SARA/',f'--output={out}/source.tar.gz','HEAD'],check=True)
+          (out/'SHA256SUMS').write_text(''.join(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name+'\n' for f in sorted(out.iterdir()) if f.is_file()))
+          subprocess.run(['git','push','origin','HEAD:refs/heads/feat/additional-matched-benchmark-20260905'],check=True)
+          print(json.dumps({'candidateCommit':commit,'tree':tree,'modelRequests':0}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-additional-benchmark-source
+          path: /tmp/sara-additional-source
+          if-no-files-found: error
+          retention-days: 7
