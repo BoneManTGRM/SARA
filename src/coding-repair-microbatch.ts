@@ -1,205 +1,142 @@
-export type CodingMicroBatchTask = {
-  id: string;
-  objective: string;
-  source: string;
-};
-
-export type CodingMicroBatchProposal = {
-  id: string;
-  source: string;
-};
-
+export type CodingMicroBatchTask = { id: string; objective: string; source: string };
+export type CodingMicroBatchProposal = { id: string; source: string };
 export type CodingMicroBatchUsage = {
-  accountedCostUsd: number;
-  inputTokens: number;
-  outputTokens: number;
-  elapsedMilliseconds: number;
+  accountedCostUsd: number; inputTokens: number; outputTokens: number; elapsedMilliseconds: number;
 };
-
 export type CodingMicroBatchModel = {
-  proposeBatch(tasks: readonly CodingMicroBatchTask[]): Promise<CodingMicroBatchUsage & {
-    proposals: CodingMicroBatchProposal[];
-  }>;
-  proposeSingle(task: CodingMicroBatchTask, maximumSpendUsd?: number): Promise<CodingMicroBatchUsage & {
-    proposal: CodingMicroBatchProposal;
-  }>;
+  /** The adapter must reserve this ceiling before external spending. */
+  proposeBatch(tasks: readonly CodingMicroBatchTask[], maximumSpendUsd?: number): Promise<CodingMicroBatchUsage & {proposals: CodingMicroBatchProposal[]}>;
+  proposeSingle(task: CodingMicroBatchTask, maximumSpendUsd?: number): Promise<CodingMicroBatchUsage & {proposal: CodingMicroBatchProposal}>;
 };
-
-export type CodingMicroBatchVerification = {
-  passed: boolean;
-  score: number;
-};
-
-export type CodingMicroBatchResult = {
+export type CodingMicroBatchVerification = { passed: boolean; score: number };
+type MemberResult = { id: string; passed: boolean; score: number; attempts: number };
+export type CodingMicroBatchFailureEvidence = {
   schemaVersion: 1;
-  evidenceLevel: "DETERMINISTIC_MICROBATCH_MECHANISM";
-  verifiedComplete: number;
-  totalTasks: number;
   modelCalls: number;
-  inputTokens: number;
-  outputTokens: number;
-  accountedCostUsd: number;
-  activeModelMilliseconds: number;
-  modelCallThroughputRatio: number | null;
-  modelCallThroughputIncreasePercent: number | null;
-  accuracyPreserved: boolean;
-  results: Array<{
-    id: string;
-    passed: boolean;
-    score: number;
-    attempts: number;
-  }>;
+  accountedCostUsd: number | null;
+  knownCostUsd: number;
+  unknownCostReservationUsd: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  results: MemberResult[];
+  failureStages: string[];
   generalClaimSupported: false;
 };
-
+/** Partial work survives exceptions. No provider messages, causes or source enter this evidence. */
+export class CodingMicroBatchExecutionError extends Error {
+  readonly evidence: CodingMicroBatchFailureEvidence;
+  constructor(message: string, evidence: CodingMicroBatchFailureEvidence) {
+    super(message); this.name = 'CodingMicroBatchExecutionError'; this.evidence = structuredClone(evidence);
+  }
+}
+export type CodingMicroBatchResult = {
+  schemaVersion: 1; evidenceLevel: 'DETERMINISTIC_MICROBATCH_MECHANISM';
+  verifiedComplete: number; totalTasks: number; modelCalls: number; inputTokens: number; outputTokens: number;
+  accountedCostUsd: number; activeModelMilliseconds: number; modelCallThroughputRatio: number | null;
+  modelCallThroughputIncreasePercent: number | null;
+  /** Legacy name: all supplied tasks passed their verifier, not a comparative accuracy measurement. */
+  accuracyPreserved: boolean;
+  results: MemberResult[]; generalClaimSupported: false;
+};
 const MAX_BATCH_TASKS = 4;
-const MAX_EXPERIMENT_SPEND_USD = 0.15;
-
+const MAX_EXPERIMENT_SPEND_USD = .15;
 function assertUsage(usage: CodingMicroBatchUsage): void {
-  if (
-    !Number.isFinite(usage.accountedCostUsd) || usage.accountedCostUsd < 0 ||
-    !Number.isFinite(usage.inputTokens) || usage.inputTokens < 0 ||
-    !Number.isFinite(usage.outputTokens) || usage.outputTokens < 0 ||
-    !Number.isFinite(usage.elapsedMilliseconds) || usage.elapsedMilliseconds < 0
-  ) {
-    throw new Error("Coding micro-batch returned malformed usage accounting.");
+  if (!usage || !Number.isFinite(usage.accountedCostUsd) || usage.accountedCostUsd < 0 ||
+      !Number.isSafeInteger(usage.inputTokens) || usage.inputTokens < 0 ||
+      !Number.isSafeInteger(usage.outputTokens) || usage.outputTokens < 0 ||
+      !Number.isFinite(usage.elapsedMilliseconds) || usage.elapsedMilliseconds < 0) {
+    throw new Error('Coding micro-batch returned malformed usage accounting.');
   }
 }
-
-function assertProposalIdentities(
-  tasks: readonly CodingMicroBatchTask[],
-  proposals: readonly CodingMicroBatchProposal[],
-): void {
-  const expected = new Set(tasks.map((task) => task.id));
-  const actual = new Set(proposals.map((proposal) => proposal.id));
-  if (actual.size !== proposals.length || actual.size !== expected.size) {
-    throw new Error("Coding micro-batch proposal identities are malformed.");
-  }
-  for (const id of actual) {
-    if (!expected.has(id)) throw new Error("Coding micro-batch proposal identities are malformed.");
+function assertVerification(value: CodingMicroBatchVerification): void {
+  if (!value || typeof value.passed !== 'boolean' || !Number.isFinite(value.score) ||
+      value.score < 0 || value.score > 1 || (value.passed && value.score !== 1)) {
+    throw new Error('Coding micro-batch returned malformed verification.');
   }
 }
-
+function assertProposalIdentities(tasks: readonly CodingMicroBatchTask[], proposals: readonly CodingMicroBatchProposal[]): void {
+  if (!Array.isArray(proposals) || proposals.some(p=>!p || typeof p.id !== 'string' || typeof p.source !== 'string')) throw new Error('Coding micro-batch proposal identities are malformed.');
+  const expected = new Set(tasks.map(t=>t.id)), actual = new Set(proposals.map(p=>p.id));
+  if (actual.size !== proposals.length || actual.size !== expected.size || [...actual].some(id=>!expected.has(id))) throw new Error('Coding micro-batch proposal identities are malformed.');
+}
 export async function runVerifiedCodingMicroBatch(input: {
-  tasks: readonly CodingMicroBatchTask[];
-  maximumSpendUsd: number;
-  model: CodingMicroBatchModel;
+  tasks: readonly CodingMicroBatchTask[]; maximumSpendUsd: number; model: CodingMicroBatchModel;
   verify(task: CodingMicroBatchTask, candidateSource: string): Promise<CodingMicroBatchVerification>;
 }): Promise<CodingMicroBatchResult> {
-  if (input.tasks.length < 1 || input.tasks.length > MAX_BATCH_TASKS) {
-    throw new Error(`Coding micro-batch requires between 1 and ${MAX_BATCH_TASKS} tasks.`);
-  }
-  const ids = new Set<string>();
-  for (const task of input.tasks) {
-    if (!task.id.trim() || ids.has(task.id)) throw new Error("Coding micro-batch task ids must be unique and non-empty.");
+  if (input.tasks.length < 1 || input.tasks.length > MAX_BATCH_TASKS) throw new Error(`Coding micro-batch requires between 1 and ${MAX_BATCH_TASKS} tasks.`);
+  const tasks = structuredClone(input.tasks), ids = new Set<string>();
+  for (const task of tasks) {
+    if (typeof task.id !== 'string' || !task.id.trim() || ids.has(task.id)) throw new Error('Coding micro-batch task ids must be unique and non-empty.');
     ids.add(task.id);
   }
-  if (
-    !Number.isFinite(input.maximumSpendUsd) ||
-    input.maximumSpendUsd <= 0 ||
-    input.maximumSpendUsd > MAX_EXPERIMENT_SPEND_USD
-  ) {
-    throw new Error("Coding micro-batch spend ceiling is invalid or exceeds $0.15.");
-  }
-
-  let modelCalls = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let accountedCostUsd = 0;
-  let activeModelMilliseconds = 0;
-
-  const batch = await input.model.proposeBatch(structuredClone(input.tasks));
-  assertUsage(batch);
-  if (batch.accountedCostUsd > input.maximumSpendUsd + Number.EPSILON) {
-    throw new Error("Coding micro-batch exceeded its configured spend ceiling.");
-  }
-  accountedCostUsd = batch.accountedCostUsd;
-  inputTokens = batch.inputTokens;
-  outputTokens = batch.outputTokens;
-  activeModelMilliseconds = batch.elapsedMilliseconds;
-  modelCalls = 1;
-
-  assertProposalIdentities(input.tasks, batch.proposals);
-  const proposalsById = new Map(batch.proposals.map((proposal) => [proposal.id, proposal]));
-  const resultsById = new Map<string, CodingMicroBatchResult["results"][number]>();
-  const failedTasks: CodingMicroBatchTask[] = [];
-
-  for (const task of input.tasks) {
-    const proposal = proposalsById.get(task.id);
-    if (!proposal) throw new Error("Coding micro-batch proposal identities are malformed.");
-    const verification = await input.verify(structuredClone(task), proposal.source);
-    if (verification.passed) {
-      resultsById.set(task.id, { id: task.id, passed: true, score: verification.score, attempts: 1 });
-    } else {
-      failedTasks.push(structuredClone(task));
-    }
-  }
-
-  if (failedTasks.length > 0) {
-    const remainingSpendUsd = input.maximumSpendUsd - accountedCostUsd;
-    if (remainingSpendUsd <= 0) {
-      throw new Error("Coding micro-batch has no remaining spend for failed-member fallback.");
-    }
-    const perFallbackSpendCeilingUsd = remainingSpendUsd / failedTasks.length;
-    const fallbacks = await Promise.all(failedTasks.map(async (task) => {
-      const response = await input.model.proposeSingle(structuredClone(task), perFallbackSpendCeilingUsd);
-      assertUsage(response);
-      if (response.accountedCostUsd > perFallbackSpendCeilingUsd + Number.EPSILON) {
-        throw new Error("Coding micro-batch fallback exceeded its reserved spend ceiling.");
-      }
-      if (response.proposal.id !== task.id) {
-        throw new Error("Coding micro-batch fallback proposal identity does not match its task.");
-      }
-      return { task, response };
-    }));
-
-    const fallbackCostUsd = fallbacks.reduce((sum, entry) => sum + entry.response.accountedCostUsd, 0);
-    if (accountedCostUsd + fallbackCostUsd > input.maximumSpendUsd + Number.EPSILON) {
-      throw new Error("Coding micro-batch exceeded its configured spend ceiling.");
-    }
-    accountedCostUsd += fallbackCostUsd;
-    inputTokens += fallbacks.reduce((sum, entry) => sum + entry.response.inputTokens, 0);
-    outputTokens += fallbacks.reduce((sum, entry) => sum + entry.response.outputTokens, 0);
-    activeModelMilliseconds += Math.max(...fallbacks.map((entry) => entry.response.elapsedMilliseconds));
-    modelCalls += fallbacks.length;
-
-    await Promise.all(fallbacks.map(async ({ task, response }) => {
-      const fallbackVerification = await input.verify(structuredClone(task), response.proposal.source);
-      resultsById.set(task.id, {
-        id: task.id,
-        passed: fallbackVerification.passed,
-        score: fallbackVerification.score,
-        attempts: 2,
-      });
-    }));
-  }
-
-  const results = input.tasks.map((task) => {
-    const result = resultsById.get(task.id);
-    if (!result) throw new Error("Coding micro-batch did not produce a verification result for every task.");
-    return result;
-  });
-  const verifiedComplete = results.filter((result) => result.passed).length;
-  const accuracyPreserved = verifiedComplete === input.tasks.length;
-  const modelCallThroughputRatio = accuracyPreserved ? verifiedComplete / modelCalls : null;
-  const modelCallThroughputIncreasePercent = modelCallThroughputRatio === null
-    ? null
-    : (modelCallThroughputRatio - 1) * 100;
-
-  return {
-    schemaVersion: 1,
-    evidenceLevel: "DETERMINISTIC_MICROBATCH_MECHANISM",
-    verifiedComplete,
-    totalTasks: input.tasks.length,
-    modelCalls,
-    inputTokens,
-    outputTokens,
-    accountedCostUsd,
-    activeModelMilliseconds,
-    modelCallThroughputRatio,
-    modelCallThroughputIncreasePercent,
-    accuracyPreserved,
-    results,
-    generalClaimSupported: false,
+  if (!Number.isFinite(input.maximumSpendUsd) || input.maximumSpendUsd <= 0 || input.maximumSpendUsd > MAX_EXPERIMENT_SPEND_USD) throw new Error('Coding micro-batch spend ceiling is invalid or exceeds $0.15.');
+  let modelCalls=0, inputTokens=0, outputTokens=0, accountedCostUsd=0, activeModelMilliseconds=0;
+  let unknownReservations=0, unknownCalls=0, message='Coding micro-batch execution failed.';
+  const stages: string[]=[]; const costs: number[]=[];
+  const members=new Map(tasks.map(t=>[t.id,{id:t.id,passed:false,score:0,attempts:0}]));
+  const results=()=>tasks.map(t=>({...members.get(t.id)!}));
+  const account=(u:CodingMicroBatchUsage,reserve:number)=>{
+    assertUsage(u); unknownReservations=Math.max(0,unknownReservations-reserve); unknownCalls--;
+    costs.push(u.accountedCostUsd);
+    accountedCostUsd=costs[0]+costs.slice(1).reduce((total,cost)=>total+cost,0);
+    inputTokens+=u.inputTokens;outputTokens+=u.outputTokens;
   };
+  const verify=async(task:CodingMicroBatchTask,source:string)=>{
+    const v=await input.verify(structuredClone(task),source);assertVerification(v);
+    Object.assign(members.get(task.id)!,{passed:v.passed,score:v.score}); return v;
+  };
+  try {
+    modelCalls++;unknownCalls++;unknownReservations=input.maximumSpendUsd;
+    let batch;
+    try {batch=await input.model.proposeBatch(structuredClone(tasks),input.maximumSpendUsd);}
+    catch {stages.push('batch_model');throw new Error();}
+    try {account(batch,input.maximumSpendUsd);}
+    catch {stages.push('batch_usage');message='Coding micro-batch returned malformed usage accounting.';throw new Error();}
+    activeModelMilliseconds=batch.elapsedMilliseconds;
+    if (accountedCostUsd > input.maximumSpendUsd+Number.EPSILON) {message='Coding micro-batch exceeded its configured spend ceiling.';stages.push('batch_budget');throw new Error();}
+    try {assertProposalIdentities(tasks,batch.proposals);}
+    catch {message='Coding micro-batch proposal identities are malformed.';stages.push('batch_identity');throw new Error();}
+    const proposals=new Map(batch.proposals.map(p=>[p.id,p]));
+    const failed: CodingMicroBatchTask[]=[];
+    for (const task of tasks) {
+      members.get(task.id)!.attempts=1;
+      let v;
+      try {v=await verify(task,proposals.get(task.id)!.source);}
+      catch {stages.push('batch_verification');message='Coding micro-batch returned malformed or failed verification.';throw new Error();}
+      if (!v.passed) failed.push(task);
+    }
+    if (failed.length) {
+      const remaining=input.maximumSpendUsd-accountedCostUsd;
+      if (remaining <= 0) {message='Coding micro-batch has no remaining spend for failed-member fallback.';stages.push('fallback_budget');throw new Error();}
+      const ceiling=remaining/failed.length;
+      // Reserve every request before dispatch; allSettled retains successful siblings on failure.
+      modelCalls+=failed.length;unknownCalls+=failed.length;unknownReservations+=remaining;
+      for(const t of failed)members.get(t.id)!.attempts=2;
+      const settled=await Promise.allSettled(failed.map(async t=>input.model.proposeSingle(structuredClone(t),ceiling)));
+      let maxFallbackMs=0, invalid=false;
+      for(let i=0;i<settled.length;i++) {
+        const row=settled[i], task=failed[i];
+        if(row.status==='rejected'){stages.push('fallback_model');invalid=true;continue;}
+        const response=row.value;
+        try {account(response,ceiling);}
+        catch {stages.push('fallback_usage');invalid=true;continue;}
+        maxFallbackMs=Math.max(maxFallbackMs,response.elapsedMilliseconds);
+        if(response.accountedCostUsd > ceiling+Number.EPSILON) {stages.push('fallback_budget');message='Coding micro-batch fallback exceeded its reserved spend ceiling.';invalid=true;continue;}
+        if(!response.proposal || response.proposal.id!==task.id || typeof response.proposal.source!=='string') {stages.push('fallback_identity');message='Coding micro-batch fallback proposal identity does not match its task.';invalid=true;continue;}
+        try {await verify(task,response.proposal.source);}
+        catch {stages.push('fallback_verification');invalid=true;}
+      }
+      activeModelMilliseconds+=maxFallbackMs;
+      if(invalid)throw new Error();
+    }
+    const complete=results().filter(r=>r.passed).length, accuracyPreserved=complete===tasks.length;
+    const ratio=accuracyPreserved?complete/modelCalls:null;
+    return {schemaVersion:1,evidenceLevel:'DETERMINISTIC_MICROBATCH_MECHANISM',verifiedComplete:complete,totalTasks:tasks.length,
+      modelCalls,inputTokens,outputTokens,accountedCostUsd,activeModelMilliseconds,modelCallThroughputRatio:ratio,
+      modelCallThroughputIncreasePercent:ratio===null?null:(ratio-1)*100,accuracyPreserved,results:results(),generalClaimSupported:false};
+  } catch {
+    throw new CodingMicroBatchExecutionError(message,{schemaVersion:1,modelCalls,accountedCostUsd:unknownCalls?null:accountedCostUsd,
+      knownCostUsd:accountedCostUsd,unknownCostReservationUsd:unknownReservations,inputTokens:unknownCalls?null:inputTokens,
+      outputTokens:unknownCalls?null:outputTokens,results:results(),failureStages:stages.length?stages:['unclassified_boundary'],generalClaimSupported:false});
+  }
 }
