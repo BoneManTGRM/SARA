@@ -1,0 +1,52 @@
+name: Publish frozen PR80 source objects
+on:
+  push:
+    branches: [integration/pr80-source-20260905]
+    paths: [.github/workflows/publish-pr80-source.yml]
+permissions:
+  contents: write
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 16769424c89d69520a486a69f17bc6ce74f7ed19
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Reconstruct source and publish blobs only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import base64, gzip, hashlib, json, os, pathlib, subprocess, urllib.request
+          def git(*args):return subprocess.check_output(['git',*args]).decode().strip()
+          def api(path,body=None):
+              request=urllib.request.Request('https://api.github.com/repos/BoneManTGRM/SARA/'+path,data=None if body is None else json.dumps(body).encode(),headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'})
+              with urllib.request.urlopen(request,timeout=30) as response:return json.load(response)
+          assert git('rev-parse','HEAD')=='16769424c89d69520a486a69f17bc6ce74f7ed19'
+          git('config','user.name','source-transport');git('config','user.email','source-transport@users.noreply.github.com')
+          git('merge','--no-commit','--no-ff','6c1551b052f32c521cfb86e0e67c7c9f3c9d6847')
+          assert git('write-tree')=='103ee302f31f29113525dcbe0dc4c697ea98caab'
+          blob=api('git/blobs/ff4602b2ed00de9c9bef21bb73a9ccf1df6dd183')
+          patch=gzip.decompress(base64.b64decode(blob['content']))
+          assert hashlib.sha256(patch).hexdigest()=='a7e11bdab5974bba7abd6e10d4fcb111a7502a2ddf8788dc29d35f731067ed33'
+          patchpath=pathlib.Path(os.environ['RUNNER_TEMP'])/'repair.patch';patchpath.write_bytes(patch)
+          git('apply','--index','--check',str(patchpath));git('apply','--index',str(patchpath));git('diff','--cached','--check')
+          tree=git('write-tree');assert tree=='0b1f89054c5580f31cf9f5744dfcbfa0d66d4c68',tree
+          paths=git('diff','--cached','--name-only','6c1551b052f32c521cfb86e0e67c7c9f3c9d6847').splitlines()
+          assert len(paths)==9
+          entries=[]
+          for path in paths:
+              text=pathlib.Path(path).read_text();sha=api('git/blobs',{'content':text,'encoding':'utf-8'})['sha']
+              assert sha==git('rev-parse',':'+path)
+              entries.append({'path':path,'mode':'100644','type':'blob','sha':sha})
+          pathlib.Path('published-source.json').write_text(json.dumps({'tree':tree,'entries':entries,'sourceExecuted':False,'refUpdated':False},indent=2)+'\n')
+          print(json.dumps({'tree':tree,'entries':entries},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr80-published-source-objects
+          path: published-source.json
+          if-no-files-found: error
