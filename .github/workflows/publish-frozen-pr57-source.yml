@@ -1,0 +1,73 @@
+name: Publish frozen PR57 source
+on:
+  push:
+    branches: [integration/pr57-fairness-source-20260905]
+    paths: [.github/workflows/publish-frozen-pr57-source.yml]
+permissions:
+  contents: write
+concurrency:
+  group: frozen-pr57-source-publication
+  cancel-in-progress: false
+jobs:
+  publish-source:
+    if: github.repository == 'BoneManTGRM/SARA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and verify exact reviewed source without executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, lzma, os, pathlib, subprocess
+          root = pathlib.Path.cwd()
+          temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          payload = ''.join((root / f'integration/pr57-fairness/payload.{i}').read_text().strip() for i in range(4))
+          assert hashlib.sha256((payload + '\n').encode()).hexdigest() == '7588f2f5e4de2b29ad0d2bf8b8f7d942bf5deff56fe4be9e3a2d87876cffe44a'
+          patch = lzma.decompress(base64.b64decode(payload, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '1f0075762ac897bdf74e638f4c62cd39f0c83e8d1d1aa6d9aee436fe22270299'
+          (temp / 'fairness.patch').write_bytes(patch)
+          subprocess.run(['git', 'checkout', '--detach', 'f547b92ad6b55ec5fe50d2ae657442495c7592ac'], check=True)
+          paths = ['docs/CODING_BENCHMARK.md', 'package.json', 'proof/coding-repair-benchmark.ts', 'scripts/benchmark-matched-coding-evidence.ts', 'src/coding-repair-benchmark-command.ts', 'src/coding-repair-benchmark-corpus.ts', 'src/coding-repair-benchmark-runner.ts', 'src/coding-repair-benchmark-store.ts', 'src/coding-repair-benchmark.ts', 'tests/coding-repair-benchmark-command.test.ts', 'tests/coding-repair-benchmark-completion.test.ts', 'tests/coding-repair-benchmark-corpus.test.ts', 'tests/coding-repair-benchmark-quality-floor.test.ts', 'tests/coding-repair-benchmark-runner.test.ts', 'tests/coding-repair-benchmark-safety.test.ts', 'tests/coding-repair-benchmark-store.test.ts', 'tests/coding-repair-benchmark.test.ts']
+          for path in paths:
+              original = 'scripts/benchmark-reparodynamic-coding.ts' if path == 'scripts/benchmark-matched-coding-evidence.ts' else path
+              content = subprocess.check_output(['git', 'show', '60206bc105c107f5c9eee9c859a4fa1e41a2113a:' + original])
+              target = root / path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(content)
+          subprocess.run(['git', 'add', '--', *paths], check=True)
+          tree = subprocess.check_output(['git', 'write-tree'], text=True).strip()
+          assert tree == 'f378e5cab3535c2fc0603fa11c3b92594f030ce3', tree
+          subprocess.run(['git', 'apply', '--index', '--check', str(temp / 'fairness.patch')], check=True)
+          subprocess.run(['git', 'apply', '--index', str(temp / 'fairness.patch')], check=True)
+          tree = subprocess.check_output(['git', 'write-tree'], text=True).strip()
+          assert tree == 'ac8085b3962488e882c615e7519776501403b0f8', tree
+          subprocess.run(['git', 'diff', '--cached', '--check'], check=True)
+          subprocess.run(['git', 'archive', '--format=tar.gz', '--output=' + str(temp / 'source.tar.gz'), tree], check=True)
+          (temp / 'reviewed-tree.txt').write_text(tree + '\n')
+          subprocess.run(['git', 'rm', '--cached', '.github/workflows/pr57-fairness-integration.yml'], check=True)
+          tree = subprocess.check_output(['git', 'write-tree'], text=True).strip()
+          assert tree == 'e36a33ca69c0a69d3c66794001917878e7d7bf02', tree
+          subprocess.run(['git', 'diff', '--cached', '--exit-code', '--', '.github/workflows'], check=True)
+          subprocess.run(['git', 'config', 'user.name', 'github-actions[bot]'], check=True)
+          subprocess.run(['git', 'config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com'], check=True)
+          commit = subprocess.check_output(['git', 'commit-tree', tree, '-p', 'f547b92ad6b55ec5fe50d2ae657442495c7592ac', '-p', '60206bc105c107f5c9eee9c859a4fa1e41a2113a', '-m', 'Transport frozen PR57 source objects; verification workflow added through owner connector'], text=True).strip()
+          subprocess.run(['git', 'push', 'origin', commit + ':refs/heads/integration/pr57-source-ready-20260905'], check=True)
+          (temp / 'published-source-commit.txt').write_text(commit + '\n')
+          (temp / 'published-source-tree.txt').write_text(tree + '\n')
+          print('PUBLISHED_SOURCE_COMMIT=' + commit)
+          print('PUBLISHED_SOURCE_TREE=' + tree)
+          print('REVIEWED_COMPLETE_TREE=ac8085b3962488e882c615e7519776501403b0f8')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frozen-pr57-source-publication
+          path: |
+            ${{ runner.temp }}/source.tar.gz
+            ${{ runner.temp }}/reviewed-tree.txt
+            ${{ runner.temp }}/published-source-commit.txt
+            ${{ runner.temp }}/published-source-tree.txt
+          if-no-files-found: error
