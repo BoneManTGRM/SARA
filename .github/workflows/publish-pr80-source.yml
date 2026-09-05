@@ -33,7 +33,10 @@ jobs:
           patch=gzip.decompress(base64.b64decode(blob['content']))
           assert hashlib.sha256(patch).hexdigest()=='a7e11bdab5974bba7abd6e10d4fcb111a7502a2ddf8788dc29d35f731067ed33'
           patchpath=pathlib.Path(os.environ['RUNNER_TEMP'])/'repair.patch';patchpath.write_bytes(patch)
-          git('apply','--index','--check',str(patchpath));git('apply','--index',str(patchpath));git('diff','--cached','--check')
+          git('apply','--index','--check',str(patchpath));git('apply','--index',str(patchpath))
+          # Check the actual changes to current production, not an inherited blank
+          # line already present on main in coding-repair-lessons.ts.
+          git('diff','--cached','--check','6c1551b052f32c521cfb86e0e67c7c9f3c9d6847')
           tree=git('write-tree');assert tree=='0b1f89054c5580f31cf9f5744dfcbfa0d66d4c68',tree
           paths=git('diff','--cached','--name-only','6c1551b052f32c521cfb86e0e67c7c9f3c9d6847').splitlines()
           assert len(paths)==9
