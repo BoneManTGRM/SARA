@@ -69,7 +69,8 @@ export async function runVerifiedCodingMicroBatch(input: {
     if (typeof task.id !== 'string' || !task.id.trim() || ids.has(task.id)) throw new Error('Coding micro-batch task ids must be unique and non-empty.');
     ids.add(task.id);
   }
-  if (!Number.isFinite(input.maximumSpendUsd) || input.maximumSpendUsd <= 0 || input.maximumSpendUsd > MAX_EXPERIMENT_SPEND_USD) throw new Error('Coding micro-batch spend ceiling is invalid or exceeds $0.15.');
+  const maximumSpendUsd = input.maximumSpendUsd;
+  if (!Number.isFinite(maximumSpendUsd) || maximumSpendUsd <= 0 || maximumSpendUsd > MAX_EXPERIMENT_SPEND_USD) throw new Error('Coding micro-batch spend ceiling is invalid or exceeds $0.15.');
   let modelCalls=0, inputTokens=0, outputTokens=0, accountedCostUsd=0, activeModelMilliseconds=0;
   let unknownReservations=0, unknownCalls=0, message='Coding micro-batch execution failed.';
   const stages: string[]=[]; const costs: number[]=[];
@@ -86,14 +87,14 @@ export async function runVerifiedCodingMicroBatch(input: {
     Object.assign(members.get(task.id)!,{passed:v.passed,score:v.score}); return v;
   };
   try {
-    modelCalls++;unknownCalls++;unknownReservations=input.maximumSpendUsd;
+    modelCalls++;unknownCalls++;unknownReservations=maximumSpendUsd;
     let batch;
-    try {batch=await input.model.proposeBatch(structuredClone(tasks),input.maximumSpendUsd);}
+    try {batch=await input.model.proposeBatch(structuredClone(tasks),maximumSpendUsd);}
     catch {stages.push('batch_model');throw new Error();}
-    try {account(batch,input.maximumSpendUsd);}
+    try {account(batch,maximumSpendUsd);}
     catch {stages.push('batch_usage');message='Coding micro-batch returned malformed usage accounting.';throw new Error();}
     activeModelMilliseconds=batch.elapsedMilliseconds;
-    if (accountedCostUsd > input.maximumSpendUsd+Number.EPSILON) {message='Coding micro-batch exceeded its configured spend ceiling.';stages.push('batch_budget');throw new Error();}
+    if (accountedCostUsd > maximumSpendUsd+Number.EPSILON) {message='Coding micro-batch exceeded its configured spend ceiling.';stages.push('batch_budget');throw new Error();}
     try {assertProposalIdentities(tasks,batch.proposals);}
     catch {message='Coding micro-batch proposal identities are malformed.';stages.push('batch_identity');throw new Error();}
     const proposals=new Map(batch.proposals.map(p=>[p.id,p]));
@@ -106,7 +107,7 @@ export async function runVerifiedCodingMicroBatch(input: {
       if (!v.passed) failed.push(task);
     }
     if (failed.length) {
-      const remaining=input.maximumSpendUsd-accountedCostUsd;
+      const remaining=maximumSpendUsd-accountedCostUsd;
       if (remaining <= 0) {message='Coding micro-batch has no remaining spend for failed-member fallback.';stages.push('fallback_budget');throw new Error();}
       const ceiling=remaining/failed.length;
       // Reserve every request before dispatch; allSettled retains successful siblings on failure.
