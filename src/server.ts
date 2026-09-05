@@ -1,3 +1,4 @@
+import { authenticateCodingBenchmarkRelay, type CodingBenchmarkRelayIdentity } from "./coding-benchmark-github-relay.ts";
 import { ownerCodingBenchmarkReadiness, launchOwnerCodingBenchmark } from "./coding-benchmark-owner.ts";
 import { CodingBenchmarkNotReadyError } from "./coding-benchmark-readiness.ts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -1146,7 +1147,20 @@ async function routeSaraRequest(
     return;
   }
 
-  const token = authenticatedToken(request, options.ownerTokenSha256);
+  let token = authenticatedToken(request, options.ownerTokenSha256);
+  let launcher: CodingBenchmarkRelayIdentity | null = null;
+  // This explicitly configured delegation is restricted to the existing benchmark
+  // routes. It cannot authenticate ordinary owner, bridge or emergency-stop APIs.
+  const relayRoute = !url.search && ((request.method === "GET" && url.pathname === "/api/coding-benchmark/readiness")
+    || (request.method === "POST" && url.pathname === "/api/coding-benchmark/run"));
+  if (!token && relayRoute && request.headers.authorization?.startsWith("Bearer ")) {
+    launcher = await authenticateCodingBenchmarkRelay(request.headers.authorization.slice(7), process.env);
+    const configuredOwner = process.env.SARA_OWNER_TOKEN?.trim();
+    if (launcher && configuredOwner && /^[a-f0-9]{64}$/iu.test(options.ownerTokenSha256)
+      && timingSafeEqual(tokenDigest(configuredOwner), Buffer.from(options.ownerTokenSha256, "hex"))) {
+      token = configuredOwner;
+    }
+  }
   if (!token) {
     unauthorized(response);
     return;
@@ -1158,7 +1172,8 @@ async function routeSaraRequest(
     const status = await kernel.getStatus();
     const environment = { ...process.env, SARA_OWNER_TOKEN: token, SARA_OWNER_TOKEN_SHA256: options.ownerTokenSha256 };
     const input = { environment, stateDirectory: options.stateDirectory,
-      constitutionVerified: status.constitution.verified, emergencyStopped: status.emergencyStopped };
+      constitutionVerified: status.constitution.verified, emergencyStopped: status.emergencyStopped,
+      ...(launcher ? { launcher } : {}) };
     if (request.method === "GET" && url.pathname.endsWith("/readiness")) {
       json(response, 200, await ownerCodingBenchmarkReadiness(input));
     } else if (request.method === "POST" && url.pathname.endsWith("/run")) {
