@@ -1,0 +1,42 @@
+name: PR69 offline source review snapshot
+on:
+  push:
+    branches: [integration/pr69-source-20260905-1626]
+    paths: [.github/workflows/pr69-source-review-snapshot.yml]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.repository == 'BoneManTGRM/SARA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Export immutable review refs without modifying remote branches
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/review"
+          git branch review-main 1e98f0f11247cf1b3c76ee20f9f5fca1de0943d8
+          git branch review-69 44788ca2bec9556f038c992d30f3cfe80e9ae24e
+          git branch review-70 e07fe3e3965a8fea6d43efb3767e01595a7cecc9
+          git branch review-90 23014289921e671f249ac62f598dbc831ceb6905
+          git branch review-93 a59facdfbaf05f35d8a4e0c87c5758cb5c003d76
+          git bundle create "${RUNNER_TEMP}/review/source.bundle" review-main review-69 review-70 review-90 review-93
+          git checkout --detach 1e98f0f11247cf1b3c76ee20f9f5fca1de0943d8
+          npm ci --ignore-scripts > "${RUNNER_TEMP}/review/install.log" 2>&1
+          npm ls --depth=0 > "${RUNNER_TEMP}/review/toolchain.txt"
+          node --version >> "${RUNNER_TEMP}/review/toolchain.txt"
+          tar -czf "${RUNNER_TEMP}/review/dependencies.tar.gz" node_modules
+          cd "${RUNNER_TEMP}/review"
+          sha256sum source.bundle dependencies.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr69-offline-review-snapshot
+          path: ${{ runner.temp }}/review/
+          if-no-files-found: error
