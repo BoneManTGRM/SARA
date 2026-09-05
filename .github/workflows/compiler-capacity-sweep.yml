@@ -1,0 +1,60 @@
+name: SARA compiler capacity experiment
+on:
+  push:
+    branches: [proof/pr-queue-audit-20260905]
+    paths: [.github/workflows/compiler-capacity-sweep.yml]
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    strategy:
+      max-parallel: 2
+      fail-fast: false
+      matrix:
+        include:
+          - entries: 512
+            mib: 16
+          - entries: 1024
+            mib: 32
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 03b403b069ddc16685bcb580794555264ae7966b
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - name: Create explicitly uncommitted capacity-only experimental variant
+        env:
+          ENTRIES: ${{ matrix.entries }}
+          MIB: ${{ matrix.mib }}
+        run: |
+          python3 - <<'PY'
+          import os,pathlib,json,hashlib
+          p=pathlib.Path('src/experimental-compiler-cache.ts');s=p.read_text()
+          assert s.count('const MAX_ENTRIES = 256;')==1 and s.count('const MAX_TEXT_BYTES = 8 * 1024 * 1024;')==1
+          s=s.replace('const MAX_ENTRIES = 256;','const MAX_ENTRIES = '+os.environ['ENTRIES']+';').replace('const MAX_TEXT_BYTES = 8 * 1024 * 1024;','const MAX_TEXT_BYTES = '+os.environ['MIB']+' * 1024 * 1024;')
+          p.write_text(s)
+          # Record checkout identity independently; GITHUB_SHA is the trigger, not this checkout.
+          pathlib.Path('capacity-profile.json').write_text(json.dumps({'baseCommit':'03b403b069ddc16685bcb580794555264ae7966b','entries':int(os.environ['ENTRIES']),'textMiB':int(os.environ['MIB']),'modifiedSourceSha256':hashlib.sha256(s.encode()).hexdigest(),'uncommittedResearchVariant':True,'productionChanged':False,'providerCalls':0},indent=2))
+          PY
+          git diff > capacity-only.patch
+      - name: Run behavior, invalidation and security regressions
+        run: node --import tsx --test --test-name-pattern='reuses unchanged|full cached|same-length|syntax, security|fresh semantic' tests/experimental-compiler-cache.test.ts > regressions.log 2>&1
+      - name: Execute matched verifier and identical-memory repair pairs
+        run: node --import tsx proof/compiler-cache-frontier.ts > execution.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-capacity-${{ matrix.entries }}-${{ github.run_id }}
+          path: |
+            capacity-profile.json
+            capacity-only.patch
+            src/experimental-compiler-cache.ts
+            regressions.log
+            execution.log
+            compiler-frontier-evidence
+          if-no-files-found: error
