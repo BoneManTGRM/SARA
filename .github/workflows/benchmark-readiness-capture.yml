@@ -1,0 +1,33 @@
+name: Benchmark readiness source capture
+on:
+  push:
+    branches: [fix/coding-benchmark-readiness-20260905]
+    paths: [.github/workflows/benchmark-readiness-capture.yml]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1 && github.run_number == 2
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ea097266bc935097b85d38f873470df4d0b46cce
+          persist-credentials: false
+      - name: Archive changed candidate, no code execution or dependency install
+        run: |
+          test "$(git rev-parse HEAD)" = ea097266bc935097b85d38f873470df4d0b46cce
+          mkdir -p /tmp/sara-capture
+          git rev-parse HEAD > /tmp/sara-capture/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-capture/tree.txt
+          git archive --format=tar.gz HEAD > /tmp/sara-capture/source.tar.gz
+          git ls-tree -r HEAD > /tmp/sara-capture/git-tree.txt
+          cd /tmp/sara-capture
+          sha256sum source.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-readiness-ea097266-source
+          path: /tmp/sara-capture
+          if-no-files-found: error
+          retention-days: 7
