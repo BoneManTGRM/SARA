@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "caseId": "bounded-inventory-basket-v8-live-01",
+  "mode": "live",
+  "contractDigest": "5fabd97aeb58eaa82cbe87395b533fe1636d42fbb1acda6a513b185cddabdfc2",
+  "implementationCommit": "a6d47883b06fcf0b5a5c6e9dde4595dcc1765df4",
+  "deploymentId": "33316cfa-0337-4eb7-8878-a418f7d1ba02",
+  "serviceId": "785bf97a-ce22-4a55-85ea-309555ac6494",
+  "nonce": "727c6bcab85d8b01e1fc4ced7a6c17be5c812a9065d0d044960baba6215ca063",
+  "maximumPhysicalSpendUsd": 0.15,
+  "issuedAt": 1788583749496,
+  "expiresAt": 1788584649496
+}
