@@ -1,0 +1,73 @@
+name: Publish frozen PR69 repair source
+on:
+  push:
+    branches: [integration/pr69-source-20260905-1626]
+    paths: [.github/workflows/pr69-publish-verified-source.yml]
+permissions:
+  contents: write
+concurrency:
+  group: pr69-frozen-source-publication
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and compare source only
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, os, pathlib, subprocess
+          root=pathlib.Path.cwd(); out=pathlib.Path(os.environ['RUNNER_TEMP'])/'pr69-publication'; out.mkdir()
+          def git(*args): return subprocess.check_output(['git',*args],text=True).strip()
+          chunks=[(root/f'integration/pr69-repair/part{i}').read_text().strip() for i in range(6)]
+          tail=(root/'integration/pr69-repair/part5-tail').read_text().strip()
+          # The first upload's final segment contained duplicated transport text.
+          # Reconstruct only frozen bytes; the original whole-payload hash stays mandatory.
+          chunks[5]=chunks[5][:1969]+chunks[4][:2783]+tail
+          payload=''.join(chunks)
+          assert hashlib.sha256((payload+'\n').encode()).hexdigest()=='22321a51e6e3868d217938cad3b313d2d7afec9dc22a9bc16326e89ed08e05e41', 'transport mismatch'
+          patch=lzma.decompress(base64.b64decode(payload,validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='589b9608511846f532122a7450f995d9b792c05c37ba37e152ccffbe6e7cbdad'
+          (out/'repair.patch').write_bytes(patch)
+          oldmain='1e98f0f11247cf1b3c76ee20f9f5fca1de0943d8'; old69='44788ca2bec9556f038c992d30f3cfe80e9ae24e'; main='30a7cb3c21a77b65bf7ba2c4c393897850e61eeb'
+          paths=['src/github-exact-target-verifier.ts','src/gmail-oauth-activation.ts','src/gmail-verified-report-sender.ts','src/nico-automated-package-verifier.ts','src/telegram-command-schema.ts','src/telegram-nico-delivery.ts','src/telegram-nico-http.ts','src/telegram-nico-production.ts','src/telegram-queue.ts','tests/github-exact-target-verifier.test.ts','tests/gmail-oauth-activation.test.ts','tests/gmail-verified-report-sender.test.ts','tests/telegram-command-schema.test.ts','tests/telegram-nico-delivery.test.ts','tests/telegram-nico-http.test.ts','tests/telegram-nico-production.test.ts','tests/telegram-queue.test.ts']
+          subprocess.run(['git','checkout','--detach',oldmain],check=True)
+          for path in paths:
+              b=subprocess.check_output(['git','show',old69+':'+path]); p=root/path; p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(b)
+          subprocess.run(['git','add','--',*paths],check=True)
+          assert git('write-tree')=='2a86331c3e2c3be9e8ebf5ad66152155129156e9','base mismatch'
+          subprocess.run(['git','apply','--index','--check',str(out/'repair.patch')],check=True)
+          subprocess.run(['git','apply','--index',str(out/'repair.patch')],check=True)
+          tested=git('write-tree'); assert tested=='c32b408053cd45b6a176be7670a759a5db2d7f62'
+          (out/'tested-source.tar.gz').write_bytes(subprocess.check_output(['git','archive','--format=tar.gz',tested]))
+          delta=subprocess.check_output(['git','diff','--binary',oldmain,tested]); (out/'integration.patch').write_bytes(delta)
+          modified=set(git('diff','--name-only',oldmain,tested).splitlines())
+          upstream=set(git('diff','--name-only',oldmain,main).splitlines())
+          assert not modified & upstream, 'concurrent source overlap requires review'
+          subprocess.run(['git','reset','--hard',main],check=True)
+          subprocess.run(['git','apply','--index','--check',str(out/'integration.patch')],check=True)
+          subprocess.run(['git','apply','--index',str(out/'integration.patch')],check=True)
+          tree=git('write-tree')
+          assert set(git('diff','--name-only',main,tree).splitlines())==modified
+          protected=['src/main.ts','src/server.ts','src/kernel.ts','src/store.ts','src/policy.ts','src/coding-repair-controller.ts','src/coding-repair-policy.ts','src/reparodynamic-candidate-generator.ts','tests/reparodynamic-candidate-generator.test.ts','scripts/start-runtime.ts','constitution','package-lock.json','.github/workflows']
+          subprocess.run(['git','diff','--exit-code',main,tree,'--',*protected],check=True)
+          subprocess.run(['git','diff','--check',main,tree],check=True)
+          assert not any(x.startswith('integration/') for x in git('ls-tree','-r','--name-only',tree).splitlines())
+          subprocess.run(['git','config','user.name','github-actions[bot]'],check=True)
+          subprocess.run(['git','config','user.email','41898282+github-actions[bot]@users.noreply.github.com'],check=True)
+          commit=git('commit-tree',tree,'-p',main,'-p',old69,'-m','Integrate repaired Telegram NICO package contract and durable replay protection; activation remains off')
+          subprocess.run(['git','push','origin',commit+':refs/heads/integration/pr69-ready-20260905'],check=True)
+          (out/'source.tar.gz').write_bytes(subprocess.check_output(['git','archive','--format=tar.gz',commit]))
+          result={'commit':commit,'tree':tree,'tested_tree':tested,'main':main,'original_pr69':old69,'changed_paths':sorted(modified),'upstream_preserved':sorted(upstream),'source_only':True,'production_activated':False}
+          (out/'publication.json').write_text(json.dumps(result,indent=2)+'\n'); print(json.dumps(result))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr69-source-publication
+          path: ${{ runner.temp }}/pr69-publication/
+          if-no-files-found: error
