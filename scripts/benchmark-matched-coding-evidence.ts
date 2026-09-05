@@ -7,11 +7,12 @@ import {
   assertCodingBenchmarkSourceRevision,
   parseCodingBenchmarkCommand,
 } from "../src/coding-repair-benchmark-command.ts";
+import type { CodingBenchmarkCorpus } from "../src/coding-repair-benchmark-corpus.ts";
 import {
-  INITIAL_CODING_BENCHMARK_CORPUS,
-  codingBenchmarkCorpusDigest,
-  type CodingBenchmarkCorpus,
-} from "../src/coding-repair-benchmark-corpus.ts";
+  LIVE_CODING_BENCHMARK_CORPUS,
+  liveCodingBenchmarkCorpusDigest,
+  verifyLiveCodingBenchmarkCandidate,
+} from "../src/coding-repair-live-benchmark-case.ts";
 import {
   initializeCodingBenchmarkStore,
   withCodingBenchmarkExecution,
@@ -34,7 +35,6 @@ import {
 import { INITIAL_CODING_REPAIR_LIMITS } from "../src/coding-repair-policy.ts";
 import { createLunaCodingRepairModel } from "../src/luna-coding-repair-model.ts";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
-import { verifyGenomeLabProgramCandidate } from "../src/genome-lab-verifier.ts";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = new URL("../", import.meta.url);
@@ -76,8 +76,8 @@ async function digestSourceFiles(paths: string[]): Promise<string> {
 
 function selectedCorpus(caseCount: number): CodingBenchmarkCorpus {
   return {
-    ...structuredClone(INITIAL_CODING_BENCHMARK_CORPUS),
-    cases: structuredClone(INITIAL_CODING_BENCHMARK_CORPUS.cases.slice(0, caseCount)),
+    ...structuredClone(LIVE_CODING_BENCHMARK_CORPUS),
+    cases: structuredClone(LIVE_CODING_BENCHMARK_CORPUS.cases.slice(0, caseCount)),
   };
 }
 
@@ -127,11 +127,19 @@ async function loadOrInitialize(input: {
 const config = parseCodingBenchmarkCommand({
   args: process.argv.slice(2),
   env: process.env,
-  maximumCases: INITIAL_CODING_BENCHMARK_CORPUS.cases.length,
+  maximumCases: LIVE_CODING_BENCHMARK_CORPUS.cases.length,
 });
 await assertExactSourceCheckout(config.sourceRevision);
 const corpus = selectedCorpus(config.caseCount);
-const corpusDigest = codingBenchmarkCorpusDigest(corpus);
+if (config.caseCount !== LIVE_CODING_BENCHMARK_CORPUS.cases.length) {
+  throw new Error("The fresh live benchmark requires the complete frozen one-task corpus.");
+}
+const corpusDigest = liveCodingBenchmarkCorpusDigest();
+const limits = Object.freeze({
+  ...INITIAL_CODING_REPAIR_LIMITS,
+  maximumModelSpendUsd: config.maximumModelSpendUsdPerArm,
+  protectedPaths: Object.freeze([...INITIAL_CODING_REPAIR_LIMITS.protectedPaths]),
+});
 const constitutionSource = await readFile(
   new URL("../constitution/constitution.v1.json", import.meta.url),
   "utf8",
@@ -156,17 +164,22 @@ const bindings: CodingBenchmarkBindings = {
     "src/coding-repair-prompt.ts",
     "src/coding-repair-artifacts.ts",
   ]),
-  policyDigest: await digestSourceFiles(["src/coding-repair-policy.ts"]),
+  policyDigest: sha256(canonicalJson({
+    implementationDigest: await digestSourceFiles(["src/coding-repair-policy.ts"]),
+    liveLimits: limits,
+  })),
   verifierDigest: await digestSourceFiles([
     "src/genome-lab-verifier.ts",
     "src/genome-lab.ts",
+    "src/coding-repair-live-benchmark-case.ts",
   ]),
   environmentDigest: sha256(canonicalJson({
     node: process.version,
     platform: process.platform,
     architecture: process.arch,
     typescript: ts.version,
-    benchmarkRuntimeSchemaVersion: 1,
+    benchmarkRuntimeSchemaVersion: 2,
+    modelSpendCeilingPerArmUsd: config.maximumModelSpendUsdPerArm,
   })),
   authorityDigest: config.authorityDigest,
 };
@@ -189,144 +202,147 @@ await withCodingBenchmarkExecution({
   stateDirectory: config.stateDirectory,
   manifest: progress.manifest,
   execute: async () => {
-for (let index = 0; index < corpus.cases.length; index += 1) {
-  const benchmarkCase = corpus.cases[index]!;
-  const pairIndex = index + 1;
-  if (progress.pairs.some((pair) => pair.pairIndex === pairIndex)) continue;
-  const context = {
-    objective: benchmarkCase.objective,
-    acceptanceCriteria: [...benchmarkCase.acceptanceCriteria],
-    missingCapabilities: [],
-    constitutionDigest,
-    memoryContext: {
-      contextDigest: sha256(canonicalJson({
-        corpusDigest,
-        caseId: benchmarkCase.caseId,
+    for (let index = 0; index < corpus.cases.length; index += 1) {
+      const benchmarkCase = corpus.cases[index]!;
+      const pairIndex = index + 1;
+      if (progress.pairs.some((pair) => pair.pairIndex === pairIndex)) continue;
+      const context = {
         objective: benchmarkCase.objective,
-        acceptanceCriteria: benchmarkCase.acceptanceCriteria,
-      })),
-      memories: [],
-    },
-  };
-  const order: [CodingBenchmarkMethod, CodingBenchmarkMethod] = pairIndex % 2 === 0
-    ? ["luna", "luna_reparodynamic"]
-    : ["luna_reparodynamic", "luna"];
-  const missing = new Set(missingCodingBenchmarkArms(progress, pairIndex));
-  for (const method of order) {
-    if (!missing.has(method)) continue;
-    const spentUsd = knownSpend(progress.armReceipts);
-    if (
-      spentUsd + INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd
-      > config.maximumSpendUsd + 1e-9
-    ) {
-      throw new Error(
-        "The live coding benchmark stopped before exceeding its owner-authorized spend cap.",
-      );
-    }
-    const result = await runCodingBenchmarkArm({
-      method,
-      benchmarkCase,
-      context,
-      verify: (candidate) => verifyGenomeLabProgramCandidate({
-        candidate,
-        objective: benchmarkCase.objective,
-        acceptanceCriteria: benchmarkCase.acceptanceCriteria,
+        acceptanceCriteria: [...benchmarkCase.acceptanceCriteria],
+        missingCapabilities: [],
         constitutionDigest,
-        maximumBudgetUsd: INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd,
-      }),
-      model: createLunaCodingRepairModel({ client, context }),
-      limits: INITIAL_CODING_REPAIR_LIMITS,
-    });
-    const receipt: CodingBenchmarkArmReceipt = {
-      schemaVersion: 1,
-      benchmarkId: config.benchmarkId,
-      pairIndex,
-      caseId: benchmarkCase.caseId,
-      bindings,
-      result,
-      completedAt: new Date().toISOString(),
-    };
-    await persistCodingBenchmarkArmReceipt({
-      stateDirectory: config.stateDirectory,
-      receipt,
-    });
-    if (result.accountedCostUsd === null) {
-      throw new Error(
-        "The arm result has unknown spend; it was preserved and further paid execution is blocked.",
+        memoryContext: {
+          contextDigest: sha256(canonicalJson({
+            corpusDigest,
+            caseId: benchmarkCase.caseId,
+            objective: benchmarkCase.objective,
+            acceptanceCriteria: benchmarkCase.acceptanceCriteria,
+          })),
+          memories: [],
+        },
+      };
+      // Pair 1 is preregistered treatment-first by the repository's existing
+      // deterministic parity rule. Arm state is reconstructed independently.
+      const order: [CodingBenchmarkMethod, CodingBenchmarkMethod] = pairIndex % 2 === 0
+        ? ["luna", "luna_reparodynamic"]
+        : ["luna_reparodynamic", "luna"];
+      const missing = new Set(missingCodingBenchmarkArms(progress, pairIndex));
+      for (const method of order) {
+        if (!missing.has(method)) continue;
+        const spentUsd = knownSpend(progress.armReceipts);
+        if (
+          spentUsd + config.maximumModelSpendUsdPerArm
+          > config.maximumSpendUsd + 1e-9
+        ) {
+          throw new Error(
+            "The live coding benchmark stopped before exceeding its owner-authorized spend cap.",
+          );
+        }
+        const result = await runCodingBenchmarkArm({
+          method,
+          benchmarkCase,
+          context,
+          verify: (candidate) => verifyLiveCodingBenchmarkCandidate({
+            candidate,
+            objective: benchmarkCase.objective,
+            acceptanceCriteria: benchmarkCase.acceptanceCriteria,
+            constitutionDigest,
+            maximumBudgetUsd: config.maximumModelSpendUsdPerArm,
+          }),
+          model: createLunaCodingRepairModel({ client, context }),
+          limits,
+        });
+        const receipt: CodingBenchmarkArmReceipt = {
+          schemaVersion: 1,
+          benchmarkId: config.benchmarkId,
+          pairIndex,
+          caseId: benchmarkCase.caseId,
+          bindings,
+          result,
+          completedAt: new Date().toISOString(),
+        };
+        await persistCodingBenchmarkArmReceipt({
+          stateDirectory: config.stateDirectory,
+          receipt,
+        });
+        if (result.accountedCostUsd === null) {
+          throw new Error(
+            "The arm result has unknown spend; it was preserved and further paid execution is blocked.",
+          );
+        }
+        progress = await loadCodingBenchmarkProgress({
+          stateDirectory: config.stateDirectory,
+          benchmarkId: config.benchmarkId,
+        });
+      }
+      const completedArms = progress.armReceipts.filter(
+        (receipt) => receipt.pairIndex === pairIndex,
       );
+      const normal = completedArms.find(
+        (receipt) => receipt.result.method === "luna",
+      )?.result;
+      const reparodynamic = completedArms.find(
+        (receipt) => receipt.result.method === "luna_reparodynamic",
+      )?.result;
+      if (!normal || !reparodynamic) {
+        throw new Error(
+          "The matched pair cannot be finalized until both immutable arm receipts exist.",
+        );
+      }
+      const pair: CodingBenchmarkPairReceipt = {
+        schemaVersion: 1,
+        benchmarkId: config.benchmarkId,
+        pairIndex,
+        caseId: benchmarkCase.caseId,
+        taskClass: benchmarkCase.taskClass,
+        taskFamily: benchmarkCase.taskFamily,
+        executionKind: "live",
+        order,
+        bindings,
+        normal,
+        reparodynamic,
+        completedAt: new Date().toISOString(),
+      };
+      await persistCodingBenchmarkPairReceipt({
+        stateDirectory: config.stateDirectory,
+        pair,
+      });
+      progress = await loadCodingBenchmarkProgress({
+        stateDirectory: config.stateDirectory,
+        benchmarkId: config.benchmarkId,
+      });
+      console.log(JSON.stringify({
+        benchmarkId: config.benchmarkId,
+        pairIndex,
+        caseId: benchmarkCase.caseId,
+        order,
+        maximumModelSpendUsdPerArm: config.maximumModelSpendUsdPerArm,
+        completedPairs: progress.pairs.length,
+        totalPairs: corpus.cases.length,
+        accountedCostUsd: Number(knownSpend(progress.armReceipts).toFixed(6)),
+      }));
     }
-    progress = await loadCodingBenchmarkProgress({
-      stateDirectory: config.stateDirectory,
-      benchmarkId: config.benchmarkId,
+
+    const summary = summarizeCodingBenchmark({
+      pairs: progress.pairs,
+      expectedBindings: bindings,
     });
-  }
-  const completedArms = progress.armReceipts.filter(
-    (receipt) => receipt.pairIndex === pairIndex,
-  );
-  const normal = completedArms.find(
-    (receipt) => receipt.result.method === "luna",
-  )?.result;
-  const reparodynamic = completedArms.find(
-    (receipt) => receipt.result.method === "luna_reparodynamic",
-  )?.result;
-  if (!normal || !reparodynamic) {
-    throw new Error(
-      "The matched pair cannot be finalized until both immutable arm receipts exist.",
-    );
-  }
-  const pair: CodingBenchmarkPairReceipt = {
-    schemaVersion: 1,
-    benchmarkId: config.benchmarkId,
-    pairIndex,
-    caseId: benchmarkCase.caseId,
-    taskClass: benchmarkCase.taskClass,
-    taskFamily: benchmarkCase.taskFamily,
-    executionKind: "live",
-    order,
-    bindings,
-    normal,
-    reparodynamic,
-    completedAt: new Date().toISOString(),
-  };
-  await persistCodingBenchmarkPairReceipt({
-    stateDirectory: config.stateDirectory,
-    pair,
-  });
-  progress = await loadCodingBenchmarkProgress({
-    stateDirectory: config.stateDirectory,
-    benchmarkId: config.benchmarkId,
-  });
-  console.log(JSON.stringify({
-    benchmarkId: config.benchmarkId,
-    pairIndex,
-    caseId: benchmarkCase.caseId,
-    completedPairs: progress.pairs.length,
-    totalPairs: corpus.cases.length,
-    accountedCostUsd: Number(knownSpend(progress.armReceipts).toFixed(6)),
-  }));
-}
-
-const summary = summarizeCodingBenchmark({
-  pairs: progress.pairs,
-  expectedBindings: bindings,
-});
-const decision = evaluateCodingBenchmarkPromotion({
-  summary,
-  currentCanaryPercent: config.currentCanaryPercent,
-});
-await persistCodingBenchmarkEvidenceSnapshot({
-  stateDirectory: config.stateDirectory,
-  summary,
-  decision,
-});
-console.log(JSON.stringify({
-  status: "completed",
-  evidenceScope: corpus.evidenceScope,
-  promotionEligibleCorpus: corpus.promotionEligible,
-  corpusLimitations: corpus.limitations,
-  summary,
-  decision,
-}, null, 2));
-
+    const decision = evaluateCodingBenchmarkPromotion({
+      summary,
+      currentCanaryPercent: config.currentCanaryPercent,
+    });
+    await persistCodingBenchmarkEvidenceSnapshot({
+      stateDirectory: config.stateDirectory,
+      summary,
+      decision,
+    });
+    console.log(JSON.stringify({
+      status: "completed",
+      evidenceScope: corpus.evidenceScope,
+      promotionEligibleCorpus: corpus.promotionEligible,
+      corpusLimitations: corpus.limitations,
+      summary,
+      decision,
+    }, null, 2));
   },
 });
