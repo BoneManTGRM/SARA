@@ -1,0 +1,67 @@
+name: One-use benchmark relay source transfer
+on:
+  push:
+    branches: [maintenance/benchmark-relay-transfer-20260905]
+    paths: [.github/workflows/relay-source-transfer.yml]
+permissions:
+  contents: write
+jobs:
+  transfer:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1 && github.run_number == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: e04c10266f0d73fab52720b1fb8d63eccbf5e814
+          persist-credentials: true
+      - name: Reconstruct and verify exact reviewed source only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, os, pathlib, subprocess, urllib.request
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          assert git('rev-parse','HEAD') == 'e04c10266f0d73fab52720b1fb8d63eccbf5e814'
+          assert git('rev-parse','HEAD^{tree}') == '101d41ea90130390817cb37460d3386ea22bd408'
+          url='https://api.github.com/repos/BoneManTGRM/SARA/git/blobs/4ce647f21050847fcfba5c0b8da7e6b6d16d52c9'
+          req=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+          with urllib.request.urlopen(req,timeout=30) as response:
+              value=json.loads(response.read(65536))
+          data=base64.b64decode(value['content'])
+          assert hashlib.sha1(b'blob '+str(len(data)).encode()+b'\0'+data).hexdigest()=='4ce647f21050847fcfba5c0b8da7e6b6d16d52c9'
+          # Repair one diagnosed transport transcription byte before decompression.
+          # The corrected gzip, patch AND complete resulting tree are pinned independently.
+          encoded=base64.b64encode(data).decode()
+          assert encoded.count('wxTUZJJep')==1
+          encoded=encoded.replace('wxTUZJJep','wxTUZJep')
+          encoded+='='*((-len(encoded))%4)
+          packed=base64.b64decode(encoded,validate=True)
+          assert hashlib.sha256(packed).hexdigest()=='19b1275f1fad7b6695d77e3380a408cd992abef818a5320f2de38424302bd704'
+          patch=gzip.decompress(packed)
+          assert hashlib.sha256(patch).hexdigest()=='708ac2da02cec435fdf25b1ffc945f4f95518adcedbbb755c525be2ce00696f9'
+          out=pathlib.Path('/tmp/sara-relay-source'); out.mkdir()
+          (out/'relay.patch').write_bytes(patch)
+          subprocess.run(['git','apply','--check',str(out/'relay.patch')],check=True)
+          subprocess.run(['git','apply','--index',str(out/'relay.patch')],check=True)
+          expected={'src/coding-benchmark-github-relay.ts','src/coding-benchmark-owner.ts','src/server.ts','tests/coding-benchmark-github-relay.test.ts','tests/coding-benchmark-github-relay-http.test.ts','docs/CODING_BENCHMARK_GITHUB_RELAY.md'}
+          assert set(git('diff','--cached','--name-only').splitlines())==expected
+          tree=git('write-tree')
+          assert tree=='c390ed22660ace3dadf0ccb14d65c338976d0e97'
+          subprocess.run(['git','config','user.name','SARA owner-authorized source transfer'],check=True)
+          subprocess.run(['git','config','user.email','235159333+BoneManTGRM@users.noreply.github.com'],check=True)
+          subprocess.run(['git','commit','-m','Add narrowly pinned GitHub OIDC transport to existing benchmark owner routes'],check=True)
+          commit=git('rev-parse','HEAD')
+          (out/'source.json').write_text(json.dumps({'commit':commit,'tree':tree,'base':'e04c10266f0d73fab52720b1fb8d63eccbf5e814','applicationExecution':False,'modelRequests':0,'transportCorrection':'one diagnosed base64 transcription byte; exact hashes enforced'},indent=2)+'\n')
+          subprocess.run(['git','archive','--format=tar.gz','--prefix=SARA/',f'--output={out}/source.tar.gz','HEAD'],check=True)
+          (out/'SHA256SUMS').write_text(''.join(hashlib.sha256(f.read_bytes()).hexdigest()+'  '+f.name+'\n' for f in sorted(out.iterdir()) if f.is_file()))
+          subprocess.run(['git','push','origin','HEAD:refs/heads/fix/coding-benchmark-github-relay-20260905'],check=True)
+          print(json.dumps({'candidateCommit':commit,'tree':tree,'modelRequests':0}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-benchmark-relay-source
+          path: /tmp/sara-relay-source
+          if-no-files-found: error
+          retention-days: 7
