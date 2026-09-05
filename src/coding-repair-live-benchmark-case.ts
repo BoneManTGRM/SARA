@@ -87,7 +87,7 @@ export const LIVE_CODING_BENCHMARK_PROTECTED_FILES: readonly ProtectedBenchmarkF
   Object.freeze({ path: "tests/summarize-ledger.test.ts", content: protectedTest }),
 ]);
 
-export const LIVE_CODING_BENCHMARK_CORPUS: CodingBenchmarkCorpus = Object.freeze({
+const liveCodingBenchmarkCorpus: CodingBenchmarkCorpus = {
   schemaVersion: 1,
   corpusId: "sara-live-summarize-ledger-v1",
   version: 1,
@@ -132,7 +132,9 @@ export const LIVE_CODING_BENCHMARK_CORPUS: CodingBenchmarkCorpus = Object.freeze
     "Protected acceptance tests are verifier-owned and excluded from the model-visible candidate and repair feedback.",
     "The matched comparison isolates controller behavior within shared SARA infrastructure; it is not all Reparodynamics versus none.",
   ],
-});
+};
+
+export const LIVE_CODING_BENCHMARK_CORPUS: CodingBenchmarkCorpus = Object.freeze(liveCodingBenchmarkCorpus);
 
 export function liveCodingBenchmarkCorpusDigest(): string {
   return sha256(canonicalJson({
