@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "node:test";
-import { claimBenchmarkRun } from "../proof/benchmark-run-admission.ts";
+import { benchmarkClaimKey, claimBenchmarkRun } from "../proof/benchmark-run-admission.ts";
 const retired="88674aed1970e107e1e92aec10f8cfc52f58f0b8f757d42883f45ef0128c18c1";
 function input(directory:string){return {ledgerDirectory:directory,grant:{experimentId:"offline-admission-test",contractDigest:"a".repeat(64),implementationCommit:"b".repeat(40),deploymentId:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",expiresAt:2000,maximumPhysicalSpendUsd:0.15},observed:{contractDigest:"a".repeat(64),implementationCommit:"b".repeat(40),deploymentId:"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},now:1000};}
 async function directoryTest(fn:(directory:string)=>Promise<void>){const dir=await mkdtemp(join(tmpdir(),"sara-admission-test-"));try{await fn(dir);}finally{await rm(dir,{recursive:true,force:true});}}
@@ -27,8 +27,7 @@ test("renaming an experiment cannot replay the same contract",()=>directoryTest(
  assert.equal((await readdir(d)).length,1);
 }));
 test("an incomplete claim still blocks rather than granting a replay",()=>directoryTest(async d=>{
- const {writeFile}=await import("node:fs/promises");const {canonicalJson,sha256}=await import("../src/canonical.ts");
- const x=input(d);const key=sha256(canonicalJson({schemaVersion:1,experimentId:x.grant.experimentId}));
+ const {writeFile}=await import("node:fs/promises");const x=input(d);const key=benchmarkClaimKey(x.grant.contractDigest);
  await writeFile(join(d,key+".json"),"partial",{mode:0o600});await assert.rejects(()=>claimBenchmarkRun(x),/ALREADY_CLAIMED/u);
 }));
 test("rejects a disposable Railway process instead of using its ephemeral ledger",()=>directoryTest(async d=>{
