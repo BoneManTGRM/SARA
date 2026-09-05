@@ -1,0 +1,30 @@
+name: Materialize reviewed compiler-reuse source
+on:
+  push:
+    branches: [experiment/v9-compiler-reuse-frontier]
+    paths: [proof/compiler-cache-integration.patch]
+permissions:
+  contents: write
+jobs:
+  materialize:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply the fixed reviewed two-file integration and refresh only experiment manifests
+        run: |
+          git apply --check proof/compiler-cache-integration.patch
+          git apply proof/compiler-cache-integration.patch
+          python3 - <<'PY'
+          import json,hashlib,pathlib
+          for filename in ['proof/live-v7-source-manifest.json','proof/live-v8-source-manifest.json']:
+            p=pathlib.Path(filename); data=json.loads(p.read_text())
+            for key in data: data[key]=hashlib.sha256(pathlib.Path(key).read_bytes()).hexdigest()
+            data['src/experimental-compiler-cache.ts']=hashlib.sha256(pathlib.Path('src/experimental-compiler-cache.ts').read_bytes()).hexdigest()
+            p.write_text(json.dumps(dict(sorted(data.items())),indent=2)+'\n')
+          PY
+          git add src/genome-lab.ts src/genome-lab-verifier.ts proof/live-v7-source-manifest.json proof/live-v8-source-manifest.json
+          git -c user.name='SARA research workflow' -c user.email='github-actions[bot]@users.noreply.github.com' commit -m 'Apply reviewed default-off compiler cache integration'
+          git push origin HEAD:experiment/v9-compiler-reuse-frontier
+          git rev-parse HEAD
