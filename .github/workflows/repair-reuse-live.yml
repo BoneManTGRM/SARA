@@ -1,0 +1,93 @@
+name: SARA one-shot empirical repair reuse
+on:
+  push:
+    branches: [experiment/v8-live-inventory-comparison]
+    paths: [.github/sara/activate-repair-reuse-01.json]
+permissions:
+  contents: read
+jobs:
+  execute:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+    env:
+      SOURCE_COMMIT: 2d1c5b19c33e5e07a3baeb8766a84e4d36a235de
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 2d1c5b19c33e5e07a3baeb8766a84e4d36a235de
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - name: Verify the already-completed exact-source engineering gates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json,os,urllib.request
+          root='https://api.github.com/repos/BoneManTGRM/SARA'
+          def get(path):
+            req=urllib.request.Request(root+path,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          for run in [33945497888,33945497846,33945497917]:
+            d=get('/actions/runs/'+str(run))
+            assert d['head_sha']==os.environ['SOURCE_COMMIT'] and d['status']=='completed' and d['conclusion']=='success', 'ENGINEERING_GATE_NOT_GREEN'
+          checks=get('/commits/'+os.environ['SOURCE_COMMIT']+'/check-runs?per_page=100')['check_runs']
+          assert any(c['name']=='Exact-head CodeQL' and c['status']=='completed' and c['conclusion']=='success' for c in checks),'CODEQL_NOT_GREEN'
+          print('Exact source, completed full verification, mechanism proof and CodeQL confirmed.')
+          PY
+      - name: Prepare the source-bound contract without model access
+        env:
+          GITHUB_SHA: 2d1c5b19c33e5e07a3baeb8766a84e4d36a235de
+          SARA_EVIDENCE_DIRECTORY: live-evidence
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          node --import tsx proof/repair-reuse-benchmark.ts --plan > live-evidence-plan.json
+      - name: Atomically consume this experiment before any provider request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json,os,base64,urllib.request,datetime
+          plan=json.load(open('live-evidence-plan.json'))
+          claim={'schemaVersion':1,'experiment':'sara-exact-repair-reuse-01','contractDigest':plan['contractDigest'],'commit':os.environ['SOURCE_COMMIT'],'triggerCommit':os.environ['GITHUB_SHA'],'runId':os.environ['GITHUB_RUN_ID'],'maximumPhysicalCalls':6,'maximumCostUsd':0.15,'claimedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'authorization':'Owner explicitly requested actual SARA repair-reuse evaluation and evidence; no production activation.'}
+          raw=json.dumps(claim,sort_keys=True).encode()
+          body={'message':'Consume the one-shot SARA empirical repair-reuse grant','branch':'experiment/repair-reuse-claims','content':base64.b64encode(raw).decode()}
+          url='https://api.github.com/repos/BoneManTGRM/SARA/contents/.github/sara/claims/repair-reuse-empirical-01.json'
+          request=urllib.request.Request(url,data=json.dumps(body).encode(),method='PUT',headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','Content-Type':'application/json'})
+          # No sha, no overwrite, no retry, no refund. Existing/uncertain claims deny execution.
+          with urllib.request.urlopen(request,timeout=30) as r:
+            assert r.status==201,'CLAIM_NOT_CREATED'
+            receipt=json.load(r)
+          claim['claimCommit']=receipt['commit']['sha']
+          open('live-evidence/claim.json','w').write(json.dumps(claim,indent=2))
+          print('One-shot grant consumed; claim commit '+claim['claimCommit'])
+          PY
+      - name: Execute actual SARA components with real Cloudflare model calls
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_SHA: 2d1c5b19c33e5e07a3baeb8766a84e4d36a235de
+          SARA_EVIDENCE_DIRECTORY: live-evidence
+          SARA_CLAIM_FILE: live-evidence/claim.json
+        run: node --import tsx proof/repair-reuse-benchmark.ts --live > live-evidence/execution.log 2>&1
+      - name: Preserve source and evidence, including incomplete runs
+        if: always()
+        run: |
+          mkdir -p live-evidence
+          git rev-parse HEAD > live-evidence/commit.txt
+          git archive --format=tar.gz HEAD > live-evidence/source.tar.gz
+          sha256sum live-evidence/source.tar.gz > live-evidence/source.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-actual-repair-reuse-${{ github.run_id }}
+          path: live-evidence
+          retention-days: 90
+          if-no-files-found: error
