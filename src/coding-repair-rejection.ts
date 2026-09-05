@@ -2,6 +2,9 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 
 // Only exact controller-owned messages are admitted. No provider prose is retained.
 const REASONS = new Map<string, string>([
+  ["Invalid coding repair verification result.", "VERIFICATION_INVALID"],
+  ["Coding repair verification targets another artifact.", "VERIFICATION_ARTIFACT_MISMATCH"],
+  ["Coding repair proposal failed the strict output contract.", "MODEL_OUTPUT_CONTRACT"],
   ["Coding repair model returned invalid token accounting.", "MODEL_TOKENS_INVALID"],
   ["Coding repair schema version is unsupported.", "UNSUPPORTED_SCHEMA"],
   ["Coding repair proposal targets a stale artifact.", "STALE_ARTIFACT"],

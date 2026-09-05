@@ -1,3 +1,4 @@
+import { codingRepairCandidateDigest } from "../src/experimental-v5/coding-repair-verification.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { sha256 } from "../src/canonical.ts";
@@ -8,7 +9,7 @@ import type { CodingRepairProposal, ProgramVerificationResult } from "../src/cod
 
 const source = "export const value = 1;\n";
 const baseline: ProgramCandidateProposal = {schemaVersion:1,candidateKind:"typescript_program",programName:"Rejection probe",summary:"Offline diagnostic test",limitations:[],files:[{path:"src/value.ts",content:source},{path:"tests/value.test.ts",content:"PRIVATE_TEST_OUTPUT"}]};
-const verification: ProgramVerificationResult = {passed:false,score:0.8,artifactDigest:sha256("artifact"),failures:[{kind:"behavior",code:"FAIL",file:"src/value.ts",line:1,column:1,evidenceDigest:sha256("evidence"),fingerprint:sha256("failure"),severity:"medium",existedBeforeRepair:true}],completedChecks:["source_policy","syntax","typecheck","artifact_integrity"],evidenceDigests:[]};
+const verification: ProgramVerificationResult = {passed:false,score:0.8,artifactDigest:codingRepairCandidateDigest(baseline),failures:[{kind:"behavior",code:"FAIL",file:"src/value.ts",line:1,column:1,evidenceDigest:sha256("evidence"),fingerprint:sha256("failure"),severity:"medium",existedBeforeRepair:true}],completedChecks:["source_policy","syntax","typecheck","artifact_integrity"],evidenceDigests:[sha256("evidence")]};
 function proposal():CodingRepairProposal{return {schemaVersion:1,baseArtifactDigest:verification.artifactDigest,failureFingerprint:verification.failures[0].fingerprint,strategy:"surgical",changes:[{path:"src/value.ts",expectedContentDigest:sha256(source),replacementText:"export const value = 2;\n"}],limitations:[]};}
 
 test("diagnostic allowlist rejects model prose, spoofed codes, and unknown messages",()=>{
@@ -51,7 +52,7 @@ test("bounded diagnostic digest is stable and legacy name-only capture keeps the
 });
 test("a later rejection retains cost already spent on a verified improvement",async()=>{
  let calls=0;
- await assert.rejects(()=>runCodingRepairController({baseline,verify:async c=>({...verification,score:c.files[0].content===source?0.6:0.8,artifactDigest:sha256(c.files[0].content)}),model:{async propose(r){calls++;return {proposal:{...proposal(),baseArtifactDigest:r.verification.artifactDigest,changes:[{path:calls===1?"src/value.ts":"src/absent.ts",expectedContentDigest:sha256(r.candidate.files[0].content),replacementText:"export const value = 2;\n"}]},inputTokens:120,outputTokens:50,accountedCostUsd:0.003};}}}),error=>{
+ await assert.rejects(()=>runCodingRepairController({baseline,verify:async c=>({...verification,score:c.files[0].content===source?0.6:0.8,artifactDigest:codingRepairCandidateDigest(c)}),model:{async propose(r){calls++;return {proposal:{...proposal(),baseArtifactDigest:r.verification.artifactDigest,changes:[{path:calls===1?"src/value.ts":"src/absent.ts",expectedContentDigest:sha256(r.candidate.files[0].content),replacementText:"export const value = 2;\n"}]},inputTokens:120,outputTokens:50,accountedCostUsd:0.003};}}}),error=>{
   assert(error instanceof CodingRepairRejectedAttemptError);assert.equal(error.evidence.cycle,2);assert.equal(error.evidence.knownRunSpendUsd,0.006);assert.equal(error.evidence.accountedCostUsd,0.003);return true;
  });assert.equal(calls,2);
 });

@@ -1,3 +1,4 @@
+import { codingRepairCandidateDigest } from "../src/experimental-v5/coding-repair-verification.ts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { sha256 } from "../src/canonical.ts";
@@ -35,7 +36,7 @@ function verification(candidate: ProgramCandidateProposal): ProgramVerificationR
   return {
     passed: false,
     score: 0.8,
-    artifactDigest: digest(JSON.stringify(candidate.files)),
+    artifactDigest: codingRepairCandidateDigest(candidate),
     failures: [failure],
     completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
     evidenceDigests: [digest("failure")],
@@ -170,7 +171,7 @@ describe("V5 bounded performance gauge", () => {
         return {
           passed: true,
           score: 1,
-          artifactDigest: digest(JSON.stringify(candidate.files)),
+          artifactDigest: codingRepairCandidateDigest(candidate),
           failures: [],
           completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
           evidenceDigests: [digest("unsafe-counter-verification")],
@@ -217,7 +218,7 @@ describe("V5 bounded performance gauge", () => {
           return {
             passed: false,
             score: 0.8,
-            artifactDigest: digest(JSON.stringify(candidate.files)),
+            artifactDigest: codingRepairCandidateDigest(candidate),
             failures: [failure],
             completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
             evidenceDigests: [firstEvidenceDigest],
@@ -234,7 +235,7 @@ describe("V5 bounded performance gauge", () => {
         return {
           passed: true,
           score: 1,
-          artifactDigest: digest(JSON.stringify(candidate.files)),
+          artifactDigest: codingRepairCandidateDigest(candidate),
           failures: [],
           completedChecks: ["source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity"],
           evidenceDigests: [secondEvidenceDigest],

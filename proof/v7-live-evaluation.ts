@@ -1,8 +1,11 @@
 export type ArmEvaluation={verifiedComplete:boolean;timeMs:number;costUsd:number|null;error:string|null};
 export function evaluatePair(control:ArmEvaluation,canary:ArmEvaluation) {
-  const valid=[control,canary].every(a=>typeof a.verifiedComplete==="boolean" && a.error===null && Number.isFinite(a.timeMs) && a.timeMs>0);
-  const comparable=valid&&control.verifiedComplete&&canary.verifiedComplete;
-  const ratio=comparable?control.timeMs/canary.timeMs:null;
+  let valid=[control,canary].every(a=>typeof a.verifiedComplete==="boolean" && a.error===null && Number.isFinite(a.timeMs) && a.timeMs>0);
+  const bothComplete=valid&&control.verifiedComplete&&canary.verifiedComplete;
+  const measuredRatio=bothComplete?control.timeMs/canary.timeMs:null;
+  if(measuredRatio!==null&&(!Number.isFinite(measuredRatio)||measuredRatio<=0||!Number.isFinite(100*(measuredRatio-1)))) valid=false;
+  const comparable=valid&&bothComplete;
+  const ratio=comparable?measuredRatio:null;
   const costKnown=[control,canary].every(a=>a.costUsd!==null&&Number.isFinite(a.costUsd)&&a.costUsd!>=0);
   const costNotHigher=comparable&&costKnown?canary.costUsd!<=control.costUsd!:null;
   return {valid,timeComparable:comparable,speedRatio:ratio,speedIncreasePercent:ratio===null?null:100*(ratio-1),

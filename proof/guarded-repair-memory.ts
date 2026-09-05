@@ -1,3 +1,4 @@
+import {assertCodingRepairVerification,isEvidenceDigest} from '../src/experimental-v5/coding-repair-verification.ts';
 import {canonicalJson,sha256} from '../src/canonical.ts';
 import {INITIAL_CODING_REPAIR_LIMITS as limits} from '../src/coding-repair-policy.ts';
 import type {ProgramCandidateProposal} from '../src/types.ts';
@@ -21,9 +22,10 @@ function lines(a:string,b:string):number{
 export class GuardedRepairMemory {
  readonly #recipes=new Map<string,Recipe>();
  learn(before:ProgramCandidateProposal,after:ProgramCandidateProposal,verification:ProgramVerificationResult,scope:Scope):string{
+  try { assertCodingRepairVerification(verification); } catch { throw Error('UNVERIFIED_RECIPE'); }
   if(verification.passed!==true||verification.score!==1||verification.failures.length||verification.artifactDigest!==artifact(after)||
    !['source_policy','syntax','typecheck','behavior_tests','artifact_integrity'].every(x=>verification.completedChecks.includes(x as any))||
-   !verification.evidenceDigests.length||!verification.evidenceDigests.every(d=>/^[a-f0-9]{64}$/u.test(d)))throw Error('UNVERIFIED_RECIPE');
+   !verification.evidenceDigests.length||!verification.evidenceDigests.every(isEvidenceDigest))throw Error('UNVERIFIED_RECIPE');
   if(new Set(before.files.map(f=>f.path)).size!==before.files.length||before.files.length!==after.files.length||new Set(after.files.map(f=>f.path)).size!==after.files.length)throw Error('RECIPE_FILE_SET_CHANGED');
   const changes:CodingRepairProposal['changes']=[];let changedLines=0;
   for(const old of before.files){
@@ -45,6 +47,7 @@ export class GuardedRepairMemory {
  }
  lookup(candidate:ProgramCandidateProposal,verification:ProgramVerificationResult,scope:Scope,strategy:'surgical'|'deep'):CodingRepairProposal|null{
   if(strategy!=='surgical'&&strategy!=='deep')return null;
+  try { assertCodingRepairVerification(verification); } catch { return null; }
   const recipe=this.#recipes.get(key(candidate,scope));
   if(!recipe||recipe.quarantineDigest||verification.passed||!verification.failures.length||verification.artifactDigest!==artifact(candidate))return null;
   const maxFiles=strategy==='surgical'?limits.surgicalFiles:limits.deepFiles;
@@ -53,7 +56,7 @@ export class GuardedRepairMemory {
   return {schemaVersion:1,baseArtifactDigest:verification.artifactDigest,failureFingerprint:verification.failures[0].fingerprint,strategy,changes:structuredClone(recipe.changes),limitations:['Exact-source verified recipe; fresh verification is still mandatory.']};
  }
  quarantine(id:string,failureDigest:string):void{
-  if(!/^[a-f0-9]{64}$/u.test(failureDigest))throw Error('INVALID_FAILURE_EVIDENCE');
+  if(!isEvidenceDigest(failureDigest))throw Error('INVALID_FAILURE_EVIDENCE');
   for(const recipe of this.#recipes.values())if(recipe.id===id)recipe.quarantineDigest=failureDigest;
  }
  get size():number{return this.#recipes.size;}
