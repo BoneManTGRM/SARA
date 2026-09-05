@@ -37,8 +37,15 @@ export function createBenchmarkAudit(input: {
   beforeDispatch(): Promise<void>;
   fetchImpl?: typeof fetch;
   onModelIdentity?: (model: string) => Promise<void>;
+  conservativeRequestReservations?: boolean;
 }): { fetch: typeof fetch; record(kind: string, payload: unknown): Promise<void> } {
   if (!["luna", "luna_reparodynamic"].includes(input.method)) throw new Error("Invalid benchmark arm.");
+  const conservative = input.conservativeRequestReservations === true;
+  // For the fresh grant reserve worst-case cache-write input at $0.25/M.
+  // Even token counting is conservatively covered as input-priced: three counts
+  // plus three generations <= 3*(0.0075+0.0171)=$0.0738 per $0.075 arm.
+  const generationReserveUsd = conservative ? 0.0171 : MAXIMUM_REQUEST_USD;
+  const countReserveUsd = conservative ? 0.0075 : null;
   let generations = 0;
   let tokenCounts = 0;
   let events = 0;
@@ -66,6 +73,9 @@ export function createBenchmarkAudit(input: {
       const requestBody = init.body;
       // Copy mutable request inputs before any asynchronous admission or I/O.
       const requestInit: RequestInit = { ...init, body: requestBody, headers: new Headers(init.headers), redirect: "error" };
+      if (conservative && Buffer.byteLength(requestBody, "utf8") + 1024 > INPUT_LIMIT) {
+        throw new Error("Benchmark request exceeded the conservative pre-count byte bound.");
+      }
       const body = object(JSON.parse(requestBody));
       if (body.model !== "gpt-5.6-luna" || typeof body.input !== "string" || !body.input.trim()
         || Object.keys(body).some(key => !["model", "input", "store", "max_output_tokens", "reasoning", "text"].includes(key))) {
@@ -91,8 +101,8 @@ export function createBenchmarkAudit(input: {
           requestedAt: new Date().toISOString(), requestDigest: sha256(requestBody), promptDigest: sha256(body.input),
           model: body.model, reasoning: isGeneration ? "medium" : null,
           maximumInputTokens: INPUT_LIMIT, maximumOutputTokens: isGeneration ? OUTPUT_LIMIT : 0,
-          maximumReservedUsd: isGeneration ? MAXIMUM_REQUEST_USD : null,
-          accounting: isGeneration ? "conservative_maximum_not_invoice" : "not_a_generation_request",
+          maximumReservedUsd: isGeneration ? generationReserveUsd : countReserveUsd,
+          accounting: conservative ? "conservative_input_and_cache_write_maximum_not_invoice" : isGeneration ? "conservative_maximum_not_invoice" : "not_a_generation_request",
         });
         reservationWritten = true;
         // Recheck after durable storage so a stop activated during I/O blocks dispatch.
@@ -116,6 +126,8 @@ export function createBenchmarkAudit(input: {
           responseId: identifier(value.id), model: identifier(value.model), status: identifier(value.status),
           inputTokens, billableOutputTokens: outputTokens,
           estimatedCostUsd: isGeneration && usageValid ? Math.ceil((inputTokens * 0.2 + outputTokens * 1.2)) / 1_000_000 : null,
+          conservativeCacheWriteCostUsd: conservative && isGeneration && usageValid ? Math.ceil(inputTokens * 0.25 + outputTokens * 1.2) / 1_000_000 : null,
+          countedRequestReserveUsd: !isGeneration ? countReserveUsd : null,
           chargeReconciled: false, responseDigest: sha256(raw),
           refused: content.some(part => part.type === "refusal"),
           outputText: content.filter(part => part.type === "output_text" && typeof part.text === "string").map(part => part.text).join("\n"),

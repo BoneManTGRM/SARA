@@ -4,7 +4,7 @@ import { it } from "node:test";
 import {
   createCodingBenchmarkRelayAuthenticator, RELAY_AUDIENCE, RELAY_PERMIT_KEY, RELAY_REF, RELAY_WORKFLOW,
 } from "../src/coding-benchmark-github-relay.ts";
-import { CODING_BENCHMARK_CONTINUATION } from "../src/coding-benchmark-readiness.ts";
+import { ADDITIONAL_BENCHMARK_AUTHORIZATION, BENCHMARK_AUTHORIZATION_KEY, CODING_BENCHMARK_CONTINUATION } from "../src/coding-benchmark-readiness.ts";
 
 const now = Date.parse("2026-09-05T22:30:00Z");
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -141,4 +141,20 @@ for (const change of [
   } });
   assert.equal(await authenticate(token(claims(change)), environment()), null);
   assert.equal(fetches, 0);
+});
+
+
+it("a fresh-grant relay cannot authenticate the old grant and requires exact selected identity", async () => {
+  const auth=createCodingBenchmarkRelayAuthenticator({now:()=>now,fetchImpl:keys});
+  const added=ADDITIONAL_BENCHMARK_AUTHORIZATION.benchmarkId;
+  const env: Record<string,string>={...environment(permit({benchmarkId:added})),[BENCHMARK_AUTHORIZATION_KEY]:added};
+  assert.equal((await auth(token(),env))?.benchmarkId,added);
+  assert.equal(await auth(token(),{...env,[RELAY_PERMIT_KEY]:JSON.stringify(permit())}),null);
+  assert.equal(await auth(token(),{...env,[BENCHMARK_AUTHORIZATION_KEY]:"invalid"}),null);
+});
+it("revoking fresh-grant selection during signing-key I/O denies admission", async () => {
+  const added=ADDITIONAL_BENCHMARK_AUTHORIZATION.benchmarkId;
+  const env: Record<string,string>={...environment(permit({benchmarkId:added})),[BENCHMARK_AUTHORIZATION_KEY]:added};
+  const auth=createCodingBenchmarkRelayAuthenticator({now:()=>now,fetchImpl:async(...args)=>{env[BENCHMARK_AUTHORIZATION_KEY]=CODING_BENCHMARK_CONTINUATION.benchmarkId;return keys(...args);}});
+  assert.equal(await auth(token(),env),null);
 });

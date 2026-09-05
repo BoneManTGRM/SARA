@@ -1,10 +1,11 @@
+import { FREE_WINDOWS_CORPUS, freeWindowsCorpusDigest, verifyFreeWindowsCandidate } from "../src/coding-benchmark-free-windows.ts";
 import * as ts from "typescript";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { persistentBenchmarkStateDirectory } from "../src/coding-benchmark-owner.ts";
 import { createBenchmarkAudit, benchmarkSpendExposure, writeBenchmarkAudit } from "../src/coding-benchmark-audit.ts";
-import { assertCodingBenchmarkRuntimeAuthority } from "../src/coding-benchmark-readiness.ts";
+import { ADDITIONAL_BENCHMARK_AUTHORIZATION, CODING_BENCHMARK_CONTINUATION, assertCodingBenchmarkRuntimeAuthority } from "../src/coding-benchmark-readiness.ts";
 import { promisify } from "node:util";
 import { canonicalJson, sha256 } from "../src/canonical.ts";
 import { parseCodingBenchmarkCommand } from "../src/coding-repair-benchmark-command.ts";
@@ -81,9 +82,10 @@ async function digestSourceFiles(paths: string[]): Promise<string> {
 }
 
 function selectedCorpus(caseCount: number): CodingBenchmarkCorpus {
+  const selected = config.benchmarkId === ADDITIONAL_BENCHMARK_AUTHORIZATION.benchmarkId ? FREE_WINDOWS_CORPUS : LIVE_CODING_BENCHMARK_CORPUS;
   return {
-    ...structuredClone(LIVE_CODING_BENCHMARK_CORPUS),
-    cases: structuredClone(LIVE_CODING_BENCHMARK_CORPUS.cases.slice(0, caseCount)),
+    ...structuredClone(selected),
+    cases: structuredClone(selected.cases.slice(0, caseCount)),
   };
 }
 
@@ -149,7 +151,9 @@ const corpus = selectedCorpus(config.caseCount);
 if (corpus.cases.length !== 1) {
   throw new Error("The fresh live benchmark requires its complete frozen one-task corpus.");
 }
-const corpusDigest = liveCodingBenchmarkCorpusDigest();
+const additional = config.benchmarkId === ADDITIONAL_BENCHMARK_AUTHORIZATION.benchmarkId;
+const corpusDigest = additional ? freeWindowsCorpusDigest() : liveCodingBenchmarkCorpusDigest();
+const verifyFrozenCandidate = additional ? verifyFreeWindowsCandidate : verifyLiveCodingBenchmarkCandidate;
 const constitutionSource = await readFile(
   new URL("../constitution/constitution.v1.json", import.meta.url),
   "utf8",
@@ -182,6 +186,7 @@ const bindings: CodingBenchmarkBindings = {
     "src/genome-lab-verifier.ts",
     "src/genome-lab.ts",
     "src/coding-repair-live-benchmark-case.ts",
+    ...(additional ? ["src/coding-benchmark-free-windows.ts"] : []),
   ]),
   environmentDigest: sha256(canonicalJson({
     node: process.version,
@@ -212,6 +217,16 @@ await withCodingBenchmarkExecution({
   stateDirectory: config.stateDirectory,
   manifest: progress.manifest,
   execute: async () => {
+    await writeBenchmarkAudit(join(config.stateDirectory, "coding-repair-benchmarks", config.benchmarkId, "trace"), "trial-registration.json", {
+      benchmarkId: config.benchmarkId, sourceRevision: config.sourceRevision, corpusDigest,
+      additionalAuthorization: additional, maximumSpendUsd: config.maximumSpendUsd,
+      maximumModelSpendUsdPerArm: config.maximumModelSpendUsdPerArm,
+      historicalBenchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
+      historicalUnresolvedExposureUsd: CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd,
+      confirmedHistoricalChargeUsd: null, chargeReconciled: false,
+      node: process.version, platform: process.platform, architecture: process.arch, typescript: ts.version,
+      registeredAt: new Date().toISOString(), bindings,
+    });
     for (let index = 0; index < corpus.cases.length; index += 1) {
       const benchmarkCase = corpus.cases[index]!;
       const pairIndex = index + 1;
@@ -250,7 +265,7 @@ await withCodingBenchmarkExecution({
         await assertRuntimeAuthority();
         const audit = createBenchmarkAudit({
           directory: join(config.stateDirectory, "coding-repair-benchmarks", config.benchmarkId, "trace"),
-          method, beforeDispatch: assertRuntimeAuthority,
+          method, beforeDispatch: assertRuntimeAuthority, conservativeRequestReservations: additional,
           onModelIdentity: async (identity) => {
             if (observedModelIdentity !== null && observedModelIdentity !== identity) {
               throw new Error("The actual model identity changed within the matched trial.");
@@ -263,7 +278,7 @@ await withCodingBenchmarkExecution({
           method,
           benchmarkCase,
           context,
-          verify: (candidate) => verifyLiveCodingBenchmarkCandidate({
+          verify: (candidate) => verifyFrozenCandidate({
             candidate,
             objective: benchmarkCase.objective,
             acceptanceCriteria: benchmarkCase.acceptanceCriteria,

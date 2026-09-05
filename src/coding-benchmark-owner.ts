@@ -1,11 +1,11 @@
 import type { CodingBenchmarkRelayIdentity } from "./coding-benchmark-github-relay.ts";
 import { spawn } from "node:child_process";
-import { readFile, realpath } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codingBenchmarkAuthorityDigest } from "./coding-repair-benchmark-command.ts";
 import { writeBenchmarkAudit } from "./coding-benchmark-audit.ts";
-import { assertCodingBenchmarkDispatch, CodingBenchmarkNotReadyError, CODING_BENCHMARK_CONTINUATION, inspectCodingBenchmarkReadiness } from "./coding-benchmark-readiness.ts";
+import { assertCodingBenchmarkDispatch, CodingBenchmarkNotReadyError, CODING_BENCHMARK_CONTINUATION, BENCHMARK_AUTHORIZATION_KEY, selectedBenchmarkAuthorization, inspectCodingBenchmarkReadiness } from "./coding-benchmark-readiness.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 type OwnerBenchmarkInput = {
@@ -32,10 +32,30 @@ export async function persistentBenchmarkStateDirectory(stateDirectory: string |
   return join(actual, "coding-benchmark-lab");
 }
 
+export async function assertBenchmarkUnclaimed(stateDirectory: string, benchmarkId: string): Promise<void> {
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(benchmarkId)) {
+    throw new CodingBenchmarkNotReadyError("BENCHMARK_SCOPE_MISMATCH");
+  }
+  try {
+    await lstat(join(stateDirectory, "coding-repair-benchmarks", benchmarkId, "trace", "owner-launch-claim.json"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new CodingBenchmarkNotReadyError("BENCHMARK_CLAIM_UNREADABLE");
+  }
+  throw new CodingBenchmarkNotReadyError("BENCHMARK_ALREADY_CLAIMED_NO_REPLAY");
+}
+
 export async function ownerCodingBenchmarkReadiness(input: OwnerBenchmarkInput) {
   const readiness = inspectCodingBenchmarkReadiness(input);
-  try { await persistentBenchmarkStateDirectory(input.stateDirectory); }
-  catch { readiness.blockers.push("PERSISTENT_BENCHMARK_STORAGE_UNAVAILABLE"); }
+  try {
+    const directory = await persistentBenchmarkStateDirectory(input.stateDirectory);
+    await assertBenchmarkUnclaimed(directory, readiness.benchmarkId);
+  }
+  catch (error) { readiness.blockers.push(error instanceof CodingBenchmarkNotReadyError ? error.code : "PERSISTENT_BENCHMARK_STORAGE_UNAVAILABLE"); }
+  if (readiness.blockers.includes("BENCHMARK_ALREADY_CLAIMED_NO_REPLAY") || readiness.blockers.includes("BENCHMARK_CLAIM_UNREADABLE")) {
+    readiness.availableAuthorizationUsd = 0;
+    readiness.unresolvedExposureUsd = 0.15;
+  }
   readiness.ready = readiness.blockers.length === 0;
   return { ...readiness,
     ...(input.launcher ? { launcher: structuredClone(input.launcher) } : {}),
@@ -58,11 +78,11 @@ export function codingBenchmarkLaunchSpec(input: {
   sourceRevision: string;
 }) {
   if (!/^[a-f0-9]{40}$/u.test(input.sourceRevision) || !isAbsolute(input.stateDirectory)) throw new Error("Invalid benchmark launch identity.");
-  const benchmarkId = CODING_BENCHMARK_CONTINUATION.benchmarkId;
+  const benchmarkId = selectedBenchmarkAuthorization(input.environment).benchmarkId;
   const authorityDigest = codingBenchmarkAuthorityDigest({ benchmarkId, sourceRevision: input.sourceRevision,
     maximumSpendUsd: 0.15, maximumModelSpendUsdPerArm: 0.075, currentCanaryPercent: 5, caseCount: 1 });
   const environment: Record<string, string> = {};
-  for (const key of ["OPENAI_API_KEY", "SARA_OWNER_TOKEN", "SARA_OWNER_TOKEN_SHA256", "SARA_STATE_DIRECTORY", "PORT", "RAILWAY_GIT_COMMIT_SHA"]) {
+  for (const key of [BENCHMARK_AUTHORIZATION_KEY, "OPENAI_API_KEY", "SARA_OWNER_TOKEN", "SARA_OWNER_TOKEN_SHA256", "SARA_STATE_DIRECTORY", "PORT", "RAILWAY_GIT_COMMIT_SHA"]) {
     const value = input.environment[key]; if (value !== undefined) environment[key] = value;
   }
   environment.SARA_CODING_BENCHMARK_SOURCE_REVISION = input.sourceRevision;
@@ -91,6 +111,8 @@ export async function launchOwnerCodingBenchmark(input: OwnerBenchmarkInput & { 
   await writeBenchmarkAudit(journal, "owner-launch-claim.json", {
     benchmarkId: readiness.benchmarkId, sourceRevision: readiness.sourceRevision,
     authorityDigest: readiness.authorityDigest, reservedUsd: 0.15,
+    historicalBenchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
+    historicalUnresolvedExposureUsd: CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd,
     claimedAt: new Date().toISOString(), launch: "existing_cli", replayAllowed: false,
     launcher: input.launcher ? structuredClone(input.launcher) : { authentication: "owner_token" },
   });

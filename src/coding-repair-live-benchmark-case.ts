@@ -159,7 +159,7 @@ function assertModelWritableCandidate(candidate: ProgramCandidateProposal): void
   if (expected.size) throw new Error("Live benchmark candidate omitted a frozen writable file.");
 }
 
-function sanitizeProtectedVerifierFailures(result: ProgramVerificationResult): ProgramVerificationResult {
+export function sanitizeProtectedVerifierFailures(result: ProgramVerificationResult): ProgramVerificationResult {
   const protectedFailures = result.failures.filter((failure) => failure.file.startsWith("tests/"));
   if (!protectedFailures.length) return result;
   const evidenceDigest = sha256(canonicalJson({

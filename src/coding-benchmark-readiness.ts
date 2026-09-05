@@ -14,6 +14,26 @@ export const CODING_BENCHMARK_CONTINUATION = Object.freeze({
   historicalResolutionEvidence: null,
 });
 
+// Explicit ADDITIONAL authorization accepted by the owner after PR103.
+// The old record above is immutable and remains unresolved; this does not replay it.
+export const ADDITIONAL_BENCHMARK_AUTHORIZATION = Object.freeze({
+  benchmarkId: "33d94c9a-0de6-41d9-a843-fe9880994242",
+  taskId: "live-free-windows-001",
+  maximumSpendUsd: 0.15,
+  maximumModelSpendUsdPerArm: 0.075,
+  unresolvedExposureUsd: 0,
+  authorizationRecord: "BoneManTGRM/SARA#105",
+  priorBenchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
+  priorUnresolvedExposureUsd: CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd,
+});
+export const BENCHMARK_AUTHORIZATION_KEY = "SARA_CODING_BENCHMARK_AUTHORIZATION_ID";
+export function selectedBenchmarkAuthorization(environment: Record<string, string | undefined>) {
+  const id = environment[BENCHMARK_AUTHORIZATION_KEY];
+  if (id === ADDITIONAL_BENCHMARK_AUTHORIZATION.benchmarkId) return ADDITIONAL_BENCHMARK_AUTHORIZATION;
+  if (id === undefined || id === "" || id === CODING_BENCHMARK_CONTINUATION.benchmarkId) return CODING_BENCHMARK_CONTINUATION;
+  throw new CodingBenchmarkNotReadyError("BENCHMARK_AUTHORIZATION_UNKNOWN");
+}
+
 type ReadinessInput = {
   environment: Record<string, string | undefined>;
   constitutionVerified: boolean;
@@ -26,6 +46,7 @@ export class CodingBenchmarkNotReadyError extends Error {
 
 export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   const env = input.environment;
+  const grant = selectedBenchmarkAuthorization(env);
   const token = env.SARA_OWNER_TOKEN?.trim() ?? "";
   const expected = env.SARA_OWNER_TOKEN_SHA256?.trim().toLowerCase() ?? "";
   const ownerAuthenticated = token.length > 0 && /^[a-f0-9]{64}$/u.test(expected)
@@ -38,15 +59,18 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   if (!sourceIdentified) blockers.push("SOURCE_IDENTITY_UNAVAILABLE");
   if (!input.constitutionVerified) blockers.push("CONSTITUTION_UNVERIFIED");
   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
-  if (CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
+  if (grant.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
   return {
-    schemaVersion: 1, benchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
+    schemaVersion: 1, benchmarkId: grant.benchmarkId,
     ready: blockers.length === 0, blockers,
     sourceRevision: sourceIdentified ? sourceRevision : null,
     maximumSpendUsd: 0.15, maximumModelSpendUsdPerArm: 0.075,
-    unresolvedExposureUsd: CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd,
+    unresolvedExposureUsd: grant.unresolvedExposureUsd,
     confirmedChargeUsd: null,
-    availableAuthorizationUsd: Math.max(0, 0.15 - CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd),
+    availableAuthorizationUsd: Math.max(0, 0.15 - grant.unresolvedExposureUsd),
+    historicalBenchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
+    historicalUnresolvedExposureUsd: CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd,
+    additionalAuthorization: grant.benchmarkId === ADDITIONAL_BENCHMARK_AUTHORIZATION.benchmarkId,
     model: "gpt-5.6-luna", reasoning: "medium", maximumAttemptsPerArm: 3,
     order: ["luna_reparodynamic", "luna"],
     compactOutput: false, compilerCaching: false,
@@ -55,7 +79,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
 }
 
 export function assertCodingBenchmarkDispatch(input: ReadinessInput & { benchmarkId: string }): void {
-  if (input.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId) {
+  if (input.benchmarkId !== selectedBenchmarkAuthorization(input.environment).benchmarkId) {
     throw new CodingBenchmarkNotReadyError("BENCHMARK_SCOPE_MISMATCH");
   }
   const readiness = inspectCodingBenchmarkReadiness(input);

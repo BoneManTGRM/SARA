@@ -1,5 +1,5 @@
 import { createPublicKey, verify, type JsonWebKey } from "node:crypto";
-import { CODING_BENCHMARK_CONTINUATION } from "./coding-benchmark-readiness.ts";
+import { selectedBenchmarkAuthorization } from "./coding-benchmark-readiness.ts";
 
 export const RELAY_AUDIENCE = "https://sara-operator-production.up.railway.app/api/coding-benchmark";
 export const RELAY_PERMIT_KEY = "SARA_CODING_BENCHMARK_GITHUB_RELAY_PERMIT_JSON";
@@ -21,13 +21,13 @@ function decode(value: string): Record<string, unknown> {
 }
 type Permit = { schemaVersion: 1; benchmarkId: string; runtimeRevision: string;
   workflowRevision: string; notBefore: number; expiresAt: number };
-function permit(raw: string | undefined, runtime: string | undefined, milliseconds: number): Permit {
+function permit(raw: string | undefined, runtime: string | undefined, milliseconds: number, benchmarkId: string): Permit {
   if (!raw || raw.length > 2048 || !Number.isFinite(milliseconds)) throw new Error("NO_PERMIT");
   const v = record(JSON.parse(raw));
   const fields = ["schemaVersion", "benchmarkId", "runtimeRevision", "workflowRevision", "notBefore", "expiresAt"];
   const seconds = Math.floor(milliseconds / 1000);
   if (Object.keys(v).length !== fields.length || !fields.every(k => Object.hasOwn(v, k))
-    || v.schemaVersion !== 1 || v.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId
+    || v.schemaVersion !== 1 || v.benchmarkId !== benchmarkId
     || !sha(v.runtimeRevision) || v.runtimeRevision !== runtime || !sha(v.workflowRevision)
     || !integer(v.notBefore) || !integer(v.expiresAt) || v.expiresAt <= v.notBefore
     || v.expiresAt - v.notBefore > 3600 || seconds < v.notBefore || seconds >= v.expiresAt) {
@@ -107,7 +107,8 @@ export function createCodingBenchmarkRelayAuthenticator(options: {
     try {
       const rawPermit = environment[RELAY_PERMIT_KEY];
       const runtime = environment.RAILWAY_GIT_COMMIT_SHA;
-      const p = permit(rawPermit, runtime, now());
+      const selectedId = selectedBenchmarkAuthorization(environment).benchmarkId;
+      const p = permit(rawPermit, runtime, now(), selectedId);
       if (typeof token !== "string" || token.length > 24_000) return null;
       const parts = token.split(".");
       if (parts.length !== 3) return null;
@@ -125,7 +126,8 @@ export function createCodingBenchmarkRelayAuthenticator(options: {
         || !verify("RSA-SHA256", Buffer.from(`${parts[0]}.${parts[1]}`), key, Buffer.from(parts[2]!, "base64url"))) return null;
       // Revocation, runtime identity changes and expiry during key I/O all deny.
       if (environment[RELAY_PERMIT_KEY] !== rawPermit || environment.RAILWAY_GIT_COMMIT_SHA !== runtime
-        || !claimsMatch(claims, permit(rawPermit, runtime, now()), now())) return null;
+        || selectedBenchmarkAuthorization(environment).benchmarkId !== selectedId
+        || !claimsMatch(claims, permit(rawPermit, runtime, now(), selectedId), now())) return null;
       return { authentication: "github_oidc_scoped", benchmarkId: p.benchmarkId, runId: claims.run_id as string,
         workflowRevision: p.workflowRevision, runtimeRevision: p.runtimeRevision };
     } catch { return null; } // Never return token, credentials or untrusted error prose.
