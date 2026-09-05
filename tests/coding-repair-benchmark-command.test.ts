@@ -118,4 +118,35 @@ describe("live coding benchmark command", () => {
       /Unknown coding benchmark argument/,
     );
   });
+
+  it("splits a smaller authorized total equally across one matched pair", () => {
+    const onePairAuthority = {
+      benchmarkId,
+      sourceRevision,
+      maximumSpendUsd: 0.15,
+      currentCanaryPercent: 5,
+      caseCount: 1,
+    };
+    const parsed = parseCodingBenchmarkCommand({
+      args: [
+        "--live",
+        "--acknowledge-lab-only",
+        "--benchmark-id",
+        benchmarkId,
+        "--max-spend-usd",
+        "0.15",
+        "--current-canary-percent",
+        "5",
+        "--case-count",
+        "1",
+      ],
+      env: {
+        OPENAI_API_KEY: "test-secret",
+        SARA_CODING_BENCHMARK_AUTHORITY_SHA256: codingBenchmarkAuthorityDigest(onePairAuthority),
+        SARA_CODING_BENCHMARK_SOURCE_REVISION: sourceRevision,
+      },
+      maximumCases: 1,
+    });
+    assert.equal((parsed as { maximumModelSpendUsdPerArm?: number }).maximumModelSpendUsdPerArm, 0.075);
+  });
 });
