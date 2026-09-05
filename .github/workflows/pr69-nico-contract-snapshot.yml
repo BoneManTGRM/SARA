@@ -1,0 +1,31 @@
+name: NICO package contract snapshot for PR69
+on:
+  push:
+    branches: [integration/pr69-source-20260905-1626]
+    paths: [.github/workflows/pr69-nico-contract-snapshot.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: BoneManTGRM/NICO
+          ref: 8e0014e69569aa7a72cc9215107ea8d61a4db7b3
+          persist-credentials: false
+      - name: Archive public source only, without executing NICO
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/contract"
+          git rev-parse HEAD HEAD^{tree} > "${RUNNER_TEMP}/contract/identity.txt"
+          git ls-files '*automated*delivery*' '*comprehensive*report*' '*control_plane_api_app*' > "${RUNNER_TEMP}/contract/paths.txt"
+          git archive --format=tar.gz HEAD > "${RUNNER_TEMP}/contract/nico-source.tar.gz"
+          cd "${RUNNER_TEMP}/contract"
+          sha256sum nico-source.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nico-package-contract-8e0014e
+          path: ${{ runner.temp }}/contract/
+          if-no-files-found: error
