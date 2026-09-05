@@ -1,0 +1,45 @@
+name: SARA empirical reuse verification
+on:
+  pull_request:
+    branches: [experiment/benchmark-rejection-replay-safety]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/v8-live-inventory-comparison'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - run: mkdir -p empirical-evidence
+      - run: npm run verify > empirical-evidence/full-verification.log 2>&1
+      - name: Measure original verification floor
+        env:
+          SARA_FLOOR_OUTPUT: empirical-evidence/verification-floor.json
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node --import tsx proof/measure-verification-floor.ts > empirical-evidence/floor.log
+      - name: Execute the complete scripted mechanism without any provider credentials
+        env:
+          SARA_EVIDENCE_DIRECTORY: empirical-evidence/scripted-study
+          GITHUB_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node --import tsx proof/repair-reuse-benchmark.ts > empirical-evidence/scripted.log
+      - run: npm run proof:http > empirical-evidence/http-repeat.log
+      - name: Preserve exact source
+        if: always()
+        run: |
+          git rev-parse HEAD > empirical-evidence/commit.txt
+          git archive --format=tar.gz HEAD > empirical-evidence/source.tar.gz
+          sha256sum empirical-evidence/source.tar.gz > empirical-evidence/source.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-reuse-verification-${{ github.event.pull_request.head.sha }}
+          path: empirical-evidence
+          if-no-files-found: error
