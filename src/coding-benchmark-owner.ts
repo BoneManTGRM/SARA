@@ -1,3 +1,4 @@
+import type { CodingBenchmarkRelayIdentity } from "./coding-benchmark-github-relay.ts";
 import { spawn } from "node:child_process";
 import { readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -12,6 +13,7 @@ type OwnerBenchmarkInput = {
   stateDirectory?: string;
   constitutionVerified: boolean;
   emergencyStopped: boolean;
+  launcher?: CodingBenchmarkRelayIdentity;
 };
 
 export async function persistentBenchmarkStateDirectory(stateDirectory: string | undefined): Promise<string> {
@@ -36,6 +38,7 @@ export async function ownerCodingBenchmarkReadiness(input: OwnerBenchmarkInput) 
   catch { readiness.blockers.push("PERSISTENT_BENCHMARK_STORAGE_UNAVAILABLE"); }
   readiness.ready = readiness.blockers.length === 0;
   return { ...readiness,
+    ...(input.launcher ? { launcher: structuredClone(input.launcher) } : {}),
     authenticatedLaunchPath: "/api/coding-benchmark/run",
     execution: "existing_matched_cli_only",
     authorityDigest: readiness.sourceRevision ? codingBenchmarkAuthorityDigest({
@@ -89,6 +92,7 @@ export async function launchOwnerCodingBenchmark(input: OwnerBenchmarkInput & { 
     benchmarkId: readiness.benchmarkId, sourceRevision: readiness.sourceRevision,
     authorityDigest: readiness.authorityDigest, reservedUsd: 0.15,
     claimedAt: new Date().toISOString(), launch: "existing_cli", replayAllowed: false,
+    launcher: input.launcher ? structuredClone(input.launcher) : { authentication: "owner_token" },
   });
   const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.environment, stdio: "ignore", timeout: 300_000 });
   child.once("exit", (code, signal) => {
