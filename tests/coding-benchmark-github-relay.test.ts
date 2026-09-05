@@ -118,3 +118,27 @@ it("coalesces overlapping key retrieval and never caches an authorization decisi
   assert.ok(results.every(Boolean)); assert.equal(count, 1);
   assert.equal(await authenticate(token(claims({ run_attempt: "2" })), environment()), null);
 });
+
+it("accepts issuer-observed self-workflow claims only when both repeat the exact pinned job source", async () => {
+  const authenticate = createCodingBenchmarkRelayAuthenticator({ now: () => now, fetchImpl: keys });
+  const result = await authenticate(token(claims({
+    job_workflow_ref: RELAY_WORKFLOW, job_workflow_sha: "b".repeat(40),
+  })), environment());
+  assert.equal(result?.workflowRevision, "b".repeat(40));
+  assert.equal(result?.authentication, "github_oidc_scoped");
+});
+for (const change of [
+  { job_workflow_ref: RELAY_WORKFLOW },
+  { job_workflow_sha: "b".repeat(40) },
+  { job_workflow_ref: RELAY_WORKFLOW, job_workflow_sha: "c".repeat(40) },
+  { job_workflow_ref: "another/reusable/workflow", job_workflow_sha: "b".repeat(40) },
+  { job_workflow_ref: RELAY_WORKFLOW, job_workflow_sha: ["b".repeat(40)] },
+  { job_workflow_ref: null, job_workflow_sha: null },
+]) it(`rejects incomplete, changed or malformed job workflow claims ${JSON.stringify(change)}`, async () => {
+  let fetches = 0;
+  const authenticate = createCodingBenchmarkRelayAuthenticator({ now: () => now, fetchImpl: async (...args) => {
+    fetches++; return keys(...args);
+  } });
+  assert.equal(await authenticate(token(claims(change)), environment()), null);
+  assert.equal(fetches, 0);
+});
