@@ -1,0 +1,68 @@
+name: SARA PR57 evidence gate repair
+on:
+  push:
+    branches: [proof/pr-queue-audit-20260905]
+    paths: [.github/workflows/pr57-gate-repair.yml]
+permissions:
+  contents: read
+jobs:
+  repair:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4e8e7c63bfa9c6c60237545da342cdd6d1714e2b
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Apply only the exact reviewed patch
+        run: |
+          mkdir -p gate-repair-evidence
+          git show 11759b989056e62f762745e1deea4767e93440ef:proof/pr57-gate-repairs.patch > gate-repair-evidence/repair.patch
+          echo 'ee68e6bd680e8492cadd527f50eeb4e7ea93e9fa4e41082ee92a5b060df2ac89  gate-repair-evidence/repair.patch' | sha256sum --check
+          git apply --check gate-repair-evidence/repair.patch
+          git apply --index gate-repair-evidence/repair.patch
+          test "$(git write-tree)" = d77bf72dd1fbb5b0cb807dd6f1a772b62e2352f8
+          git diff --cached --check
+      - run: npm ci --ignore-scripts
+      - name: Full locked-source verification without provider credentials
+        run: |
+          set +e
+          npm run verify > gate-repair-evidence/verification.log 2>&1
+          code=$?
+          printf '%s\n' "$code" > gate-repair-evidence/verification-exit.txt
+          exit "$code"
+      - name: Publish only if the target has not moved and the reviewed tree is unchanged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git write-tree)" = d77bf72dd1fbb5b0cb807dd6f1a772b62e2352f8
+          git diff --exit-code
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic $auth"
+          trap 'git config --local --unset-all http.https://github.com/.extraheader || true' EXIT
+          test "$(git ls-remote origin refs/heads/feature/reparodynamic-ab-evidence | cut -f1)" = 4e8e7c63bfa9c6c60237545da342cdd6d1714e2b
+          git -c core.hooksPath=/dev/null -c user.name='SARA verified integration' -c user.email='github-actions[bot]@users.noreply.github.com' commit -m 'Repair incomplete-corpus and quality promotion gates in PR57'
+          git push origin HEAD:refs/heads/feature/reparodynamic-ab-evidence
+          git rev-parse HEAD > gate-repair-evidence/published-commit.txt
+      - name: Preserve exact source and all partial results
+        if: always()
+        run: |
+          git rev-parse HEAD > gate-repair-evidence/checkout.txt
+          git write-tree > gate-repair-evidence/tree.txt
+          git archive --format=tar.gz "$(git write-tree)" > gate-repair-evidence/source.tar.gz
+          sha256sum gate-repair-evidence/source.tar.gz > gate-repair-evidence/source.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-pr57-gate-repair-${{ github.run_id }}
+          path: gate-repair-evidence
+          retention-days: 30
+          if-no-files-found: error
