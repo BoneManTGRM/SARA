@@ -65,4 +65,14 @@ export function summarizeLedger(entries: readonly LedgerEntry[]): LedgerSummary[
     candidate.files.push({ path: "tests/summarize-ledger.test.ts", content: "throw new Error('forged');\n" });
     await assert.rejects(() => verification(candidate), /protected acceptance file|writable file set/);
   });
+
+  it("sanitizes protected-test type failures before they can become repair feedback", async () => {
+    const candidate = structuredClone(benchmarkCase.baseline);
+    const implementation = candidate.files.find((file) => file.path === "src/summarize-ledger.ts")!;
+    implementation.content = "export function summarizeLedger(): number { return 0; }\n";
+    const result = await verification(candidate);
+    assert.equal(result.passed, false);
+    assert.equal(result.failures.some((failure) => failure.file.startsWith("tests/")), false);
+    assert.equal(result.failures.some((failure) => failure.code === "PROTECTED_ACCEPTANCE_FAILURE"), true);
+  });
 });
