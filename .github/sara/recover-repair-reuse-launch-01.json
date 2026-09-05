@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "experiment": "sara-exact-repair-reuse-01",
+  "sourceCommit": "2d1c5b19c33e5e07a3baeb8766a84e4d36a235de",
+  "contractDigest": "0ff775216187b4452ccd9ce74ad147f18fcf07d1ad899f4e40e9d556539f012c",
+  "previousRun": "33945741305",
+  "previousArchiveSha256": "41faef602ffb107a0930521fe44517a5e2169f8489b81a51e7fb522d548406d6",
+  "provenPreviousProviderCalls": 0,
+  "invalidation": "PRE_PROVIDER_SOURCE_ENVIRONMENT_MISMATCH",
+  "correction": "Pass checked-out source identity explicitly to the child process; preserve real trigger commit and run ID in the external claim.",
+  "originalClaimPreserved": true,
+  "sourceOrVerifierOrTaskChanged": false,
+  "selectedModelOutcome": false,
+  "maximumPhysicalRequestsAcrossBothLaunches": 6,
+  "maximumReservedCostUsdAcrossBothLaunches": 0.15,
+  "furtherAutomaticRetries": false,
+  "productionActivation": false
+}
