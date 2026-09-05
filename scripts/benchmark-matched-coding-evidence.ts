@@ -1,6 +1,10 @@
 import * as ts from "typescript";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { persistentBenchmarkStateDirectory } from "../src/coding-benchmark-owner.ts";
+import { createBenchmarkAudit, benchmarkSpendExposure, writeBenchmarkAudit } from "../src/coding-benchmark-audit.ts";
+import { assertCodingBenchmarkRuntimeAuthority } from "../src/coding-benchmark-readiness.ts";
 import { promisify } from "node:util";
 import { canonicalJson, sha256 } from "../src/canonical.ts";
 import { parseCodingBenchmarkCommand } from "../src/coding-repair-benchmark-command.ts";
@@ -34,6 +38,7 @@ import { INITIAL_CODING_REPAIR_LIMITS } from "../src/coding-repair-policy.ts";
 import { createLunaCodingRepairModel } from "../src/luna-coding-repair-model.ts";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
 
+const cliStarted = performance.now();
 const execFileAsync = promisify(execFile);
 const repositoryRoot = new URL("../", import.meta.url);
 
@@ -82,11 +87,8 @@ function selectedCorpus(caseCount: number): CodingBenchmarkCorpus {
   };
 }
 
-function knownSpend(receipts: CodingBenchmarkArmReceipt[]): number {
-  if (receipts.some((receipt) => receipt.result.accountedCostUsd === null)) {
-    throw new Error("A completed benchmark arm has unknown spend; further paid execution is blocked.");
-  }
-  return receipts.reduce((total, receipt) => total + receipt.result.accountedCostUsd!, 0);
+function exposure(receipts: CodingBenchmarkArmReceipt[], maximumArmSpendUsd: number) {
+  return benchmarkSpendExposure(receipts.map(receipt => receipt.result.accountedCostUsd), maximumArmSpendUsd);
 }
 
 function assertManifestMatches(
@@ -131,6 +133,14 @@ const config = parseCodingBenchmarkCommand({
   maximumCases: LIVE_CODING_BENCHMARK_CORPUS.cases.length,
 });
 const sourceIdentityMethod = await assertExactSourceCheckout(config.sourceRevision);
+const assertRuntimeAuthority = () => assertCodingBenchmarkRuntimeAuthority({ benchmarkId: config.benchmarkId, environment: process.env });
+// Fail before creating/consuming any new claim. The original unresolved exposure
+// remains blocked even if an operator changes the UUID or state path.
+await assertRuntimeAuthority();
+if (config.maximumSpendUsd !== 0.15 || config.maximumModelSpendUsdPerArm !== 0.075
+    || config.stateDirectory !== await persistentBenchmarkStateDirectory(process.env.SARA_STATE_DIRECTORY)) {
+  throw new Error("The benchmark must use the original equal ceilings and existing persistent lab directory.");
+}
 const armLimits = {
   ...structuredClone(INITIAL_CODING_REPAIR_LIMITS),
   maximumModelSpendUsd: config.maximumModelSpendUsdPerArm,
@@ -146,6 +156,7 @@ const constitutionSource = await readFile(
 );
 const constitutionDigest = sha256(constitutionSource);
 const client = new OpenAIResponsesClient({ apiKey: config.apiKey });
+let observedModelIdentity: string | null = null;
 const modelImplementationDigest = await digestSourceFiles([
   "src/luna-coding-repair-model.ts",
   "src/openai-worker.ts",
@@ -163,6 +174,8 @@ const bindings: CodingBenchmarkBindings = {
     "src/coding-repair-benchmark-runner.ts",
     "src/coding-repair-prompt.ts",
     "src/coding-repair-artifacts.ts",
+    "src/coding-benchmark-audit.ts",
+    "src/coding-benchmark-readiness.ts",
   ]),
   policyDigest: await digestSourceFiles(["src/coding-repair-policy.ts"]),
   verifierDigest: await digestSourceFiles([
@@ -225,7 +238,7 @@ await withCodingBenchmarkExecution({
       const missing = new Set(missingCodingBenchmarkArms(progress, pairIndex));
       for (const method of order) {
         if (!missing.has(method)) continue;
-        const spentUsd = knownSpend(progress.armReceipts);
+        const spentUsd = exposure(progress.armReceipts, config.maximumModelSpendUsdPerArm).totalExposureUsd;
         if (
           spentUsd + armLimits.maximumModelSpendUsd
           > config.maximumSpendUsd + 1e-9
@@ -234,6 +247,18 @@ await withCodingBenchmarkExecution({
             "The live coding benchmark stopped before exceeding its owner-authorized spend cap.",
           );
         }
+        await assertRuntimeAuthority();
+        const audit = createBenchmarkAudit({
+          directory: join(config.stateDirectory, "coding-repair-benchmarks", config.benchmarkId, "trace"),
+          method, beforeDispatch: assertRuntimeAuthority,
+          onModelIdentity: async (identity) => {
+            if (observedModelIdentity !== null && observedModelIdentity !== identity) {
+              throw new Error("The actual model identity changed within the matched trial.");
+            }
+            observedModelIdentity = identity;
+          },
+        });
+        const auditedClient = new OpenAIResponsesClient({ apiKey: config.apiKey, fetchImpl: audit.fetch });
         const result = await runCodingBenchmarkArm({
           method,
           benchmarkCase,
@@ -245,8 +270,9 @@ await withCodingBenchmarkExecution({
             constitutionDigest,
             maximumBudgetUsd: armLimits.maximumModelSpendUsd,
           }),
-          model: createLunaCodingRepairModel({ client, context }),
+          model: createLunaCodingRepairModel({ client: auditedClient, context }),
           limits: armLimits,
+          onEvidence: (kind, payload) => audit.record(kind, payload),
         });
         const receipt: CodingBenchmarkArmReceipt = {
           schemaVersion: 1,
@@ -261,11 +287,9 @@ await withCodingBenchmarkExecution({
           stateDirectory: config.stateDirectory,
           receipt,
         });
-        if (result.accountedCostUsd === null) {
-          throw new Error(
-            "The arm result has unknown spend; it was preserved and further paid execution is blocked.",
-          );
-        }
+        // An unknown arm keeps its full $0.075 reserved. The other arm has a
+        // separate equal allocation; continuing it is not permission to retry
+        // the failed arm or reclaim its unresolved reservation.
         progress = await loadCodingBenchmarkProgress({
           stateDirectory: config.stateDirectory,
           benchmarkId: config.benchmarkId,
@@ -315,7 +339,8 @@ await withCodingBenchmarkExecution({
         maximumModelSpendUsdPerArm: config.maximumModelSpendUsdPerArm,
         completedPairs: progress.pairs.length,
         totalPairs: corpus.cases.length,
-        accountedCostUsd: Number(knownSpend(progress.armReceipts).toFixed(6)),
+        ...exposure(progress.armReceipts, config.maximumModelSpendUsdPerArm),
+        costsAreEstimates: true,
       }));
     }
 
@@ -331,6 +356,13 @@ await withCodingBenchmarkExecution({
       stateDirectory: config.stateDirectory,
       summary,
       decision,
+    });
+    await writeBenchmarkAudit(join(config.stateDirectory, "coding-repair-benchmarks", config.benchmarkId, "trace"), "terminal-accounting.json", {
+      ...exposure(progress.armReceipts, config.maximumModelSpendUsdPerArm),
+      costsAreEstimates: true, providerChargesReconciled: false,
+      cliElapsedMilliseconds: performance.now() - cliStarted,
+      included: "CLI preflight, source/task binding, initial/repair/final verification, model requests, failures, and evidence persistence through summary",
+      excluded: "process/module startup, deployment, CI, evidence download and subsequent audit",
     });
     console.log(JSON.stringify({
       status: "completed",

@@ -315,6 +315,7 @@ export async function runCodingBenchmarkArm(input: {
   verify(candidate: ProgramCandidateProposal): Promise<ProgramVerificationResult>;
   model: CodingRepairModel;
   limits?: CodingRepairLimits;
+  onEvidence?: (kind: "verification" | "model_request" | "model_response" | "model_failure", payload: unknown) => Promise<void>;
 }): Promise<CodingBenchmarkArmResult> {
   const method = input.method;
   if (method !== "luna" && method !== "luna_reparodynamic") throw new Error("Coding benchmark method is unsupported.");
@@ -324,7 +325,14 @@ export async function runCodingBenchmarkArm(input: {
   assertBenchmarkCase(benchmarkCase, context);
   const started = performance.now();
   const baseline = benchmarkCase.baseline;
-  const verify = async (candidate: ProgramCandidateProposal) => structuredClone(await input.verify(structuredClone(candidate)));
+  let verificationSequence = 0;
+  const verify = async (candidate: ProgramCandidateProposal) => {
+    const verification = structuredClone(await input.verify(structuredClone(candidate)));
+    // Persist every verified source snapshot, including rejected proposals and
+    // the fresh final check. The observer cannot modify runtime inputs/results.
+    await input.onEvidence?.("verification", structuredClone({ sequence: ++verificationSequence, candidate, verification }));
+    return verification;
+  };
   const baselineVerification = await verify(baseline);
   let modelCalls = 0;
   let accounted = 0;
@@ -332,7 +340,16 @@ export async function runCodingBenchmarkArm(input: {
     if (modelCalls >= limits.maximumCycles) throw new Error("Coding benchmark model call limit exceeded.");
     const available = Math.min(request.remainingCostUsd, limits.maximumModelSpendUsd - accounted);
     modelCalls++; // Count before the provider, including failed requests.
-    const response = await input.model.propose(structuredClone({ ...request, remainingCostUsd: available }));
+    const boundRequest = structuredClone({ ...request, remainingCostUsd: available });
+    await input.onEvidence?.("model_request", structuredClone({ cycle: modelCalls, request: boundRequest }));
+    let response: Awaited<ReturnType<CodingRepairModel["propose"]>>;
+    try {
+      response = await input.model.propose(boundRequest);
+    } catch (error) {
+      await input.onEvidence?.("model_failure", { cycle: modelCalls, code: "MODEL_PROPOSAL_FAILED" });
+      throw error;
+    }
+    await input.onEvidence?.("model_response", structuredClone({ cycle: modelCalls, response }));
     if (!Number.isFinite(response.accountedCostUsd) || response.accountedCostUsd < 0
         || response.accountedCostUsd > available) throw new Error("Coding benchmark cost enforcement failed.");
     if (![response.inputTokens, response.outputTokens].every(count => Number.isSafeInteger(count) && count >= 0)) {

@@ -1,3 +1,5 @@
+import { ownerCodingBenchmarkReadiness, launchOwnerCodingBenchmark } from "./coding-benchmark-owner.ts";
+import { CodingBenchmarkNotReadyError } from "./coding-benchmark-readiness.ts";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { DASHBOARD_HTML } from "./dashboard.ts";
@@ -1149,10 +1151,31 @@ async function routeSaraRequest(
     unauthorized(response);
     return;
   }
+  if (url.pathname === "/api/coding-benchmark/readiness" || url.pathname === "/api/coding-benchmark/run") {
+    // Preserve both existing authentication layers, even if server and kernel
+    // configuration disagree. Never expose credentials in response/evidence.
+    kernel.authenticateOwnerToken(token);
+    const status = await kernel.getStatus();
+    const environment = { ...process.env, SARA_OWNER_TOKEN: token, SARA_OWNER_TOKEN_SHA256: options.ownerTokenSha256 };
+    const input = { environment, stateDirectory: options.stateDirectory,
+      constitutionVerified: status.constitution.verified, emergencyStopped: status.emergencyStopped };
+    if (request.method === "GET" && url.pathname.endsWith("/readiness")) {
+      json(response, 200, await ownerCodingBenchmarkReadiness(input));
+    } else if (request.method === "POST" && url.pathname.endsWith("/run")) {
+      json(response, 202, await launchOwnerCodingBenchmark({ ...input, body: await readJson(request) }));
+    } else {
+      json(response, 405, { error: "Method not allowed." });
+    }
+    return;
+  }
   await handleAuthenticatedRequest(request, response, url, kernel, kernel.authenticateOwnerToken(token), options);
 }
 
 function handleRequestError(response: ServerResponse, error: unknown): void {
+  if (error instanceof CodingBenchmarkNotReadyError) {
+    json(response, 423, { error: "Coding benchmark is not cleared for execution.", code: error.code });
+    return;
+  }
   if (error instanceof PolicyDeniedError) {
     json(response, error.decision.code === "EMERGENCY_STOP" ? 423 : 403, {
       error: error.decision.reason,
