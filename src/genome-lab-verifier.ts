@@ -1,3 +1,4 @@
+import type { ExperimentalCompilerCache } from "./experimental-compiler-cache.ts";
 import * as ts from "typescript";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -50,7 +51,7 @@ function diagnosticSignal(diagnostic: ts.Diagnostic): CodingFailureSignal {
   });
 }
 
-function typeDiagnostics(candidate: ProgramCandidateProposal): ts.Diagnostic[] {
+function typeDiagnostics(candidate: ProgramCandidateProposal, cache?: ExperimentalCompilerCache): ts.Diagnostic[] {
   const files = new Map(candidate.files.map((file) => [`${VIRTUAL_ROOT}/${file.path}`, file.content]));
   const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,
@@ -61,7 +62,7 @@ function typeDiagnostics(candidate: ProgramCandidateProposal): ts.Diagnostic[] {
     noEmit: true,
     allowImportingTsExtensions: true,
   };
-  const base = ts.createCompilerHost(options);
+  const base = cache?.createHost(options) ?? ts.createCompilerHost(options);
   const host: ts.CompilerHost = {
     ...base,
     fileExists: (name) => files.has(name) || base.fileExists(name),
@@ -90,6 +91,7 @@ function programArtifactDigest(candidate: ProgramCandidateProposal): string {
 export async function verifyProgramCandidate(input: {
   candidate: ProgramCandidateProposal;
   behaviorCheck?: (candidate: ProgramCandidateProposal) => Promise<CodingFailureSignal[]>;
+  experimentalCompilerCache?: ExperimentalCompilerCache;
 }): Promise<ProgramVerificationResult> {
   const artifactDigest = programArtifactDigest(input.candidate);
   const failures: CodingFailureSignal[] = [];
@@ -105,7 +107,7 @@ export async function verifyProgramCandidate(input: {
   }
   const completedChecks: ProgramVerificationResult["completedChecks"] = ["source_policy", "syntax", "typecheck", "artifact_integrity"];
   if (!failures.some((failure) => failure.kind === "policy" || failure.kind === "security")) {
-    failures.push(...typeDiagnostics(input.candidate).map(diagnosticSignal));
+    failures.push(...typeDiagnostics(input.candidate, input.experimentalCompilerCache).map(diagnosticSignal));
   }
   if (input.behaviorCheck) {
     failures.push(...await input.behaviorCheck(structuredClone(input.candidate)));
@@ -137,6 +139,7 @@ export async function verifyGenomeLabProgramCandidate(input: {
   acceptanceCriteria: string[];
   constitutionDigest: string;
   maximumBudgetUsd?: number;
+  experimentalCompilerCache?: ExperimentalCompilerCache;
 }): Promise<ProgramVerificationResult> {
   // Missing modules cannot be created through the bounded existing-file repair contract.
   // Use the same structural validator as Genome Lab, without weakening its restrictions.
@@ -149,7 +152,7 @@ export async function verifyGenomeLabProgramCandidate(input: {
       failures: [failure], completedChecks: ["source_policy", "artifact_integrity"], evidenceDigests: [failure.evidenceDigest],
     };
   }
-  const initial = await verifyProgramCandidate({ candidate: input.candidate });
+  const initial = await verifyProgramCandidate({ candidate: input.candidate, experimentalCompilerCache: input.experimentalCompilerCache });
   if (initial.failures.length > 0) return initial;
   const root = await mkdtemp(join(tmpdir(), "sara-reparodynamic-verify-"));
   try {
@@ -170,6 +173,7 @@ export async function verifyGenomeLabProgramCandidate(input: {
       input.candidate,
       root,
       randomUUID(),
+      input.experimentalCompilerCache,
     );
     const completedChecks: ProgramVerificationResult["completedChecks"] = [
       "source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity",
