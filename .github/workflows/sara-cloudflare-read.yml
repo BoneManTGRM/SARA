@@ -1,0 +1,54 @@
+name: SARA report-delivery connection inspection
+on:
+  push:
+    branches: [experiment/v8-live-inventory-comparison]
+    paths: [.github/workflows/sara-cloudflare-read.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: github.repository == 'BoneManTGRM/SARA'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Read only SARA worker metadata and source
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          python3 - <<'PY'
+          import os,json,pathlib,urllib.request,urllib.error,hashlib,re
+          out=pathlib.Path('connection-evidence');out.mkdir()
+          root='https://api.cloudflare.com/client/v4/accounts/'+os.environ['CF_ACCOUNT']+'/workers/scripts'
+          def get(url):
+            try:
+              request=urllib.request.Request(url,headers={'Authorization':'Bearer '+os.environ['CF_TOKEN']})
+              with urllib.request.urlopen(request,timeout=30) as r:return r.status,r.read(2000001)
+            except urllib.error.HTTPError as e:return e.code,b''
+          status,body=get(root)
+          report={'scriptsHttpStatus':status,'workers':[],'writes':0,'messagesSent':0,'providerCalls':0}
+          if status==200:
+            values=json.loads(body).get('result',[])
+            matches=[x['id'] for x in values if re.search(r'sara|seed',x.get('id',''),re.I)]
+            report['matchedWorkers']=matches
+            for i,name in enumerate(matches[:3]):
+              item={'name':name}
+              s,b=get(root+'/'+urllib.parse.quote(name,safe='')+'/settings');item['settingsHttpStatus']=s
+              if s==200:item['bindings']=[{'name':v.get('name'),'type':v.get('type')} for v in json.loads(b).get('result',{}).get('bindings',[])]
+              s,b=get(root+'/'+urllib.parse.quote(name,safe=''));item['sourceHttpStatus']=s
+              if s==200 and len(b)<=2000000:
+                item['sourceSha256']=hashlib.sha256(b).hexdigest()
+                text=b.decode('utf8','replace')
+                text=re.sub(r'\b[0-9]{6,}:[A-Za-z0-9_-]{25,}\b','[REDACTED_BOT_TOKEN]',text)
+                text=re.sub(r'\bsk-[A-Za-z0-9_-]{20,}\b','[REDACTED_API_KEY]',text)
+                (out/('worker-'+str(i)+'.txt')).write_text(text)
+              report['workers'].append(item)
+          (out/'inspection.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-report-connection-${{ github.sha }}
+          path: connection-evidence
+          retention-days: 7
+          if-no-files-found: error
