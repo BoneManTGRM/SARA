@@ -1,0 +1,36 @@
+name: SARA PR consolidation source capture
+on:
+  push:
+    branches: [audit/pr-consolidation-source-20260905]
+    paths: [.github/workflows/pr-consolidation-source.yml]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1 && github.run_number == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 0103cf266f052b8f9c14c4123280560902a77aca
+          fetch-depth: 1
+      - name: Capture only the selected source histories without executing code
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --unshallow origin main:refs/capture/main experiment/reparodynamic-learning-v5:refs/capture/pr70 experiment/benchmark-rejection-replay-safety:refs/capture/pr90 experiment/v8-live-inventory-comparison:refs/capture/pr93
+          test "$(git rev-parse refs/capture/main)" = 0103cf266f052b8f9c14c4123280560902a77aca
+          test "$(git rev-parse refs/capture/pr70)" = e07fe3e3965a8fea6d43efb3767e01595a7cecc9
+          test "$(git rev-parse refs/capture/pr90)" = 23014289921e671f249ac62f598dbc831ceb6905
+          test "$(git rev-parse refs/capture/pr93)" = a59facdfbaf05f35d8a4e0c87c5758cb5c003d76
+          mkdir -p /tmp/sara-pr-source
+          git bundle create /tmp/sara-pr-source/sara-selected.bundle refs/capture/main refs/capture/pr70 refs/capture/pr90 refs/capture/pr93
+          git show-ref | grep refs/capture/ > /tmp/sara-pr-source/refs.txt
+          cd /tmp/sara-pr-source
+          sha256sum sara-selected.bundle > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-selected-pr-source
+          path: /tmp/sara-pr-source
+          if-no-files-found: error
+          retention-days: 14
