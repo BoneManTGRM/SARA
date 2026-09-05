@@ -1,0 +1,34 @@
+name: One-use authenticated benchmark connection proof
+on:
+  push:
+    branches: [verify/coding-benchmark-owner-relay-20260905]
+    paths:
+      - .github/workflows/coding-benchmark-owner-relay.yml
+      - scripts/probe-coding-benchmark-owner-relay.py
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  prove-connection-without-paid-execution:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Verify exact probe and exercise existing authenticated rejection path
+        env:
+          EXPECTED_RUNTIME: a8ef0213cd7d173772cc41e76d35b6df3d3cb09e
+          PYTHONOPTIMIZE: '0'
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo 'a3720c2e77a95c0004f73f6e51a1df829a5dd6b29ba3cdf6c31bf0bbc177689f  scripts/probe-coding-benchmark-owner-relay.py' | sha256sum -c -
+          python3 scripts/probe-coding-benchmark-owner-relay.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-authenticated-benchmark-connection-${{ github.run_id }}-1
+          path: /tmp/sara-relay-live-proof
+          if-no-files-found: error
+          retention-days: 7
