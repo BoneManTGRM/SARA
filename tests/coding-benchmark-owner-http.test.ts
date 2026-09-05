@@ -40,3 +40,25 @@ it("owner benchmark HTTP readiness cannot dispatch while exposure is unresolved"
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+it("benchmark owner routes also require the kernel's authenticated owner, not only server configuration", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "sara-benchmark-owner-mismatch-"));
+  const realToken = "kernel-owner-fixture";
+  const mismatchedToken = "server-only-owner-fixture";
+  const kernel = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: sha256(realToken) });
+  const server = createSaraServer(kernel, { ownerTokenSha256: sha256(mismatchedToken), stateDirectory: directory });
+  try {
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const headers = { authorization: `Bearer ${mismatchedToken}`, "content-type": "application/json" };
+    for (const [path, method] of [["/api/coding-benchmark/readiness", "GET"], ["/api/coding-benchmark/run", "POST"]]) {
+      const response = await fetch(base + path, { method, headers });
+      assert.equal(response.status, 403);
+      assert.equal((await response.json() as { code: string }).code, "OWNER_AUTHENTICATION_FAILED");
+    }
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

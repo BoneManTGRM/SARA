@@ -1152,8 +1152,9 @@ async function routeSaraRequest(
     return;
   }
   if (url.pathname === "/api/coding-benchmark/readiness" || url.pathname === "/api/coding-benchmark/run") {
-    // Both paths use the existing owner authentication above. Never put owner
-    // or model credentials in a response, URL, evidence file, or child solution.
+    // Preserve both existing authentication layers, even if server and kernel
+    // configuration disagree. Never expose credentials in response/evidence.
+    kernel.authenticateOwnerToken(token);
     const status = await kernel.getStatus();
     const environment = { ...process.env, SARA_OWNER_TOKEN: token, SARA_OWNER_TOKEN_SHA256: options.ownerTokenSha256 };
     const input = { environment, stateDirectory: options.stateDirectory,
