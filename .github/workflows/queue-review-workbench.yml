@@ -1,0 +1,37 @@
+name: SARA locked queue review workbench
+on:
+  push:
+    branches: [proof/pr-queue-audit-20260905]
+    paths: [.github/workflows/queue-review-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9f88a9e27cd01aae0935f785e903735a4d23566d
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - name: Preserve source objects and exact installed toolchain for offline review
+        run: |
+          mkdir -p review-workbench
+          git rev-parse HEAD > review-workbench/checkout.txt
+          git bundle create review-workbench/repository.bundle --all
+          cp package.json package-lock.json review-workbench/
+          tar -czf review-workbench/locked-node-modules.tar.gz node_modules
+          sha256sum review-workbench/repository.bundle review-workbench/locked-node-modules.tar.gz review-workbench/package-lock.json > review-workbench/SHA256SUMS
+          node -e 'console.log(JSON.stringify({node:process.version,typescript:require("typescript").version,tsx:require("tsx/package.json").version,providerCalls:0,applicationCodeExecuted:false}))' > review-workbench/toolchain.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-locked-review-${{ github.run_id }}
+          path: review-workbench
+          retention-days: 7
+          if-no-files-found: error
