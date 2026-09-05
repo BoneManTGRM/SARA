@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "experiment": "sara-exact-repair-reuse-01",
+  "reviewedSourceCommit": "2d1c5b19c33e5e07a3baeb8766a84e4d36a235de",
+  "contractDigest": "0ff775216187b4452ccd9ce74ad147f18fcf07d1ad899f4e40e9d556539f012c",
+  "model": "@cf/zai-org/glm-4.7-flash",
+  "reasoning": "medium",
+  "maximumPhysicalRequests": 6,
+  "maximumReservedCostUsd": 0.15,
+  "authorization": "The owner explicitly requested actual SARA execution, comparison against equally capable ordinary memory, and an evidence report. This is the disclosed Cloudflare-model reuse study, not a Luna rerun.",
+  "acceptedEngineeringRuns": [33945497888, 33945497846, 33945497917],
+  "sourceArchiveSha256": "39f78473392937afabb27115bf222dc05b1d71cd7e92a845d607f3c9350cbef2",
+  "oneShot": true,
+  "retainFailures": true,
+  "productionActivation": false,
+  "separateV8LunaGrantConsumedByThisAction": false
+}

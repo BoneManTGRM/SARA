@@ -1,0 +1,13 @@
+# Compiler-work reuse research
+
+This experiment is based on the observed PR93 head cc62a5c33428b28487c8e995b8754ec143756164. It does not mutate that branch or main. No paid call, deployment, promotion, verifier outcome cache, authority expansion or consumed-grant reuse is authorized by this experiment.
+
+A default-off typed option threads a bounded process-local cache through the two existing compiler hosts. It reuses parsed external node_modules declaration files after rereading and hashing bytes plus compiler version/options/parse context. Both original compiler passes, policy gates, behavioral subprocesses, integrity checks and independent final verification still execute. Candidate ASTs, diagnostics, PASS results and runtime state are not cached.
+
+SourceFile is a mutable compiler internal: this is pinned-toolchain research, not a general cross-version/custom-host API or a soundness proof. Limits bound source text (8 MiB/256 entries), not complete AST heap. Changed dependencies, compiler options, missing files and explicit fresh-source requests bypass or invalidate reuse. Candidate files never enter the cache. Keep disabled outside this reviewed experiment until broader differential stress testing and independent review.
+
+The first local repeated-parsing requirement was observed failing against a neutral no-cache implementation, then passed after implementation. Additional invalidation/security/parity/semantic tests are regression coverage, not claimed to have all been test-first. Local TypeScript 5.8.3 with an untracked transpilation loader was used because npm access was unavailable. The final GitHub workflow installs the committed dependency lock and repeats verification separately.
+
+The matched measurement alternates order across six original verifier fixtures, each correct and broken (12 pairs), then six repeated repairs using the actual captured V8 full-file artifact. Both repair arms have identical guarded memory, eligibility, source, mutation limits, 50 original assertions and 10 additional runtime-boundary assertions. Every repair performs three fresh original verifications. Learning/cache population is included separately; batch totals can include it. Neither arm generates new code through a model. Do not multiply any ratio by historical +109% or +40% results, or call it a general coding speedup.
+
+The bootstrap workflow applies the fixed reviewed integration patch only to this new research branch and refreshes experiment manifests before PR verification. The later source commit, not an unapplied patch, is the candidate tested. The manifest update gives a new experiment identity and does not reauthorize the old live launcher. All historical commits and their evidence remain intact.

@@ -1,0 +1,129 @@
+diff --git a/src/genome-lab-verifier.ts b/src/genome-lab-verifier.ts
+index 7192f8c..a6c5c2a 100644
+--- a/src/genome-lab-verifier.ts
++++ b/src/genome-lab-verifier.ts
+@@ -1,3 +1,4 @@
++import type { ExperimentalCompilerCache } from "./experimental-compiler-cache.ts";
+ import * as ts from "typescript";
+ import { randomUUID } from "node:crypto";
+ import { mkdtemp, rm } from "node:fs/promises";
+@@ -50,7 +51,7 @@ function diagnosticSignal(diagnostic: ts.Diagnostic): CodingFailureSignal {
+   });
+ }
+ 
+-function typeDiagnostics(candidate: ProgramCandidateProposal): ts.Diagnostic[] {
++function typeDiagnostics(candidate: ProgramCandidateProposal, cache?: ExperimentalCompilerCache): ts.Diagnostic[] {
+   const files = new Map(candidate.files.map((file) => [`${VIRTUAL_ROOT}/${file.path}`, file.content]));
+   const options: ts.CompilerOptions = {
+     target: ts.ScriptTarget.ES2022,
+@@ -61,7 +62,7 @@ function typeDiagnostics(candidate: ProgramCandidateProposal): ts.Diagnostic[] {
+     noEmit: true,
+     allowImportingTsExtensions: true,
+   };
+-  const base = ts.createCompilerHost(options);
++  const base = cache?.createHost(options) ?? ts.createCompilerHost(options);
+   const host: ts.CompilerHost = {
+     ...base,
+     fileExists: (name) => files.has(name) || base.fileExists(name),
+@@ -90,6 +91,7 @@ function programArtifactDigest(candidate: ProgramCandidateProposal): string {
+ export async function verifyProgramCandidate(input: {
+   candidate: ProgramCandidateProposal;
+   behaviorCheck?: (candidate: ProgramCandidateProposal) => Promise<CodingFailureSignal[]>;
++  experimentalCompilerCache?: ExperimentalCompilerCache;
+ }): Promise<ProgramVerificationResult> {
+   const artifactDigest = programArtifactDigest(input.candidate);
+   const failures: CodingFailureSignal[] = [];
+@@ -105,7 +107,7 @@ export async function verifyProgramCandidate(input: {
+   }
+   const completedChecks: ProgramVerificationResult["completedChecks"] = ["source_policy", "syntax", "typecheck", "artifact_integrity"];
+   if (!failures.some((failure) => failure.kind === "policy" || failure.kind === "security")) {
+-    failures.push(...typeDiagnostics(input.candidate).map(diagnosticSignal));
++    failures.push(...typeDiagnostics(input.candidate, input.experimentalCompilerCache).map(diagnosticSignal));
+   }
+   if (input.behaviorCheck) {
+     failures.push(...await input.behaviorCheck(structuredClone(input.candidate)));
+@@ -137,6 +139,7 @@ export async function verifyGenomeLabProgramCandidate(input: {
+   acceptanceCriteria: string[];
+   constitutionDigest: string;
+   maximumBudgetUsd?: number;
++  experimentalCompilerCache?: ExperimentalCompilerCache;
+ }): Promise<ProgramVerificationResult> {
+   // Missing modules cannot be created through the bounded existing-file repair contract.
+   // Use the same structural validator as Genome Lab, without weakening its restrictions.
+@@ -149,7 +152,7 @@ export async function verifyGenomeLabProgramCandidate(input: {
+       failures: [failure], completedChecks: ["source_policy", "artifact_integrity"], evidenceDigests: [failure.evidenceDigest],
+     };
+   }
+-  const initial = await verifyProgramCandidate({ candidate: input.candidate });
++  const initial = await verifyProgramCandidate({ candidate: input.candidate, experimentalCompilerCache: input.experimentalCompilerCache });
+   if (initial.failures.length > 0) return initial;
+   const root = await mkdtemp(join(tmpdir(), "sara-reparodynamic-verify-"));
+   try {
+@@ -170,6 +173,7 @@ export async function verifyGenomeLabProgramCandidate(input: {
+       input.candidate,
+       root,
+       randomUUID(),
++      input.experimentalCompilerCache,
+     );
+     const completedChecks: ProgramVerificationResult["completedChecks"] = [
+       "source_policy", "syntax", "typecheck", "behavior_tests", "artifact_integrity",
+diff --git a/src/genome-lab.ts b/src/genome-lab.ts
+index 76ffffb..f6ea3a4 100644
+--- a/src/genome-lab.ts
++++ b/src/genome-lab.ts
+@@ -1,3 +1,4 @@
++import type { ExperimentalCompilerCache } from "./experimental-compiler-cache.ts";
+ import { execFile } from "node:child_process";
+ import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+ import { dirname, join, posix } from "node:path";
+@@ -203,8 +204,8 @@ function verificationSource(proposal: SkillCandidateProposal): string {
+   ].join("\n");
+ }
+ 
+-function semanticDiagnostics(files: string[]): ts.Diagnostic[] {
+-  const program = ts.createProgram(files, {
++function semanticDiagnostics(files: string[], cache?: ExperimentalCompilerCache): ts.Diagnostic[] {
++  const options: ts.CompilerOptions = {
+     target: ts.ScriptTarget.ES2022,
+     module: ts.ModuleKind.ESNext,
+     moduleResolution: ts.ModuleResolutionKind.Bundler,
+@@ -212,7 +213,8 @@ function semanticDiagnostics(files: string[]): ts.Diagnostic[] {
+     skipLibCheck: true,
+     noEmit: true,
+     allowImportingTsExtensions: true,
+-  });
++  };
++  const program = ts.createProgram(files, options, cache?.createHost(options));
+   return ts.getPreEmitDiagnostics(program).filter(
+     (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+   );
+@@ -350,6 +352,7 @@ async function buildVerifiedProgramCandidate(
+   proposal: ProgramCandidateProposal,
+   genomeLabRoot: string,
+   candidateId: string,
++  experimentalCompilerCache?: ExperimentalCompilerCache,
+ ): Promise<GeneratedSkillCandidate> {
+   validateProgramCandidateStructure(proposal);
+   const allPaths = new Set(proposal.files.map((file) => file.path));
+@@ -383,7 +386,7 @@ async function buildVerifiedProgramCandidate(
+       runtimeFiles.push(runtimePath);
+       if (file.path.startsWith("tests/")) runtimeTests.push(runtimePath);
+     }
+-    const diagnostics = semanticDiagnostics(projectFiles);
++    const diagnostics = semanticDiagnostics(projectFiles, experimentalCompilerCache);
+     if (diagnostics.length > 0) {
+       throw new Error(`Generated program failed TypeScript verification with ${diagnostics.length} error(s).`);
+     }
+@@ -460,10 +463,11 @@ export async function buildVerifiedSkillCandidate(
+   proposal: CandidateProposal,
+   genomeLabRoot: string,
+   candidateId: string,
++  experimentalCompilerCache?: ExperimentalCompilerCache,
+ ): Promise<GeneratedSkillCandidate> {
+   if (!UUID_V4.test(candidateId)) throw new Error("Genome Lab candidate id must be a UUID v4.");
+   if (isProgramCandidate(proposal)) {
+-    return buildVerifiedProgramCandidate(handoff, proposal, genomeLabRoot, candidateId);
++    return buildVerifiedProgramCandidate(handoff, proposal, genomeLabRoot, candidateId, experimentalCompilerCache);
+   }
+   validateSkillCandidateProposal(proposal);
+   assertPureSkillSource(proposal.source);

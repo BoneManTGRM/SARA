@@ -1,0 +1,39 @@
+name: Repair reuse capability preflight
+on:
+  pull_request:
+    branches: [experiment/benchmark-rejection-replay-safety]
+    paths: [.github/workflows/reuse-capability-preflight.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/v8-live-inventory-comparison'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Record availability without exposing values or calling providers
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SARA_TELEGRAM_BOT_TOKEN: ${{ secrets.SARA_TELEGRAM_BOT_TOKEN }}
+          SARA_TELEGRAM_OWNER_CHAT_ID: ${{ secrets.SARA_TELEGRAM_OWNER_CHAT_ID }}
+          SARA_EXECUTOR_TOKEN: ${{ secrets.SARA_EXECUTOR_TOKEN }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, datetime
+          names = ['OPENAI_API_KEY','RAILWAY_TOKEN','CLOUDFLARE_API_TOKEN','CLOUDFLARE_ACCOUNT_ID','TELEGRAM_BOT_TOKEN','TELEGRAM_CHAT_ID','SARA_TELEGRAM_BOT_TOKEN','SARA_TELEGRAM_OWNER_CHAT_ID','SARA_EXECUTOR_TOKEN']
+          report = {'schemaVersion':1,'sourceSha':os.environ['SOURCE_SHA'],'timestamp':datetime.datetime.now(datetime.timezone.utc).isoformat(),'availability':{k:bool(os.environ.get(k,'').strip()) for k in names},'providerCalls':0,'messagesSent':0,'secretValuesDisclosed':False}
+          text=json.dumps(report,indent=2)
+          open('capability-preflight.json','w').write(text+'\n')
+          print(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repair-reuse-capability-${{ github.event.pull_request.head.sha }}
+          path: capability-preflight.json
+          if-no-files-found: error

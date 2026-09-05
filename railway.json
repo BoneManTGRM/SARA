@@ -1,0 +1,1 @@
+{"$schema":"https://railway.com/railway.schema.json","build":{"builder":"DOCKERFILE","dockerfilePath":"proof/Dockerfile.v8-comparison"},"deploy":{"startCommand":"node --import tsx proof/v8-railway-supervisor.ts --await-grant","restartPolicyType":"NEVER","numReplicas":1}}

@@ -1,0 +1,8 @@
+FROM node:22.16.0-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY . .
+RUN npm run typecheck && node --import tsx proof/live-v8-comparison.ts
+USER node
+CMD ["node","--import","tsx","proof/v8-railway-supervisor.ts","--await-grant"]
