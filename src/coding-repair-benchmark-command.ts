@@ -6,6 +6,7 @@ export type CodingBenchmarkCommandConfig = {
   acknowledgeLabOnly: true;
   benchmarkId: string;
   maximumSpendUsd: number;
+  maximumModelSpendUsdPerArm: number;
   currentCanaryPercent: number;
   caseCount: number;
   stateDirectory: string;
@@ -52,6 +53,25 @@ function parseMoney(value: string | undefined): number {
   return parsed;
 }
 
+function equalPerArmSpend(maximumSpendUsd: number, caseCount: number): number {
+  if (!Number.isFinite(maximumSpendUsd) || maximumSpendUsd <= 0) {
+    throw new Error("Benchmark maximum spend is malformed.");
+  }
+  if (!Number.isSafeInteger(caseCount) || caseCount < 1 || caseCount > 100) {
+    throw new Error("Benchmark case count is malformed.");
+  }
+  const perArm = maximumSpendUsd / (caseCount * 2);
+  if (perArm < 0.01 - 1e-12) {
+    throw new Error("The authorized total must reserve at least $0.01 for every benchmark arm.");
+  }
+  if (perArm > INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd + 1e-12) {
+    throw new Error(
+      `The authorized total would exceed the $${INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd.toFixed(2)} per-arm ceiling.`,
+    );
+  }
+  return perArm;
+}
+
 export function codingBenchmarkAuthorityDigest(
   input: CodingBenchmarkAuthorityInput,
 ): string {
@@ -70,6 +90,7 @@ export function codingBenchmarkAuthorityDigest(
   if (!Number.isInteger(input.caseCount) || input.caseCount < 1 || input.caseCount > 100) {
     throw new Error("Benchmark authority case count is malformed.");
   }
+  const maximumModelSpendUsdPerArm = equalPerArmSpend(input.maximumSpendUsd, input.caseCount);
   return sha256(canonicalJson({
     schemaVersion: 1,
     action: "run_live_reparodynamic_coding_benchmark",
@@ -77,9 +98,9 @@ export function codingBenchmarkAuthorityDigest(
     benchmarkId: input.benchmarkId.toLowerCase(),
     sourceRevision: input.sourceRevision.toLowerCase(),
     maximumSpendUsd: input.maximumSpendUsd,
+    maximumModelSpendUsdPerArm,
     currentCanaryPercent: input.currentCanaryPercent,
     caseCount: input.caseCount,
-    maximumModelSpendUsdPerArm: INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd,
   }));
 }
 
@@ -151,14 +172,7 @@ export function parseCodingBenchmarkCommand(input: {
     throw new Error("--current-canary-percent must be from 0 through 100.");
   }
   const maximumSpendUsd = parseMoney(values.get("--max-spend-usd"));
-  const minimumSpendUsd = Number((
-    caseCount * 2 * INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd
-  ).toFixed(2));
-  if (maximumSpendUsd < minimumSpendUsd) {
-    throw new Error(
-      `--max-spend-usd must be at least $${minimumSpendUsd.toFixed(2)} for ${caseCount} complete matched pairs.`,
-    );
-  }
+  const maximumModelSpendUsdPerArm = equalPerArmSpend(maximumSpendUsd, caseCount);
   const stateDirectory = values.get("--state-directory") ?? ".sara-state";
   if (!stateDirectory.trim() || stateDirectory.length > 1_024 || stateDirectory.includes("\0")) {
     throw new Error("--state-directory is malformed.");
@@ -198,6 +212,7 @@ export function parseCodingBenchmarkCommand(input: {
     acknowledgeLabOnly: true,
     benchmarkId,
     maximumSpendUsd,
+    maximumModelSpendUsdPerArm,
     currentCanaryPercent,
     caseCount,
     stateDirectory,
