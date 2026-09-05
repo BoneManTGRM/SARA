@@ -1,0 +1,39 @@
+name: Backlog offline recovery
+on:
+  push:
+    branches: [maintenance/backlog-recovery-20260905]
+    paths: [.github/workflows/backlog-offline-recovery.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - name: Export source objects and locked dependencies only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/offline"
+          git bundle create "$RUNNER_TEMP/offline/repository.bundle" --all
+          git show-ref > "$RUNNER_TEMP/offline/refs.txt"
+          git checkout --detach 6c1551b052f32c521cfb86e0e67c7c9f3c9d6847
+          npm ci --ignore-scripts
+          tar -czf "$RUNNER_TEMP/offline/dependencies.tar.gz" node_modules
+          cp package-lock.json "$RUNNER_TEMP/offline/package-lock.json"
+          node --version > "$RUNNER_TEMP/offline/node-version.txt"
+          cd "$RUNNER_TEMP/offline"
+          sha256sum repository.bundle dependencies.tar.gz package-lock.json > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-backlog-offline-recovery
+          path: ${{ runner.temp }}/offline/
+          if-no-files-found: error
+          retention-days: 7
