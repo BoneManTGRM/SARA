@@ -1,0 +1,85 @@
+name: SARA bounded fallback integration
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/reparodynamic-evidence-gates'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - name: Preserve evidence engine, protected source and histories
+        run: |
+          git merge-base --is-ancestor e804c3169419f363b472c0bbba0675f25569fe35 HEAD
+          git merge-base --is-ancestor e7446f76386aba31e6f46974fc76f7269cf11ed4 HEAD
+          git diff --exit-code e804c3169419f363b472c0bbba0675f25569fe35 HEAD -- src/main.ts src/server.ts src/kernel.ts src/policy.ts src/store.ts src/coding-repair-controller.ts src/coding-repair-policy.ts src/coding-repair-benchmark.ts src/coding-repair-benchmark-store.ts src/coding-repair-receipt-store.ts src/revenue-pilot-testing-runtime.ts package.json package-lock.json constitution scripts/start-runtime.ts
+          git diff --check e804c3169419f363b472c0bbba0675f25569fe35 HEAD
+      - name: Full locked verification
+        run: |
+          set +e
+          npm run verify > verification.log 2>&1
+          code=$?
+          printf '%s\n' "$code" > verification-exit.txt
+          exit "$code"
+      - name: Repeat fallback and kernel boundaries
+        run: |
+          node --import tsx --test tests/reparodynamic-fallback.test.ts tests/reparodynamic-candidate-generator.test.ts > fallback-repeat.log 2>&1
+      - name: Existing V7 scripted cases
+        run: node --import tsx proof/reparodynamic-first-edits-v7.ts > v7-proof.jsonl 2>&1
+      - name: Repeat HTTP boundaries
+        run: npm run proof:http > http-repeat.log 2>&1
+      - name: Archive immutable source and evidence
+        if: always()
+        run: |
+          git rev-parse HEAD > commit.txt
+          git rev-parse HEAD^{tree} > tree.txt
+          git archive --format=tar.gz HEAD > source.tar.gz
+          sha256sum source.tar.gz > source.sha256
+          node --version > node-version.txt
+          npm ls --depth=0 > dependency-versions.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bounded-fallback-${{ github.event.pull_request.head.sha }}
+          path: |
+            verification.log
+            verification-exit.txt
+            fallback-repeat.log
+            v7-proof.jsonl
+            http-repeat.log
+            commit.txt
+            tree.txt
+            source.tar.gz
+            source.sha256
+            node-version.txt
+            dependency-versions.txt
+          if-no-files-found: error
+  security:
+    name: Exact-head fallback CodeQL
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/reparodynamic-evidence-gates'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: javascript-typescript
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
