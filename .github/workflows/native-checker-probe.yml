@@ -1,0 +1,45 @@
+name: SARA isolated native checker probe
+on:
+  push:
+    branches: [proof/native-checker-probe-20260905]
+    paths: [.github/workflows/native-checker-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - name: Install the fixed comparison tool outside the repository
+        run: |
+          mkdir -p native-checker-evidence
+          npm install --prefix /tmp/sara-native-probe --ignore-scripts --no-audit --no-fund --save-exact typescript@7.0.2 > native-checker-evidence/native-install.log 2>&1
+          cp /tmp/sara-native-probe/package-lock.json native-checker-evidence/native-package-lock.json
+      - name: Compare type-checker outcomes and timings without model calls
+        env:
+          SARA_RESEARCH_SOURCE_SHA: ${{ github.sha }}
+          SARA_NATIVE_ROOT: /tmp/sara-native-probe/node_modules/typescript
+        run: node --import tsx proof/native-checker-probe.mjs > native-checker-evidence/execution.log 2>&1
+      - name: Preserve exact source and incomplete evidence too
+        if: always()
+        run: |
+          mkdir -p native-checker-evidence
+          git rev-parse HEAD > native-checker-evidence/commit.txt
+          git diff --exit-code -- package.json package-lock.json src/
+          git archive --format=tar.gz HEAD > native-checker-evidence/source.tar.gz
+          sha256sum native-checker-evidence/source.tar.gz > native-checker-evidence/source.sha256
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-native-checker-${{ github.sha }}
+          path: native-checker-evidence
+          if-no-files-found: error
