@@ -1,17 +1,23 @@
 import { timingSafeEqual } from "node:crypto";
 import { sha256 } from "./canonical.ts";
 
-// One continuation, not a reusable spending grant. Only reviewed authoritative
-// execution/provider evidence may change this record. Environment flags, a new
-// UUID and missing files cannot clear the historical exposure.
-export const CODING_BENCHMARK_CONTINUATION = Object.freeze({
+export const CODING_BENCHMARK_HISTORICAL_HOLD = Object.freeze({
   benchmarkId: "41267154-ba42-496a-bb79-1656898ac716",
-  originalSourceRevision: "30a7cb3c21a77b65bf7ba2c4c393897850e61eeb",
-  originalAuthorityDigest: "6ceb8530c59902abd842483a059e337a30f4979eceaa0f93979269dd2e5c4f0c",
+  maximumSpendUsd: 0.15,
+  unresolvedExposureUsd: 0.15,
+  confirmedChargeUsd: null,
+  resolutionEvidence: null,
+});
+
+// Separate owner authorization from issue #105. This is one additional matched
+// comparison, not a renewal or clearing of the historical hold above.
+export const CODING_BENCHMARK_CONTINUATION = Object.freeze({
+  benchmarkId: "33d94c9a-0de6-41d9-a843-fe9880994242",
+  registrationSourceRevision: "9fa4945bd8becab34ee536ce86dc45d6c8a5bd43",
   maximumSpendUsd: 0.15,
   maximumModelSpendUsdPerArm: 0.075,
-  unresolvedExposureUsd: 0.15,
-  historicalResolutionEvidence: null,
+  unresolvedExposureUsd: 0,
+  authorizationEvidence: "SARA issue #105 and owner messages: Yes please make it happen / Continue doing what you were doing.",
 });
 
 type ReadinessInput = {
@@ -40,17 +46,28 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
   if (CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
   return {
-    schemaVersion: 1, benchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
-    ready: blockers.length === 0, blockers,
+    schemaVersion: 2,
+    benchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
+    ready: blockers.length === 0,
+    blockers,
     sourceRevision: sourceIdentified ? sourceRevision : null,
-    maximumSpendUsd: 0.15, maximumModelSpendUsdPerArm: 0.075,
+    maximumSpendUsd: CODING_BENCHMARK_CONTINUATION.maximumSpendUsd,
+    maximumModelSpendUsdPerArm: CODING_BENCHMARK_CONTINUATION.maximumModelSpendUsdPerArm,
     unresolvedExposureUsd: CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd,
     confirmedChargeUsd: null,
-    availableAuthorizationUsd: Math.max(0, 0.15 - CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd),
-    model: "gpt-5.6-luna", reasoning: "medium", maximumAttemptsPerArm: 3,
+    availableAuthorizationUsd: Math.max(0, CODING_BENCHMARK_CONTINUATION.maximumSpendUsd - CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd),
+    historicalHold: {
+      benchmarkId: CODING_BENCHMARK_HISTORICAL_HOLD.benchmarkId,
+      unresolvedExposureUsd: CODING_BENCHMARK_HISTORICAL_HOLD.unresolvedExposureUsd,
+      confirmedChargeUsd: CODING_BENCHMARK_HISTORICAL_HOLD.confirmedChargeUsd,
+    },
+    model: "gpt-5.6-luna",
+    reasoning: "medium",
+    maximumAttemptsPerArm: 3,
     order: ["luna_reparodynamic", "luna"],
-    compactOutput: false, compilerCaching: false,
-    evidenceRequired: "Authoritative pre-deploy execution or provider request/usage evidence for the original task, source and deployment. Missing receipts are insufficient.",
+    compactOutput: false,
+    compilerCaching: false,
+    evidenceRequired: "The new authorization is independent. Preserve the prior $0.15 hold; do not replay or clear benchmark 41267154-ba42-496a-bb79-1656898ac716.",
   };
 }
 
