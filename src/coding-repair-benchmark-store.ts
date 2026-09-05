@@ -4,6 +4,7 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import {
   assertCodingBenchmarkSummaryProof,
   codingBenchmarkPairDigest,
+  evaluateCodingBenchmarkPromotion,
   summarizeCodingBenchmark,
   type CodingBenchmarkArmResult,
   type CodingBenchmarkBindings,
@@ -385,6 +386,9 @@ export async function persistCodingBenchmarkEvidenceSnapshot(input: {
     stateDirectory: input.stateDirectory,
     benchmarkId: input.summary.benchmarkId,
   });
+  if (progress.pairs.length !== progress.manifest.caseIds.length) {
+    throw new Error("An evidence snapshot requires the entire frozen benchmark corpus.");
+  }
   if (input.decision.proofDigest !== input.summary.proofDigest) {
     throw new Error("Benchmark decision is not bound to its summary proof.");
   }
@@ -401,6 +405,11 @@ export async function persistCodingBenchmarkEvidenceSnapshot(input: {
     throw new Error("Benchmark summary must include every currently persisted complete pair.");
   }
   assertCodingBenchmarkSummaryProof(input.summary, progress.pairs);
+  const expectedDecision = evaluateCodingBenchmarkPromotion({summary: input.summary,
+    currentCanaryPercent: progress.manifest.currentCanaryPercent});
+  if (canonicalJson(input.decision) !== canonicalJson(expectedDecision)) {
+    throw new Error("Benchmark decision does not match the deterministic recommendation.");
+  }
   const snapshot: CodingBenchmarkEvidenceSnapshot = {
     schemaVersion: 1,
     benchmarkId: input.summary.benchmarkId,
@@ -435,6 +444,9 @@ function assertSnapshot(input: {
   pairByDigest: Map<string, CodingBenchmarkPairReceipt>;
 }): void {
   const { snapshot, filename, manifest, pairByDigest } = input;
+  if (snapshot.summary.pairCount !== manifest.caseIds.length || snapshot.pairDigests.length !== manifest.caseIds.length) {
+    throw new Error("An evidence snapshot requires the entire frozen benchmark corpus.");
+  }
   if (
     snapshot.schemaVersion !== 1
     || snapshot.benchmarkId !== manifest.benchmarkId
@@ -458,6 +470,11 @@ function assertSnapshot(input: {
     return pair;
   });
   assertCodingBenchmarkSummaryProof(snapshot.summary, pairs);
+  const expectedDecision = evaluateCodingBenchmarkPromotion({summary: snapshot.summary,
+    currentCanaryPercent: manifest.currentCanaryPercent});
+  if (canonicalJson(snapshot.decision) !== canonicalJson(expectedDecision)) {
+    throw new Error("Persisted decision does not match the deterministic recommendation.");
+  }
 }
 
 export async function loadCodingBenchmarkProgress(input: {

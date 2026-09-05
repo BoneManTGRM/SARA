@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { canonicalJson, sha256 } from "../src/canonical.ts";
 import {
   evaluateCodingBenchmarkPromotion,
   summarizeCodingBenchmark,
@@ -244,4 +245,33 @@ describe("coding benchmark evidence store", () => {
       await rm(stateDirectory, { recursive: true, force: true });
     }
   });
+});
+
+
+it("rejects a caller-forged expansion decision even when its summary digest matches", async () => {
+  const stateDirectory = await temporaryState();
+  try {
+    await initializeCodingBenchmarkStore({stateDirectory, manifest});
+    await persistBothArms(stateDirectory);
+    await persistCodingBenchmarkPairReceipt({stateDirectory, pair: pair()});
+    const summary = summarizeCodingBenchmark({pairs: [pair()], bootstrapSamples: 500});
+    const decision = evaluateCodingBenchmarkPromotion({summary, currentCanaryPercent: 5});
+    await assert.rejects(persistCodingBenchmarkEvidenceSnapshot({stateDirectory, summary,
+      decision: {...decision, action: "promote_default", recommendedCanaryPercent: 100}}), /deterministic recommendation/);
+  } finally { await rm(stateDirectory, {recursive:true, force:true}); }
+});
+
+it("rejects a legacy partial snapshot on reload even with consistent content hashes", async () => {
+  const stateDirectory = await temporaryState();
+  try {
+    await initializeCodingBenchmarkStore({stateDirectory, manifest: {...manifest, caseIds: ["case-001", "case-002"]}});
+    await persistBothArms(stateDirectory);
+    await persistCodingBenchmarkPairReceipt({stateDirectory, pair: pair()});
+    const summary = summarizeCodingBenchmark({pairs:[pair()], bootstrapSamples:500});
+    const decision = evaluateCodingBenchmarkPromotion({summary, currentCanaryPercent:5});
+    const payload = {schemaVersion:1,benchmarkId,pairDigests:[sha256(canonicalJson(pair()))],summary,decision};
+    const envelope = {schemaVersion:1,kind:"snapshot",payload,payloadDigest:sha256(canonicalJson(payload))};
+    await writeFile(join(stateDirectory,"coding-repair-benchmarks",benchmarkId,"snapshots",summary.proofDigest+".json"),JSON.stringify(envelope));
+    await assert.rejects(loadCodingBenchmarkProgress({stateDirectory,benchmarkId}), /entire frozen benchmark corpus/);
+  } finally { await rm(stateDirectory,{recursive:true,force:true}); }
 });

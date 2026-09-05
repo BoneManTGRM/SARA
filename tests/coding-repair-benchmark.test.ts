@@ -107,12 +107,14 @@ describe("matched Reparodynamic coding benchmark", () => {
   it("measures a supported success lift and opens only the next canary stage", () => {
     const pairs = Array.from({ length: 30 }, (_, index) => materialPair({
       index: index + 1,
-      normalSuccess: index < 6,
-      reparodynamicSuccess: index < 12,
+      // Keep the original +20-point lift, now satisfying the required 80% floor.
+      normalSuccess: index < 18,
+      reparodynamicSuccess: index < 24,
     }));
     const summary = summarizeCodingBenchmark({ pairs, bootstrapSamples: 4_000 });
     assert.equal(summary.evidenceLevel, "MEASURED");
     assert.equal(summary.paired.verifiedSuccessDelta, 0.2);
+    assert.equal(summary.reparodynamic.verifiedSuccessRate, 0.8);
     assert.ok(summary.paired.verifiedSuccessDelta95.lower > 0);
 
     const decision = evaluateCodingBenchmarkPromotion({ summary, currentCanaryPercent: 5 });
@@ -219,4 +221,20 @@ describe("matched Reparodynamic coding benchmark", () => {
     assert.equal(decision.recommendedCanaryPercent, 0);
     assert.ok(decision.reasonCodes.includes("critical_regression_increase"));
   });
+});
+
+
+it("rejects non-boolean completion and regression flags instead of counting truthiness", () => {
+  for (const field of ["verifiedComplete", "regression", "criticalRegression"] as const) {
+    const p = pair({index:1,normalSuccess:true,reparodynamicSuccess:true});
+    (p.reparodynamic as unknown as Record<string,unknown>)[field] = "yes";
+    assert.throws(()=>summarizeCodingBenchmark({pairs:[p],bootstrapSamples:500}), /boolean/);
+  }
+});
+
+it("retains positive sub-micro costs in aggregate evidence", () => {
+  const p=pair({index:1,normalSuccess:true,reparodynamicSuccess:true,normalCostUsd:0.0000004,reparodynamicCostUsd:0.0000002});
+  const summary=summarizeCodingBenchmark({pairs:[p],bootstrapSamples:500});
+  assert.equal(summary.normal.totalAccountedCostUsd,0.0000004);
+  assert.equal(summary.reparodynamic.totalAccountedCostUsd,0.0000002);
 });

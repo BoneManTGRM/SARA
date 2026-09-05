@@ -146,6 +146,9 @@ function assertCount(value: number, field: string): void {
 }
 
 function assertArm(arm: CodingBenchmarkArmResult, method: CodingBenchmarkMethod): void {
+  if ([arm.verifiedComplete, arm.regression, arm.criticalRegression].some(value => typeof value !== "boolean")) {
+    throw new Error("Benchmark completion and regression flags must be boolean.");
+  }
   if (arm.method !== method) throw new Error(`Benchmark arm method must be ${method}.`);
   if (!Number.isFinite(arm.finalScore) || arm.finalScore < 0 || arm.finalScore > 1) {
     throw new Error("Benchmark final score must be within 0 and 1.");
@@ -207,7 +210,7 @@ function sumNullable(values: readonly (number | null)[]): { total: number | null
   const known = values.filter((value): value is number => value !== null);
   return {
     total: known.length === values.length
-      ? rounded(known.reduce((total, value) => total + value, 0))
+      ? known.reduce((total, value) => total + value, 0)
       : null,
     known: known.length,
   };
@@ -525,6 +528,16 @@ export function evaluateCodingBenchmarkPromotion(input: {
       reasonCodes: ["no_supported_major_benefit"],
     };
   }
+  // Relative speed cannot justify promoting unsuccessful or regressing work.
+  if (summary.reparodynamic.verifiedSuccessRate < 0.8) {
+    return {...base, action: "hold", recommendedCanaryPercent: input.currentCanaryPercent,
+      reasonCodes: ["verified_quality_floor_not_met"]};
+  }
+  if (summary.reparodynamic.regressions > summary.normal.regressions) {
+    return {...base, action: "hold", recommendedCanaryPercent: input.currentCanaryPercent,
+      reasonCodes: ["noncritical_regression_increase"]};
+  }
+
   const benefitReasons = [
     ...(verifiedSuccessGainSupported ? ["verified_success_gain_supported"] : []),
     ...(timeReductionSupported ? ["equivalent_success_time_reduction_supported"] : []),
