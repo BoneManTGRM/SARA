@@ -1,3 +1,4 @@
+import { CodingRepairRejectedAttemptError } from "./coding-repair-rejection.ts";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { assertReceiptChain, digestCodingRepairProposal } from "./coding-repair-artifacts.ts";
 import {
@@ -181,26 +182,38 @@ export async function runCodingRepairController(input: {
       remainingCostUsd: decision.remainingCostUsd,
       attemptLessons: structuredClone(attemptLessons),
     });
-    if (
-      !Number.isFinite(response.accountedCostUsd) ||
-      response.accountedCostUsd < 0 ||
-      response.accountedCostUsd > decision.remainingCostUsd
-    ) {
-      throw new Error("Coding repair model exceeded or malformed its accounted cost.");
-    }
-    accountedCostUsd += response.accountedCostUsd;
-    validateCodingRepairProposal({
-      proposal: response.proposal,
-      candidate: champion,
-      artifactDigest: verification.artifactDigest,
-      failureFingerprints: new Set(verification.failures.map((failure) => failure.fingerprint)),
-      limits,
-      expectedStrategy: modelStrategy,
-    });
-    const applied = applyProposal(champion, response.proposal);
-    const lineLimit = modelStrategy === "surgical" ? limits.surgicalChangedLines : limits.deepChangedLines;
-    if (applied.changedLines > lineLimit) {
-      throw new Error("Coding repair proposal exceeds its changed-line limit.");
+    let applied: ReturnType<typeof applyProposal>;
+    try {
+      if (
+        !Number.isFinite(response.accountedCostUsd) ||
+        response.accountedCostUsd < 0 ||
+        response.accountedCostUsd > decision.remainingCostUsd
+      ) {
+        throw new Error("Coding repair model exceeded or malformed its accounted cost.");
+      }
+      accountedCostUsd += response.accountedCostUsd;
+      validateCodingRepairProposal({
+        proposal: response.proposal,
+        candidate: champion,
+        artifactDigest: verification.artifactDigest,
+        failureFingerprints: new Set(verification.failures.map((failure) => failure.fingerprint)),
+        limits,
+        expectedStrategy: modelStrategy,
+      });
+      applied = applyProposal(champion, response.proposal);
+      const lineLimit = modelStrategy === "surgical" ? limits.surgicalChangedLines : limits.deepChangedLines;
+      if (applied.changedLines > lineLimit) {
+        throw new Error("Coding repair proposal exceeds its changed-line limit.");
+      }
+    } catch (error) {
+      let rejectedProposalDigest: string | null = null;
+      try { rejectedProposalDigest = digestCodingRepairProposal(response.proposal); } catch { /* Malformed proposal has no canonical digest. */ }
+      throw new CodingRepairRejectedAttemptError({
+        error, cycle, retainedArtifactDigest: verification.artifactDigest,
+        proposalDigest: rejectedProposalDigest,
+        inputTokens: response.inputTokens, outputTokens: response.outputTokens,
+        accountedCostUsd: response.accountedCostUsd, knownRunSpendUsd: accountedCostUsd,
+      });
     }
 
     const proposalDigest = digestCodingRepairProposal(response.proposal);
