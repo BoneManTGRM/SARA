@@ -1,0 +1,56 @@
+name: SARA owner testing integration
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feature/no-price-testing-owner-api'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+      - run: npm ci --ignore-scripts
+      - name: Preserve production authority and original ancestry
+        run: |
+          git diff --exit-code 6c1551b052f32c521cfb86e0e67c7c9f3c9d6847 HEAD -- src/main.ts src/server.ts src/kernel.ts src/store.ts src/policy.ts src/coding-repair-controller.ts src/coding-repair-policy.ts scripts/start-runtime.ts constitution package-lock.json
+          git merge-base --is-ancestor 6c1551b052f32c521cfb86e0e67c7c9f3c9d6847 HEAD
+          git merge-base --is-ancestor 16769424c89d69520a486a69f17bc6ce74f7ed19 HEAD
+      - name: Complete locked verification
+        run: |
+          set +e
+          npm run verify > verification.log 2>&1
+          code=$?
+          printf '%s\n' "$code" > verification-exit.txt
+          exit "$code"
+      - name: Repeated crash and HTTP boundaries
+        run: node --import tsx --test tests/revenue-pilot-testing-crash.test.ts tests/revenue-pilot-testing-http.test.ts tests/revenue-pilot-testing-execution-http.test.ts > crash-http-repeat.log 2>&1
+      - name: Archive exact source and execution records
+        if: always()
+        run: |
+          git rev-parse HEAD HEAD^{tree} > source-identity.txt
+          git archive --format=tar.gz HEAD > source.tar.gz
+          sha256sum source.tar.gz > source.sha256
+          node --version > toolchain.txt
+          npm ls --depth=0 >> toolchain.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: owner-testing-${{ github.event.pull_request.head.sha }}
+          path: |
+            verification.log
+            verification-exit.txt
+            crash-http-repeat.log
+            source-identity.txt
+            source.tar.gz
+            source.sha256
+            toolchain.txt
+          if-no-files-found: error

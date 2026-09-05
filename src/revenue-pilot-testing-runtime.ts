@@ -133,7 +133,16 @@ function currentMonthCost(jobs: readonly RevenuePilotTestingJob[], now: Date): n
   const total = jobs.flatMap((job) => job.receipts)
     .filter((receipt) => receipt.completedAt.startsWith(prefix))
     .reduce((sum, receipt) => sum + receipt.costUsd, 0);
-  return Math.ceil(total * 1_000_000) / 1_000_000;
+  // A lease records a possibly dispatched request, not permission to retry after
+  // its deadline. Hold the pinned role ceiling until a durable receipt reconciles
+  // that request, including when the original claim belongs to an older month.
+  const unresolved = jobs.reduce((sum, job) => {
+    if (!job.activeLease) return sum;
+    const profile = ROLE_PROFILES[job.activeLease.role];
+    if (!profile) throw new Error("Unrecognized unresolved testing role.");
+    return sum + profile.maximumTaskCostUsd;
+  }, 0);
+  return Math.ceil((total + unresolved) * 1_000_000) / 1_000_000;
 }
 
 function roleInstruction(role: RevenuePilotLease["role"]): string {
@@ -639,6 +648,11 @@ export class RevenuePilotTestingRuntime {
           role,
         });
 
+        if (job.activeLease && (job.activeLease.workerId !== profile.workerId || !pending)) {
+          throw new RevenuePilotTestingConflictError(
+            "The testing role has unresolved execution. A durable matching artifact or explicit reconciliation is required; lease expiry does not authorize redispatch.",
+          );
+        }
         if (job.activeLease && Date.parse(job.activeLease.expiresAt) > now.getTime()) {
           if (job.activeLease.workerId !== profile.workerId || !pending) {
             throw new RevenuePilotTestingConflictError("The testing role is already active without a recoverable private artifact.");

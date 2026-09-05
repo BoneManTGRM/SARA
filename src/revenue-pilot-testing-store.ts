@@ -83,6 +83,26 @@ export function assertRevenuePilotTestingJobIntegrity(
   ) {
     throw new Error("Testing job integrity check failed: invalid execution cost.");
   }
+  const roles = new Set(["work_director", "specialist_worker", "independent_verifier", "delivery_operator"]);
+  if (value.activeLease !== null) {
+    const lease = value.activeLease;
+    if (!isRecord(lease) || typeof lease.id !== "string" || !SAFE_ID.test(lease.id) ||
+        typeof lease.workerId !== "string" || !SAFE_ID.test(lease.workerId) ||
+        typeof lease.role !== "string" || !roles.has(lease.role) || lease.role !== value.nextRole ||
+        !hasValidTimestamp(lease.claimedAt) || !hasValidTimestamp(lease.expiresAt) ||
+        Date.parse(lease.expiresAt) <= Date.parse(lease.claimedAt) || value.status !== "running") {
+      throw new Error("Testing job integrity check failed: invalid unresolved lease.");
+    }
+  } else if (value.status === "running") {
+    throw new Error("Testing job integrity check failed: running job has no durable lease.");
+  }
+  for (const receipt of value.receipts) {
+    if (!isRecord(receipt) || typeof receipt.role !== "string" || !roles.has(receipt.role) ||
+        typeof receipt.costUsd !== "number" || !Number.isFinite(receipt.costUsd) || receipt.costUsd < 0 ||
+        !hasValidTimestamp(receipt.completedAt)) {
+      throw new Error("Testing job integrity check failed: invalid accounted receipt.");
+    }
+  }
   if (!hasValidTimestamp(value.createdAt) || !hasValidTimestamp(value.updatedAt)) {
     throw new Error("Testing job integrity check failed: invalid timestamps.");
   }
@@ -134,6 +154,12 @@ export async function persistRevenuePilotTestingJob(input: {
   }
   try {
     await rename(temporary, destination);
+    // Dispatch follows this method. Persist the directory entry as well as file
+    // bytes so a returned durable claim is not only a rename in volatile metadata.
+    for (const parent of [directory, input.stateDirectory]) {
+      const directoryHandle = await open(parent, "r");
+      try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+    }
   } catch (error) {
     await rm(temporary, { force: true });
     throw error;

@@ -29,18 +29,23 @@
   "scripts": {
     "test": "node --import tsx --test tests/*.test.ts",
     "demo": "node --import tsx cli.ts",
-    "start": "node --import tsx src/main.ts",
+    "start": "node --import tsx scripts/start-runtime.ts",
     "proof:bootstrap": "node --import tsx proof/bootstrap.ts",
     "proof:self-build": "node --import tsx proof/self-build.ts",
     "proof:revenue-pilot": "node --import tsx proof/revenue-pilot.ts",
     "proof:reparodynamic-coding": "node --import tsx proof/reparodynamic-coding.ts",
+    "proof:reparodynamic-learning-v3": "node --import tsx proof/reparodynamic-learning-v3.ts",
     "benchmark:coding:offline": "node --import tsx proof/reparodynamic-coding.ts",
     "benchmark:coding:live": "node --import tsx scripts/benchmark-reparodynamic-coding.ts --live",
     "proof:http": "node --import tsx --test tests/http.test.ts",
     "executor:site": "node --import tsx scripts/site-directive-executor.ts",
     "executor:cloudflare": "node --import tsx scripts/cloudflare-objective-executor.ts",
     "typecheck": "tsc --noEmit",
-    "verify": "npm test && npm run typecheck && npm run demo && npm run proof:bootstrap && npm run proof:self-build && npm run proof:revenue-pilot && npm run proof:reparodynamic-coding && npm run proof:http"
+    "verify": "npm test && npm run typecheck && npm run demo && npm run proof:bootstrap && npm run proof:self-build && npm run proof:revenue-pilot && npm run proof:reparodynamic-coding && npm run proof:reparodynamic-learning-v3 && npm run proof:coding-benchmark && npm run proof:http && npm run proof:reparodynamic-efficiency-v6",
+    "proof:reparodynamic-efficiency-v6": "node --import tsx proof/reparodynamic-efficiency-v6.ts",
+    "proof:reparodynamic-first-edits-v7": "node --import tsx proof/reparodynamic-first-edits-v7.ts",
+    "proof:coding-benchmark": "node --import tsx proof/coding-repair-benchmark.ts",
+    "benchmark:coding:evidence:live": "node --import tsx scripts/benchmark-matched-coding-evidence.ts --live"
   },
   "engines": {
     "node": ">=22"
