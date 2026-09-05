@@ -1,4 +1,4 @@
-name: Benchmark safety exact-head proof
+name: V7 live comparison preflight
 on:
   pull_request:
     branches: [experiment/reparodynamic-first-edits-v7]
@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   verify:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/benchmark-rejection-replay-safety'
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/v7-live-first-comparison'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -20,31 +20,19 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run verify > verification.log 2>&1
       - run: node --import tsx proof/live-v7-comparison.ts --self-test > self-test.log
-      - run: node --import tsx proof/live-v7-comparison.ts --self-test --all-wrong > all-wrong.log
+      - run: node --import tsx proof/live-v7-comparison.ts --self-test --all-wrong > failure-self-test.log
       - run: npm run proof:http > http-repeat.log 2>&1
-      - run: node --import tsx scripts/launch-supervised-benchmark.ts --mode plan > supervision-contract.json
-      - name: Preserve exact-head source
-        if: always()
-        run: |
-          git rev-parse HEAD > commit.txt
-          git archive --format=tar.gz HEAD > source.tar.gz
-          sha256sum source.tar.gz > source.sha256
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: benchmark-safety-${{ github.event.pull_request.head.sha }}
+          name: v7-live-preflight-${{ github.event.pull_request.head.sha }}
           path: |
             verification.log
             self-test.log
-            all-wrong.log
+            failure-self-test.log
             http-repeat.log
-            supervision-contract.json
-            commit.txt
-            source.tar.gz
-            source.sha256
-          if-no-files-found: error
   security:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/benchmark-rejection-replay-safety'
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'experiment/v7-live-first-comparison'
     name: Exact-head CodeQL
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -15,8 +15,16 @@ const REASONS = new Map<string, string>([
   ["Coding repair proposal exceeds its changed-line limit.", "CHANGED_LINE_LIMIT"],
   ["Coding repair model exceeded or malformed its accounted cost.", "MODEL_COST_INVALID"],
 ]);
+function safeMessage(error: unknown): string | null {
+  try {
+    if (!(error instanceof Error)) return null;
+    const descriptor = Object.getOwnPropertyDescriptor(error, "message");
+    return descriptor && "value" in descriptor && typeof descriptor.value === "string" && descriptor.value.length <= 500 ? descriptor.value : null;
+  } catch { return null; }
+}
 export function classifyCodingRepairRejection(error: unknown): string {
-  return error instanceof Error ? REASONS.get(error.message) ?? "UNKNOWN_REJECTION" : "UNKNOWN_REJECTION";
+  const message = safeMessage(error);
+  return message === null ? "UNKNOWN_REJECTION" : REASONS.get(message) ?? "UNKNOWN_REJECTION";
 }
 function counter(value: unknown): number | null {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
@@ -46,8 +54,8 @@ export function buildCodingRepairRejectionEvidence(input: {
 export class CodingRepairRejectedAttemptError extends Error {
   readonly evidence: ReturnType<typeof buildCodingRepairRejectionEvidence>;
   constructor(input: Parameters<typeof buildCodingRepairRejectionEvidence>[0]) {
-    const recognized = input.error instanceof Error && REASONS.has(input.error.message);
-    super(recognized ? (input.error as Error).message : "Coding repair proposal rejected at the controller boundary.");
+    const message = safeMessage(input.error);
+    super(message !== null && REASONS.has(message) ? message : "Coding repair proposal rejected at the controller boundary.");
     this.evidence = Object.freeze(buildCodingRepairRejectionEvidence(input));
     // Legacy benchmark catch blocks recorded only Error.name. Keep the code there too.
     this.name = `CodingRepairRejectedAttemptError:${this.evidence.reasonCode}`;
