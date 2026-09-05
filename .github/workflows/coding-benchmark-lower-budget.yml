@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   verify:
-    if: github.head_ref == 'fix/live-benchmark-equal-arm-budget'
+    if: github.head_ref == 'fix/live-benchmark-equal-arm-budget' || github.head_ref == 'benchmark/live-hidden-task-final'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -56,7 +56,7 @@ jobs:
           path: ${{ env.EVIDENCE_DIR }}
           if-no-files-found: error
   codeql:
-    if: github.head_ref == 'fix/live-benchmark-equal-arm-budget'
+    if: github.head_ref == 'fix/live-benchmark-equal-arm-budget' || github.head_ref == 'benchmark/live-hidden-task-final'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
