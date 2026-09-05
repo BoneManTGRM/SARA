@@ -1,3 +1,4 @@
+import type { ExperimentalCompilerCache } from "./experimental-compiler-cache.ts";
 import { execFile } from "node:child_process";
 import { lstat, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, posix } from "node:path";
@@ -203,8 +204,8 @@ function verificationSource(proposal: SkillCandidateProposal): string {
   ].join("\n");
 }
 
-function semanticDiagnostics(files: string[]): ts.Diagnostic[] {
-  const program = ts.createProgram(files, {
+function semanticDiagnostics(files: string[], cache?: ExperimentalCompilerCache): ts.Diagnostic[] {
+  const options: ts.CompilerOptions = {
     target: ts.ScriptTarget.ES2022,
     module: ts.ModuleKind.ESNext,
     moduleResolution: ts.ModuleResolutionKind.Bundler,
@@ -212,7 +213,8 @@ function semanticDiagnostics(files: string[]): ts.Diagnostic[] {
     skipLibCheck: true,
     noEmit: true,
     allowImportingTsExtensions: true,
-  });
+  };
+  const program = ts.createProgram(files, options, cache?.createHost(options));
   return ts.getPreEmitDiagnostics(program).filter(
     (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
   );
@@ -350,6 +352,7 @@ async function buildVerifiedProgramCandidate(
   proposal: ProgramCandidateProposal,
   genomeLabRoot: string,
   candidateId: string,
+  experimentalCompilerCache?: ExperimentalCompilerCache,
 ): Promise<GeneratedSkillCandidate> {
   validateProgramCandidateStructure(proposal);
   const allPaths = new Set(proposal.files.map((file) => file.path));
@@ -383,7 +386,7 @@ async function buildVerifiedProgramCandidate(
       runtimeFiles.push(runtimePath);
       if (file.path.startsWith("tests/")) runtimeTests.push(runtimePath);
     }
-    const diagnostics = semanticDiagnostics(projectFiles);
+    const diagnostics = semanticDiagnostics(projectFiles, experimentalCompilerCache);
     if (diagnostics.length > 0) {
       throw new Error(`Generated program failed TypeScript verification with ${diagnostics.length} error(s).`);
     }
@@ -460,10 +463,11 @@ export async function buildVerifiedSkillCandidate(
   proposal: CandidateProposal,
   genomeLabRoot: string,
   candidateId: string,
+  experimentalCompilerCache?: ExperimentalCompilerCache,
 ): Promise<GeneratedSkillCandidate> {
   if (!UUID_V4.test(candidateId)) throw new Error("Genome Lab candidate id must be a UUID v4.");
   if (isProgramCandidate(proposal)) {
-    return buildVerifiedProgramCandidate(handoff, proposal, genomeLabRoot, candidateId);
+    return buildVerifiedProgramCandidate(handoff, proposal, genomeLabRoot, candidateId, experimentalCompilerCache);
   }
   validateSkillCandidateProposal(proposal);
   assertPureSkillSource(proposal.source);
