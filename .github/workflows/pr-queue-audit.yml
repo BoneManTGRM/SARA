@@ -1,0 +1,60 @@
+name: SARA PR queue read-only audit
+on:
+  push:
+    branches: [proof/pr-queue-audit-20260905]
+    paths: [.github/workflows/pr-queue-audit.yml]
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Capture immutable repository objects and PR metadata; do not execute candidate code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p queue-evidence
+          git bundle create queue-evidence/repository.bundle --all
+          python3 - <<'PY'
+          import os,json,urllib.request,pathlib,subprocess,hashlib,datetime
+          out=pathlib.Path('queue-evidence'); root='https://api.github.com/repos/BoneManTGRM/SARA'
+          def get(path):
+            req=urllib.request.Request(root+path,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          def git(*args):return subprocess.run(['git',*args],capture_output=True,text=True,check=True).stdout
+          prs=[]
+          for page in range(1,5):
+            values=get('/pulls?state=open&per_page=100&page='+str(page));prs.extend(values)
+            if len(values)<100:break
+          result={'capturedAt':datetime.datetime.now(datetime.timezone.utc).isoformat(),'mainSha':git('rev-parse','origin/main').strip(),'openCount':len(prs),'pullRequests':[],'mutations':0,'modelCalls':0}
+          for item in prs:
+            n=item['number'];p=get('/pulls/'+str(n));sha=p['head']['sha'];base=p['base']['sha']
+            row={k:p.get(k) for k in ['number','title','body','draft','state','mergeable','mergeable_state','changed_files','additions','deletions']}
+            row.update(head=p['head']['ref'],headSha=sha,base=p['base']['ref'],baseSha=base)
+            row['checks']=get('/commits/'+sha+'/check-runs?per_page=100')['check_runs']
+            row['reviews']=get('/pulls/'+str(n)+'/reviews?per_page=100')
+            row['status']=get('/commits/'+sha+'/status')
+            mb=git('merge-base',base,sha).strip();row['mergeBase']=mb
+            patch=git('diff','--binary',mb,sha);(out/('pr-'+str(n)+'.patch')).write_text(patch)
+            row['patchSha256']=hashlib.sha256(patch.encode()).hexdigest()
+            row['changedPaths']=git('diff','--name-only',mb,sha).splitlines()
+            result['pullRequests'].append(row)
+          (out/'queue.json').write_text(json.dumps(result,indent=2)+'\n')
+          (out/'bundle.sha256').write_text(hashlib.sha256((out/'repository.bundle').read_bytes()).hexdigest()+'\n')
+          print(json.dumps({'mainSha':result['mainSha'],'openCount':len(prs),'numbers':[p['number'] for p in prs],'modelCalls':0}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-pr-queue-${{ github.run_id }}
+          path: queue-evidence
+          retention-days: 30
+          if-no-files-found: error
