@@ -43,8 +43,13 @@ export function createBenchmarkAudit(input: {
   let tokenCounts = 0;
   let events = 0;
   let closed = false;
+  let inFlight = false;
+  const method = input.method;
+  const directory = input.directory;
+  const beforeDispatch = input.beforeDispatch;
+  const onModelIdentity = input.onModelIdentity;
   const realFetch = input.fetchImpl ?? fetch;
-  const write = (name: string, payload: unknown) => writeBenchmarkAudit(input.directory, `${input.method}-${name}.json`, payload);
+  const write = (name: string, payload: unknown) => writeBenchmarkAudit(directory, `${method}-${name}.json`, payload);
   return {
     async record(kind, payload) {
       if (!/^[a-z_]{1,40}$/u.test(kind)) throw new Error("Invalid benchmark evidence kind.");
@@ -52,12 +57,16 @@ export function createBenchmarkAudit(input: {
     },
     fetch: async (resource, init) => {
       if (closed) throw new Error("Benchmark audit is closed after a failed or uncertain dispatch.");
+      if (inFlight) throw new Error("Benchmark concurrent dispatch rejected; requests are never queued.");
       const url = typeof resource === "string" ? resource : resource instanceof URL ? resource.href : resource.url;
       const isGeneration = url === "https://api.openai.com/v1/responses";
       if ((!isGeneration && url !== "https://api.openai.com/v1/responses/input_tokens") || init?.method !== "POST" || typeof init.body !== "string") {
         throw new Error("Benchmark worker attempted an unapproved provider endpoint.");
       }
-      const body = object(JSON.parse(init.body));
+      const requestBody = init.body;
+      // Copy mutable request inputs before any asynchronous admission or I/O.
+      const requestInit: RequestInit = { ...init, body: requestBody, headers: new Headers(init.headers), redirect: "error" };
+      const body = object(JSON.parse(requestBody));
       if (body.model !== "gpt-5.6-luna" || typeof body.input !== "string" || !body.input.trim()
         || Object.keys(body).some(key => !["model", "input", "store", "max_output_tokens", "reasoning", "text"].includes(key))) {
         throw new Error("Benchmark request changed the frozen provider contract.");
@@ -66,24 +75,29 @@ export function createBenchmarkAudit(input: {
         throw new Error("Benchmark request changed the frozen reasoning or output ceiling.");
       }
       if (isGeneration ? generations >= 3 : tokenCounts >= 3) throw new Error("Benchmark request attempt ceiling reached.");
-      await input.beforeDispatch();
+      // Admit synchronously. Same-instance overlap must not pass the ceiling
+      // check while another invocation is suspended in beforeDispatch.
+      inFlight = true;
       const index = isGeneration ? ++generations : ++tokenCounts;
       const prefix = `${isGeneration ? "" : "count-"}${String(index).padStart(4, "0")}`;
-      // An exclusive, fsynced receipt precedes fetch. A collision or failed write
-      // is fatal; no expiry, missing-response recovery, or automatic resend exists.
-      await write(`${prefix}-reservation`, {
-        method: input.method, operation: isGeneration ? "generation" : "input_token_count",
-        requestedAt: new Date().toISOString(), requestDigest: sha256(init.body), promptDigest: sha256(body.input),
-        model: body.model, reasoning: isGeneration ? "medium" : null,
-        maximumInputTokens: INPUT_LIMIT, maximumOutputTokens: isGeneration ? OUTPUT_LIMIT : 0,
-        maximumReservedUsd: isGeneration ? MAXIMUM_REQUEST_USD : null,
-        accounting: isGeneration ? "conservative_maximum_not_invoice" : "not_a_generation_request",
-      });
+      let reservationWritten = false;
       const started = performance.now();
       try {
+        await beforeDispatch();
+        // An exclusive, fsynced receipt precedes fetch. A collision or failed write
+        // is fatal; no expiry, missing-response recovery, or automatic resend exists.
+        await write(`${prefix}-reservation`, {
+          method, operation: isGeneration ? "generation" : "input_token_count",
+          requestedAt: new Date().toISOString(), requestDigest: sha256(requestBody), promptDigest: sha256(body.input),
+          model: body.model, reasoning: isGeneration ? "medium" : null,
+          maximumInputTokens: INPUT_LIMIT, maximumOutputTokens: isGeneration ? OUTPUT_LIMIT : 0,
+          maximumReservedUsd: isGeneration ? MAXIMUM_REQUEST_USD : null,
+          accounting: isGeneration ? "conservative_maximum_not_invoice" : "not_a_generation_request",
+        });
+        reservationWritten = true;
         // Recheck after durable storage so a stop activated during I/O blocks dispatch.
-        await input.beforeDispatch();
-        const response = await realFetch(resource, { ...init, redirect: "error" });
+        await beforeDispatch();
+        const response = await realFetch(url, requestInit);
         const raw = await response.clone().text();
         if (Buffer.byteLength(raw, "utf8") > 1_048_576) throw new Error("Benchmark response exceeded evidence bound.");
         let value: Record<string, unknown> = {};
@@ -97,7 +111,7 @@ export function createBenchmarkAudit(input: {
         });
         const usageValid = inputTokens !== null && inputTokens <= INPUT_LIMIT && outputTokens !== null && outputTokens <= OUTPUT_LIMIT;
         await write(`${prefix}-response`, {
-          method: input.method, receivedAt: new Date().toISOString(), elapsedMilliseconds: performance.now() - started,
+          method, receivedAt: new Date().toISOString(), elapsedMilliseconds: performance.now() - started,
           httpStatus: response.status, providerRequestId: identifier(response.headers.get("x-request-id")),
           responseId: identifier(value.id), model: identifier(value.model), status: identifier(value.status),
           inputTokens, billableOutputTokens: outputTokens,
@@ -111,15 +125,18 @@ export function createBenchmarkAudit(input: {
           // Preserve the response but do not allow a success without actual identity.
           throw new Error("Benchmark provider identity unavailable or changed.");
         }
-        if (isGeneration) await input.onModelIdentity?.(value.model as string);
+        if (isGeneration) await onModelIdentity?.(value.model as string);
         if (isGeneration && (!response.ok || !usageValid || value.status !== "completed" || typeof value.model !== "string" || !/^gpt-5\.6-luna(?:-\d{4}-\d{2}-\d{2})?$/u.test(value.model))) {
           closed = true;
         }
         return response;
-      } catch {
+      } catch (error) {
         closed = true;
-        await write(`${prefix}-error`, { method: input.method, failureCode: "PROVIDER_OR_EVIDENCE_FAILURE", estimatedCostUsd: null, reservationRetained: true, elapsedMilliseconds: performance.now() - started });
+        if (!reservationWritten) throw error;
+        await write(`${prefix}-error`, { method, failureCode: "PROVIDER_OR_EVIDENCE_FAILURE", estimatedCostUsd: null, reservationRetained: true, elapsedMilliseconds: performance.now() - started });
         throw new Error("Benchmark provider or evidence failed; no replay permitted.");
+      } finally {
+        inFlight = false;
       }
     },
   };
