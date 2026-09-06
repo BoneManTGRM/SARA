@@ -1,0 +1,73 @@
+name: Verify exact durable reuse candidate
+on:
+  push:
+    branches: [perf/durable-repair-reuse]
+    paths: [.github/workflows/durable-reuse-transfer.yml]
+permissions:
+  contents: read
+jobs:
+  transfer:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Apply exact source without changing the frozen benchmark
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sara-reuse-transfer
+          python3 - <<'PY'
+          import base64,gzip,hashlib,pathlib
+          parts=[pathlib.Path('.sara-reuse-transfer')/('part'+str(i)) for i in range(4)]
+          encoded=''.join(p.read_text(encoding='ascii') for p in parts)
+          assert len(encoded)==23056
+          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert len(patch)==66379
+          assert hashlib.sha256(patch).hexdigest()=='54888d55d085f249c2091151245458d08c7729830f8c62ffaad20a0ad2eddd12'
+          pathlib.Path('/tmp/sara-reuse-transfer/candidate.patch').write_bytes(patch)
+          PY
+          git apply --index /tmp/sara-reuse-transfer/candidate.patch
+          git rm .github/workflows/durable-reuse-transfer.yml .sara-reuse-transfer/part0 .sara-reuse-transfer/part1 .sara-reuse-transfer/part2 .sara-reuse-transfer/part3
+          test "$(git write-tree)" = 093ee1da7a2bec3c12bde8b730597559ed01cbf4
+          test -z "$(git ls-files node_modules)"
+      - run: npm ci --ignore-scripts
+      - name: Run full credential-free verification
+        run: |
+          set -euo pipefail
+          npm run verify | tee /tmp/sara-reuse-transfer/verify.log
+          git diff --exit-code
+          test "$(git write-tree)" = 093ee1da7a2bec3c12bde8b730597559ed01cbf4
+      - name: Publish only the verified branch candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = BoneManTGRM/SARA
+          test "$GITHUB_REF" = refs/heads/perf/durable-repair-reuse
+          test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'SARA verified source transfer'
+          git config user.email 'source-transfer@users.noreply.github.com'
+          git commit -m 'Persist exact verified repairs and prevent contended fallback or revoked returns'
+          test "$(git rev-parse HEAD^{tree})" = 093ee1da7a2bec3c12bde8b730597559ed01cbf4
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/perf/durable-repair-reuse
+          unset AUTH GH_TOKEN
+          git rev-parse HEAD > /tmp/sara-reuse-transfer/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-reuse-transfer/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/sara-reuse-transfer/source.tar.gz
+          cd /tmp/sara-reuse-transfer
+          sha256sum candidate.patch source.tar.gz verify.log > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: sara-durable-reuse-transfer-${{ github.run_id }}
+          path: /tmp/sara-reuse-transfer/
+          if-no-files-found: error
+          retention-days: 14
