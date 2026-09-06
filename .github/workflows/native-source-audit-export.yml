@@ -1,0 +1,34 @@
+name: Export fixed native candidate source
+on:
+  push:
+    branches: [verify/native-source-export-20260906]
+    paths: [.github/workflows/native-source-audit-export.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: '120577b317435c360f632603a830a6a717976909'
+          persist-credentials: false
+      - name: Archive source only
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 120577b317435c360f632603a830a6a717976909
+          test "$(git rev-parse HEAD^{tree})" = a0a5c6855fadff7d596adfff5548f461fc1caa9e
+          mkdir -p /tmp/native-source-audit
+          git rev-parse HEAD > /tmp/native-source-audit/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/native-source-audit/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/native-source-audit/source.tar.gz
+          cd /tmp/native-source-audit
+          sha256sum source.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-source-audit-${{ github.run_id }}
+          path: /tmp/native-source-audit/
+          retention-days: 14
+          if-no-files-found: error
