@@ -17,7 +17,9 @@ Object.freeze(LIMITS);
 const MAX_RECORDS = 128;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_RECORD_BYTES = 100 * 1024;
-export type RepairMemoryHit = { key: string; id: string; verifiedArtifactDigest: string; proposal: CodingRepairProposal };
+export type RepairMemoryIdentity = { key: string; id: string; verifiedArtifactDigest: string };
+export type RepairMemoryHit = RepairMemoryIdentity & { proposal: CodingRepairProposal };
+type MemoryTransaction<T> = { value: T; changed: boolean };
 type RecipeBody = { key: string; verifiedArtifactDigest: string; changes: CodingRepairProposal["changes"]; changedLines: number };
 type Recipe = RecipeBody & { id: string; evidenceDigests: string[]; quarantineDigest: string | null };
 
@@ -101,10 +103,10 @@ export class DurableCodingRepairMemory {
   readonly directory: string;
   constructor(stateDirectory: string) { this.directory = resolve(stateDirectory, "coding-repair-memory-v1"); }
 
-  async #transaction<T>(write: boolean, action: (records: Recipe[]) => T): Promise<T> {
-    return withMemoryQueue(this.directory, () => this.#filesystemTransaction(write, action));
+  async #transaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>): Promise<T> {
+    return withMemoryQueue(this.directory, () => this.#filesystemTransaction(action));
   }
-  async #filesystemTransaction<T>(write: boolean, action: (records: Recipe[]) => T): Promise<T> {
+  async #filesystemTransaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>): Promise<T> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     if (await realpath(this.directory) !== this.directory) throw new Error("REPAIR_MEMORY_DIRECTORY_SYMLINK");
     const dir = await open(this.directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -134,8 +136,10 @@ export class DurableCodingRepairMemory {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      const result = action(records);
-      if (write) {
+      const { value, changed } = action(records);
+      // A duplicate acknowledgement still rereads/validates under the lock.
+      // Only an actual state transition needs another durable file replacement.
+      if (changed) {
         validateRecords(records);
         const bytes = canonicalJson({ schemaVersion: 1, records, digest: sha256(canonicalJson(records)) });
         if (Buffer.byteLength(bytes) > MAX_BYTES) throw new Error("REPAIR_MEMORY_CAPACITY");
@@ -149,7 +153,7 @@ export class DurableCodingRepairMemory {
         await dir.sync();
         releaseLock = true;
       }
-      return structuredClone(result);
+      return structuredClone(value);
     } finally {
       try {
         if (temporary) await unlink(temporary).catch(() => {});
@@ -179,16 +183,16 @@ export class DurableCodingRepairMemory {
     const body: RecipeBody = { key, changes, changedLines: count, verifiedArtifactDigest: input.verification.artifactDigest };
     const record: Recipe = { ...body, id: identity(body), evidenceDigests: [...input.verification.evidenceDigests], quarantineDigest: null };
     validateRecords([record]);
-    return this.#transaction(true, records => {
+    return this.#transaction(records => {
       const existing = records.find(r => r.key === key);
       if (existing) {
         if (existing.quarantineDigest) throw new Error("REPAIR_MEMORY_QUARANTINED");
         if (existing.id !== record.id) throw new Error("REPAIR_MEMORY_CONFLICT");
-        return existing.id;
+        return { value: existing.id, changed: false };
       }
       if (records.length >= MAX_RECORDS) throw new Error("REPAIR_MEMORY_CAPACITY");
       records.push(record);
-      return record.id;
+      return { value: record.id, changed: true };
     });
   }
 
@@ -197,12 +201,12 @@ export class DurableCodingRepairMemory {
     candidate = structuredClone(candidate); verification = structuredClone(verification);
     const key = codingRepairMemoryKey(candidate, verification, scope);
     if (strategy !== "surgical" && strategy !== "deep") return null;
-    return this.#transaction(false, records => {
+    return this.#transaction<RepairMemoryHit | null>(records => {
       const r = records.find(record => record.key === key);
-      if (!r || r.quarantineDigest) return null;
+      if (!r || r.quarantineDigest) return { value: null, changed: false };
       const limit = strategy === "surgical" ? LIMITS.surgicalChangedLines : LIMITS.deepChangedLines;
       const count = r.changes.reduce((n, change) => n + changedLines(candidate.files.find(f => f.path === change.path)?.content ?? "", change.replacementText), 0);
-      if (count !== r.changedLines || count > limit) return null;
+      if (count !== r.changedLines || count > limit) return { value: null, changed: false };
       const proposal: CodingRepairProposal = { schemaVersion: 1, baseArtifactDigest: verification.artifactDigest,
         failureFingerprint: verification.failures[0].fingerprint, strategy, changes: structuredClone(r.changes),
         limitations: ["Exact-source learned repair; all current verification remains mandatory."] };
@@ -211,27 +215,30 @@ export class DurableCodingRepairMemory {
       const replacements = new Map(proposal.changes.map(c => [c.path, c.replacementText]));
       const after = { ...candidate, files: candidate.files.map(f => ({ ...f, content: replacements.get(f.path) ?? f.content })) };
       if (codingRepairCandidateDigest(after) !== r.verifiedArtifactDigest) throw new Error("REPAIR_MEMORY_RESULT_MISMATCH");
-      return { key, id: r.id, verifiedArtifactDigest: r.verifiedArtifactDigest, proposal };
+      return { value: { key, id: r.id, verifiedArtifactDigest: r.verifiedArtifactDigest, proposal }, changed: false };
     });
   }
 
-  async assertReusable(hit: RepairMemoryHit): Promise<void> {
+  async assertReusable(hit: RepairMemoryIdentity): Promise<void> {
     const { key, id, verifiedArtifactDigest } = hit;
     if (![key, id, verifiedArtifactDigest].every(isEvidenceDigest)) throw new Error("REPAIR_MEMORY_INVALID_HIT");
-    await this.#transaction(false, records => {
+    await this.#transaction(records => {
       const record = records.find(r => r.key === key);
       if (!record || record.quarantineDigest !== null || record.id !== id || record.verifiedArtifactDigest !== verifiedArtifactDigest)
         throw new Error("REPAIR_MEMORY_REVOKED_DURING_RUN");
+      return { value: undefined, changed: false };
     });
   }
 
   async quarantine(key: string, failureDigest: string): Promise<void> {
     if (!isEvidenceDigest(key) || !isEvidenceDigest(failureDigest)) throw new Error("REPAIR_MEMORY_INVALID_QUARANTINE");
     try {
-      await this.#transaction(true, records => {
+      await this.#transaction(records => {
         const record = records.find(r => r.key === key);
         if (!record) throw new Error("REPAIR_MEMORY_UNKNOWN_RECORD");
-        record.quarantineDigest ??= failureDigest;
+        if (record.quarantineDigest !== null) return { value: undefined, changed: false };
+        record.quarantineDigest = failureDigest;
+        return { value: undefined, changed: true };
       });
     } catch (error) {
       // A quarantine that cannot commit must not silently become an eligible recipe
