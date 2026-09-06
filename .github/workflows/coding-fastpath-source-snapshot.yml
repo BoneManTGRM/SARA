@@ -1,0 +1,34 @@
+name: Coding fastpath source snapshot
+on:
+  push:
+    branches: [perf/coding-fastpath-20260906]
+    paths: [.github/workflows/coding-fastpath-source-snapshot.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts
+      - name: Capture source and locked test dependencies only
+        run: |
+          mkdir -p /tmp/sara-fastpath-source
+          git rev-parse HEAD > /tmp/sara-fastpath-source/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-fastpath-source/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/sara-fastpath-source/source.tar.gz
+          tar -czf /tmp/sara-fastpath-source/test-dependencies.tar.gz node_modules
+          cd /tmp/sara-fastpath-source
+          sha256sum *.gz > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sara-fastpath-source-${{ github.sha }}
+          path: /tmp/sara-fastpath-source/
+          retention-days: 7
