@@ -1,3 +1,4 @@
+import { NativeCodingVerifier } from "./native-coding-verifier.ts";
 import { resolve } from "node:path";
 import { SaraKernel } from "./kernel.ts";
 import { runLunaStartupProof, type LunaStartupProof } from "./luna-startup-proof.ts";
@@ -147,6 +148,8 @@ let startupProof: LunaStartupProof = {
   outputDigest: null,
   failureCode: client ? null : "unexpected_failure",
 };
+const nativeVerifier = reparodynamicCodingMode === "canary" ? await NativeCodingVerifier.create() : undefined;
+console.log(`SARA coding loop checker: ${nativeVerifier ? "native-7.0.2-with-legacy-final" : "legacy"}`);
 const server = createSaraServer(kernel, {
   ownerTokenSha256,
   stateDirectory,
@@ -160,6 +163,7 @@ const server = createSaraServer(kernel, {
     reparodynamicCoding: {
       mode: reparodynamicCodingMode,
       modelClient: client,
+      ...(nativeVerifier ? { nativeVerifier } : {}),
       stateDirectory,
     },
   } : {}),
