@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { sha256 } from "./canonical.ts";
-import { ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
+import { ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
 
 const MAX_FILES = 128;
 const MAX_FILE_BYTES = 1_048_576;
@@ -19,7 +19,7 @@ export type BenchmarkEvidence = {
  * Raw bounded files preserve interrupted writes without inventing valid receipts.
  */
 export async function readCodingBenchmarkEvidence(stateDirectory: string, benchmarkId: string): Promise<BenchmarkEvidence> {
-  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
+  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
     throw new Error("BENCHMARK_EVIDENCE_SCOPE_REJECTED");
   }
   const empty: BenchmarkEvidence = { schemaVersion: 1, status: "not_started", replayAllowed: false, files: [] };
