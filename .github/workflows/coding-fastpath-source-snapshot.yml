@@ -1,0 +1,70 @@
+name: Verify single-check coding verifier candidate
+on:
+  push:
+    branches: [perf/coding-fastpath-20260906]
+    paths: [.github/workflows/coding-fastpath-source-snapshot.yml]
+permissions:
+  contents: read
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.repository == 'BoneManTGRM/SARA' && github.run_attempt == 1
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply the exact candidate delta
+        env:
+          PATCH_BASE64: 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
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = add77ea44d9a282975e132f6f836944bee5dae36
+          mkdir -p /tmp/sara-single-check-transfer
+          python3 - <<'PY'
+          import os,base64,gzip,hashlib,pathlib
+          patch=gzip.decompress(base64.b64decode(os.environ['PATCH_BASE64'],validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='198d15f2aa5a54416ec9d77a6e4bbbfeef7806cb56881a0b1acde46431c7143b'
+          pathlib.Path('/tmp/sara-single-check-transfer/candidate.patch').write_bytes(patch)
+          PY
+          git apply --index /tmp/sara-single-check-transfer/candidate.patch
+          git rm .github/workflows/coding-fastpath-source-snapshot.yml
+          git write-tree | tee /tmp/sara-single-check-transfer/tree-before-verify.txt
+          test "$(git write-tree)" = abb8462b296f5f375d1e50d52cf7c5e9b0faa4c6
+      - run: npm ci --ignore-scripts
+      - name: Verify the exact candidate without provider credentials
+        run: |
+          set -euo pipefail
+          npm run verify | tee /tmp/sara-single-check-transfer/verify.log
+          git diff --exit-code
+          test "$(git write-tree)" = abb8462b296f5f375d1e50d52cf7c5e9b0faa4c6
+      - name: Publish only the verified branch candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = BoneManTGRM/SARA
+          test "$GITHUB_REF" = refs/heads/perf/coding-fastpath-20260906
+          test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'SARA verified source transfer'
+          git config user.email 'source-transfer@users.noreply.github.com'
+          git commit -m 'Remove duplicate semantic compilation while retaining fresh isolated verification'
+          test "$(git rev-parse HEAD^{tree})" = abb8462b296f5f375d1e50d52cf7c5e9b0faa4c6
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/perf/coding-fastpath-20260906
+          unset AUTH GH_TOKEN
+          git rev-parse HEAD > /tmp/sara-single-check-transfer/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-single-check-transfer/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/sara-single-check-transfer/source.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sara-single-check-transfer-${{ github.run_id }}
+          path: /tmp/sara-single-check-transfer/
+          retention-days: 14
