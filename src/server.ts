@@ -27,6 +27,7 @@ import type { ReparodynamicCodingMode } from "./coding-repair-types.ts";
 import { createReparodynamicCandidateGenerator } from "./reparodynamic-candidate-generator.ts";
 import { createLunaCodingRepairModel } from "./luna-coding-repair-model.ts";
 import { verifyGenomeLabProgramCandidate } from "./genome-lab-verifier.ts";
+import { DurableRepairReuseStore, RepairReuseSession, repairReuseScope, persistRepairReuseEvents } from "./coding-repair-reuse.ts";
 import { persistCodingRepairReceipt, persistCodingRepairRun } from "./coding-repair-receipt-store.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -546,6 +547,13 @@ async function handleSelfBuild(
         acceptanceCriteria: context.acceptanceCriteria,
         constitutionDigest: context.constitutionDigest,
       }),
+      reuse: async (context) => new RepairReuseSession(
+        new DurableRepairReuseStore(options.reparodynamicCoding!.stateDirectory),
+        await repairReuseScope(context, baseGenerator.id),
+        (candidate) => verifyGenomeLabProgramCandidate({ candidate, objective: context.objective,
+          acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest }),
+        persistRepairReuseEvents(options.reparodynamicCoding!.stateDirectory, runId),
+      ),
       onReceipt: (receipt) => persistCodingRepairReceipt({
         stateDirectory: options.reparodynamicCoding!.stateDirectory,
         runId,
