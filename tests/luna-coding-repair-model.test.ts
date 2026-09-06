@@ -118,3 +118,34 @@ describe("Luna coding repair adapter", () => {
     assert(result.accountedCostUsd > 0);
   });
 });
+
+for (const [kind, failedCheck] of [["policy", "source_policy"], ["integrity", "artifact_integrity"]] as const) {
+  it(`does not describe a failed ${failedCheck} check as previously passing`, async () => {
+    let observedPrompt = "";
+    const candidate: ProgramCandidateProposal = {
+      schemaVersion: 1, candidateKind: "typescript_program", programName: "Feedback fixture", summary: "fixture", limitations: [],
+      files: [{ path: "src/index.ts", content: "export const value = 1;\n" },
+        { path: "src/more.ts", content: "export const more = true;\n" },
+        { path: "tests/index.test.ts", content: "HIDDEN_CONTROL_SENTINEL" }],
+    };
+    const client: WorkerModelClient = {
+      routeKey: "openai:gpt-5.6-luna:paid", maximumWallTimeMs: 1_000,
+      async countInputTokens(prompt) { observedPrompt = prompt; return 100; },
+      async execute() { return { outputText: JSON.stringify({ schemaVersion: 1, baseArtifactDigest: "a".repeat(64),
+        failureFingerprint: "f".repeat(64), strategy: "surgical", changes: [], limitations: [] }),
+        inputTokens: 100, billableOutputTokens: 50 }; },
+    };
+    const model = createLunaCodingRepairModel({ client, context: {
+      objective: "Repair the visible fault.", acceptanceCriteria: ["Retain all checks."], missingCapabilities: [],
+      constitutionDigest: "c".repeat(64), memoryContext: { contextDigest: "m".repeat(64), memories: [] },
+    } });
+    await model.propose({ candidate, verification: { passed: false, score: 0.2, artifactDigest: "a".repeat(64),
+      failures: [{ kind, code: "VISIBLE_FAILURE", file: "src/index.ts", line: 1, column: 1,
+        evidenceDigest: "e".repeat(64), fingerprint: "f".repeat(64), severity: "high", existedBeforeRepair: true }],
+      completedChecks: ["source_policy", "artifact_integrity"], evidenceDigests: ["e".repeat(64)] },
+      strategy: "surgical", cycle: 1, remainingCostUsd: 0.075 });
+    const payload = JSON.parse(observedPrompt.split("\n").at(-1)!) as { previouslyPassingChecks: string[] };
+    assert.equal(payload.previouslyPassingChecks.includes(failedCheck), false);
+    assert.doesNotMatch(observedPrompt, /HIDDEN_CONTROL_SENTINEL/);
+  });
+}

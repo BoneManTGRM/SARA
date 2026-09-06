@@ -51,6 +51,28 @@ const BLOCKED_IDENTIFIERS = new Set([
 ]);
 const BLOCKED_PROPERTIES = new Set(["__proto__", "constructor", "prototype"]);
 
+export type GenomeLabSourceDiagnostic = {
+  kind: "policy" | "syntax";
+  code: "GENOME_LAB_SOURCE_SYNTAX" | "GENOME_LAB_MODULE_LOADING" | "GENOME_LAB_MODULE_SPECIFIER"
+    | "GENOME_LAB_EXTERNAL_MODULE" | "GENOME_LAB_IMPORT_EXTENSION" | "GENOME_LAB_RELATIVE_MODULE"
+    | "GENOME_LAB_TEST_IMPORT" | "GENOME_LAB_BLOCKED_IDENTIFIER" | "GENOME_LAB_BLOCKED_PROPERTY"
+    | "GENOME_LAB_COMPUTED_ACCESS" | "GENOME_LAB_ANY_TYPE";
+  file: string;
+  line: number;
+  column: number;
+};
+
+/** Trusted parser/guard evidence only; never constructed from a child-process error. */
+export class GenomeLabSourceError extends Error {
+  readonly diagnostic: Readonly<GenomeLabSourceDiagnostic>;
+  constructor(message: string, diagnostic: GenomeLabSourceDiagnostic) {
+    super(message);
+    this.name = "GenomeLabSourceError";
+    this.diagnostic = Object.freeze({ ...diagnostic });
+  }
+}
+
+
 type ArtifactTreeEntry = {
   path: string;
   type: "directory" | "file";
@@ -272,27 +294,38 @@ function programModuleSpecifier(node: ts.Node): ts.Expression | undefined {
   return undefined;
 }
 
-function assertBoundedProgramSource(
+export function assertBoundedProgramSource(
   filePath: string,
   source: string,
   allPaths: ReadonlySet<string>,
 ): void {
   const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TS);
   const syntaxErrors = (sourceFile as ts.SourceFile & { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics ?? [];
-  if (syntaxErrors.some((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error)) {
-    throw new Error(`Program file ${filePath} contains invalid TypeScript syntax.`);
+  const syntaxError = syntaxErrors.find((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
+  if (syntaxError) {
+    const location = sourceFile.getLineAndCharacterOfPosition(syntaxError.start ?? 0);
+    throw new GenomeLabSourceError(`Program file ${filePath} contains invalid TypeScript syntax.`, {
+      kind: "syntax", code: "GENOME_LAB_SOURCE_SYNTAX", file: filePath,
+      line: location.line + 1, column: location.character + 1,
+    });
   }
   let violation = "";
+  let diagnostic: GenomeLabSourceDiagnostic | undefined;
+  const reject = (node: ts.Node, code: GenomeLabSourceDiagnostic["code"], reason: string): void => {
+    const location = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    violation = reason;
+    diagnostic = { kind: "policy", code, file: filePath, line: location.line + 1, column: location.character + 1 };
+  };
   const visit = (node: ts.Node): void => {
     if (violation) return;
     if (ts.isImportEqualsDeclaration(node) || (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)) {
-      violation = "dynamic or legacy module loading is prohibited";
+      reject(node, "GENOME_LAB_MODULE_LOADING", "dynamic or legacy module loading is prohibited");
       return;
     }
     const moduleExpression = programModuleSpecifier(node);
     if (moduleExpression) {
       if (!ts.isStringLiteral(moduleExpression)) {
-        violation = "module specifiers must be string literals";
+        reject(node, "GENOME_LAB_MODULE_SPECIFIER", "module specifiers must be string literals");
         return;
       }
       const specifier = moduleExpression.text;
@@ -300,44 +333,46 @@ function assertBoundedProgramSource(
         (specifier === "node:test" || specifier === "node:assert/strict");
       if (!allowedTestBuiltin) {
         if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
-          violation = `external module ${specifier} is prohibited`;
+          reject(node, "GENOME_LAB_EXTERNAL_MODULE", `external module ${specifier} is prohibited`);
           return;
         }
         if (!specifier.endsWith(".ts")) {
-          violation = "relative imports must use an explicit .ts extension";
+          reject(node, "GENOME_LAB_IMPORT_EXTENSION", "relative imports must use an explicit .ts extension");
           return;
         }
         const resolved = posix.normalize(posix.join(posix.dirname(filePath), specifier));
         if (resolved.startsWith("../") || !allPaths.has(resolved)) {
-          violation = `relative module ${specifier} is outside or absent from the candidate`;
+          reject(node, "GENOME_LAB_RELATIVE_MODULE", `relative module ${specifier} is outside or absent from the candidate`);
           return;
         }
         if (filePath.startsWith("src/") && !resolved.startsWith("src/")) {
-          violation = "production source may not import test modules";
+          reject(node, "GENOME_LAB_TEST_IMPORT", "production source may not import test modules");
           return;
         }
       }
     }
     if (ts.isIdentifier(node) && BLOCKED_IDENTIFIERS.has(node.text)) {
-      violation = `identifier ${node.text} is prohibited`;
+      reject(node, "GENOME_LAB_BLOCKED_IDENTIFIER", `identifier ${node.text} is prohibited`);
       return;
     }
     if (ts.isPropertyAccessExpression(node) && (BLOCKED_PROPERTIES.has(node.name.text) || node.name.text.startsWith("__"))) {
-      violation = `property ${node.name.text} is prohibited`;
+      reject(node, "GENOME_LAB_BLOCKED_PROPERTY", `property ${node.name.text} is prohibited`);
       return;
     }
     if (ts.isElementAccessExpression(node)) {
-      violation = "computed property access is prohibited";
+      reject(node, "GENOME_LAB_COMPUTED_ACCESS", "computed property access is prohibited");
       return;
     }
     if (node.kind === ts.SyntaxKind.AnyKeyword) {
-      violation = "the any type is prohibited";
+      reject(node, "GENOME_LAB_ANY_TYPE", "the any type is prohibited");
       return;
     }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
-  if (violation) throw new Error(`Generated program is not a bounded isolated candidate: ${filePath}: ${violation}.`);
+  if (diagnostic) {
+    throw new GenomeLabSourceError(`Generated program is not a bounded isolated candidate: ${filePath}: ${violation}.`, diagnostic);
+  }
 }
 
 function runtimeModuleSource(source: string): string {
