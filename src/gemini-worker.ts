@@ -1,3 +1,4 @@
+import { readBoundedProviderBody } from "./bounded-provider-body.ts";
 import type { WorkerModelClient } from "./model-router.ts";
 
 export class GeminiInteractionsClient implements WorkerModelClient {
@@ -26,7 +27,22 @@ export class GeminiInteractionsClient implements WorkerModelClient {
   }
 
   async countInputTokens(prompt: string): Promise<number> {
-    return Buffer.byteLength(prompt, "utf8");
+    if (!prompt.trim() || Buffer.byteLength(prompt, "utf8") > 4 * 1024 * 1024) throw new Error("GEMINI_TOKEN_INPUT_BOUND");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
+    try {
+      const response = await this.#fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:countTokens", {
+        method: "POST", redirect: "error",
+        headers: { "content-type": "application/json", "x-goog-api-key": this.#apiKey },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }] }), signal: controller.signal,
+      });
+      if (!response.ok) { if (response.body) void response.body.cancel().catch(() => {}); throw new Error("GEMINI_TOKEN_HTTP_FAILURE"); }
+      const body: unknown = JSON.parse(await readBoundedProviderBody(response, controller.signal, 65536));
+      const count = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).totalTokens : null;
+      if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("GEMINI_TOKEN_ACCOUNTING_INVALID");
+      return count as number; // Provider tokenizer result; completed generation usage remains the billing evidence.
+    } catch { throw new Error("GEMINI_TOKEN_COUNT_UNAVAILABLE"); }
+    finally { clearTimeout(timer); }
   }
 
   async execute(input: {

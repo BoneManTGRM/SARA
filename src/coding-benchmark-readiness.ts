@@ -63,7 +63,19 @@ export const HARDENED_REUSE_BENCHMARK_GRANT = Object.freeze({
   activationSha256: "f5a1918d1b396a8344b2cf1d38282726b656c09ea8cb6f9c7b220826c81f63e8",
 });
 
+// Owner-requested fresh qualification after failed d89f2a9c. Old exposure is never reclaimed.
+export const OBSERVED_REUSE_BENCHMARK_GRANT = Object.freeze({
+  benchmarkId: "68990425-bf42-4ec5-a4f1-e6af301780ac",
+  registrationSourceRevision: "4adf3c149030d2984807753caac24d62521d6b80",
+  maximumSpendUsd: 0.15,
+  maximumModelSpendUsdPerArm: 0.05,
+  unresolvedExposureUsd: 0,
+  activationSha256: "19af2967caa26e9c325a5ff25eb84e52db2916e2cbad8e2cec082bb0d2be6abe",
+});
+
 export function activeCodingBenchmarkContinuation(environment: Record<string, string | undefined>) {
+  if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
+      === OBSERVED_REUSE_BENCHMARK_GRANT.activationSha256) return OBSERVED_REUSE_BENCHMARK_GRANT;
   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
       === HARDENED_REUSE_BENCHMARK_GRANT.activationSha256) return HARDENED_REUSE_BENCHMARK_GRANT;
   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
@@ -103,7 +115,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   if (!sourceIdentified) blockers.push("SOURCE_IDENTITY_UNAVAILABLE");
   if (!input.constitutionVerified) blockers.push("CONSTITUTION_UNVERIFIED");
   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
-  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
+  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
   if (active.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
   const additional = active.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId;
   return {
@@ -128,12 +140,15 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
       experiment: "current_components_cold_pilot", adaptiveOutputAvailable: true, nativeIntermediateChecks: true,
       finalLegacyRequired: true, kernelJobMeasured: false, persistentReuseMeasured: false,
     } : {}),
-    ...([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) ? {
+    ...([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) ? {
       experiment: "maximum_observed_reuse_pilot", arms: ["regenerate", "ordinary_memory", "optimized"],
       jobsPerArm: 4, maximumAttemptsPerArm: 12, maximumAttemptsPerJob: 3,
       adaptiveOutputAvailable: true, nativeIntermediateChecks: true, finalLegacyRequired: true,
       kernelJobMeasured: false, persistentReuseMeasured: true,
       absoluteMaximumEstablished: false,
+    } : {}),
+    ...(active.benchmarkId === OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId ? {
+      providerDeadlineMilliseconds: 60000, dispatchAccountingV2: true, providerBodyBoundBytes: 1048576,
     } : {}),
     evidenceRequired: additional
       ? "This grant is separate and one-use. Preserve the prior $0.15 unresolved hold and never replay the historical benchmark."
