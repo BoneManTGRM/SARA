@@ -1,0 +1,150 @@
+--- a/scripts/benchmark-observed-reuse.ts
++++ b/scripts/benchmark-observed-reuse.ts
+@@ -6 +6 @@
+-import { HARDENED_REUSE_BENCHMARK_GRANT as grant, assertCodingBenchmarkRuntimeAuthority } from "../src/coding-benchmark-readiness.ts";
++import { OBSERVED_REUSE_BENCHMARK_GRANT as grant, assertCodingBenchmarkRuntimeAuthority } from "../src/coding-benchmark-readiness.ts";
+@@ -11 +11 @@
+-import { REUSE_SPEED_PROTOCOL, runReuseSpeedBenchmark } from "../src/reuse-speed-benchmark.ts";
++import { OBSERVED_REUSE_PROTOCOL, runObservedReuseBenchmark } from "../src/observed-reuse-benchmark.ts";
+@@ -17 +17,5 @@
+-  "src/reuse-speed-benchmark.ts": "d55ad68a692315fd455705841f30a732b244cdcf497e186e2733f591ec26018a"
++  "src/reuse-speed-benchmark.ts": "d55ad68a692315fd455705841f30a732b244cdcf497e186e2733f591ec26018a",
++  "src/observed-reuse-benchmark.ts": "051f25101377e1a5c2a3edc203ec2803255c41332763d793bd592da6bab71872",
++  "src/bounded-provider-body.ts": "77573a94e7292c387e82b3106749ed7ab2dd83997595aa71732b774b8d9b31b1",
++  "src/self-build-http-timing.ts": "bcd8c0c27cd8256d623cd909974cba28e4268208d627ff7e790b57a4fa9c5558",
++  "src/main.ts": "6882ba4389374411310f75b3ab9e0f7bd48507cfff20a8955269264ac28d94e0"
+@@ -30 +34 @@
+-const harness = await Promise.all(["src/reuse-speed-benchmark.ts", "scripts/benchmark-hardened-reuse.ts", "src/coding-benchmark-readiness.ts",
++const harness = await Promise.all(["src/observed-reuse-benchmark.ts", "src/bounded-provider-body.ts", "src/self-build-http-timing.ts", "src/main.ts", "scripts/benchmark-observed-reuse.ts", "src/coding-benchmark-readiness.ts",
+@@ -37 +41 @@
+-    controllerDigest: sha256(canonicalJson(harness)), policyDigest: sha256(canonicalJson(REUSE_SPEED_PROTOCOL)),
++    controllerDigest: sha256(canonicalJson(harness)), policyDigest: sha256(canonicalJson(OBSERVED_REUSE_PROTOCOL)),
+@@ -44 +48 @@
+-    protocol: REUSE_SPEED_PROTOCOL, hardeningPins, setupMilliseconds: performance.now()-start, exactRevision: config.sourceRevision });
++    protocol: OBSERVED_REUSE_PROTOCOL, hardeningPins, setupMilliseconds: performance.now()-start, exactRevision: config.sourceRevision });
+@@ -46 +50 @@
+-    await runReuseSpeedBenchmark({ directory: join(root,"reuse-state"), benchmarkId: grant.benchmarkId,
++    await runObservedReuseBenchmark({ directory: join(root,"reuse-state"), benchmarkId: grant.benchmarkId,
+--- a/tests/observed-reuse-grant.test.ts
++++ b/tests/observed-reuse-grant.test.ts
+@@ -7 +7 @@
+-import { HARDENED_REUSE_BENCHMARK_GRANT as current, REUSE_SPEED_BENCHMARK_GRANT as prior,
++import { OBSERVED_REUSE_BENCHMARK_GRANT as current, HARDENED_REUSE_BENCHMARK_GRANT as prior,
+@@ -22 +22 @@
+-  assert.equal(ready.jobsPerArm,4);assert.equal(ready.persistentReuseMeasured,true);
++  assert.equal(ready.providerDeadlineMilliseconds,60000);assert.equal(ready.dispatchAccountingV2,true);assert.equal(ready.jobsPerArm,4);assert.equal(ready.persistentReuseMeasured,true);
+@@ -28,2 +28,2 @@
+-  assert(codingBenchmarkLaunchSpec({...args,environment:env}).args.includes('scripts/benchmark-hardened-reuse.ts'));
+-  for(const [grant,path] of [[prior,'scripts/benchmark-reuse-speed.ts'],[cold,'scripts/benchmark-current-coding-evidence.ts']] as const){
++  assert(codingBenchmarkLaunchSpec({...args,environment:env}).args.includes('scripts/benchmark-observed-reuse.ts'));
++  for(const [grant,path] of [[prior,'scripts/benchmark-hardened-reuse.ts'],[cold,'scripts/benchmark-current-coding-evidence.ts']] as const){
+@@ -45 +45 @@
+-  const text=await readFile(new URL('../scripts/benchmark-hardened-reuse.ts',import.meta.url),'utf8');
++  const text=await readFile(new URL('../scripts/benchmark-observed-reuse.ts',import.meta.url),'utf8');
+@@ -47 +47 @@
+-  assert.equal(Object.keys(pins).length,4);
++  assert.equal(Object.keys(pins).length,8);
+@@ -49 +49 @@
+-  assert(text.includes('HARDENED_REUSE_BENCHMARK_GRANT as grant'));
++  assert(text.includes('OBSERVED_REUSE_BENCHMARK_GRANT as grant'));
+--- a/tests/self-build-http-timing-integration.test.ts
++++ b/tests/self-build-http-timing-integration.test.ts
+@@ -0,0 +1 @@
++import { observeSelfBuildHttp, type SelfBuildHttpTiming } from "../src/self-build-http-timing.ts";
+@@ -17 +18 @@
+-test("native loop retains original final and kernel checks across cold job and complete restart", async () => {
++test("outer HTTP observations include mandatory kernel completion and receipts for cold/restarted warm jobs", async () => {
+@@ -21,0 +23 @@
++  const timing: SelfBuildHttpTiming[] = [];
+@@ -48,0 +51 @@
++      observeSelfBuildHttp(server, {emit: value => timing.push(value)});
+@@ -64,0 +68,3 @@
++    const succeeded=timing.filter(t=>t.statusCode===201);
++    assert.equal(succeeded.length,2);assert(succeeded.every(t=>t.kernelAcceptanceInferredFrom201));
++    assert.equal(timing.length,6);assert.equal(new Set(timing.map(t=>t.observationId)).size,6);
+@@ -68,0 +75 @@
++    for(let i=0;i<2;i++) assert(succeeded[i].elapsedMilliseconds > Math.min(...summaries.map(s=>s.totalElapsedMilliseconds)), "outer measurement must include later kernel work");
+--- a/src/coding-benchmark-evidence.ts
++++ b/src/coding-benchmark-evidence.ts
+@@ -5 +5 @@
+-import { HARDENED_REUSE_BENCHMARK_GRANT, ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
++import { OBSERVED_REUSE_BENCHMARK_GRANT, HARDENED_REUSE_BENCHMARK_GRANT, ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
+@@ -22 +22 @@
+-  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
++  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
+@@ -45 +45 @@
+-  if ([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
++  if ([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
+--- a/src/coding-benchmark-owner.ts
++++ b/src/coding-benchmark-owner.ts
+@@ -9 +9 @@
+-import { HARDENED_REUSE_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, activeCodingBenchmarkContinuation, assertCodingBenchmarkDispatch, CodingBenchmarkNotReadyError, inspectCodingBenchmarkReadiness } from "./coding-benchmark-readiness.ts";
++import { OBSERVED_REUSE_BENCHMARK_GRANT, HARDENED_REUSE_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, activeCodingBenchmarkContinuation, assertCodingBenchmarkDispatch, CodingBenchmarkNotReadyError, inspectCodingBenchmarkReadiness } from "./coding-benchmark-readiness.ts";
+@@ -52 +52 @@
+-    execution: [REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId)
++    execution: [REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId)
+@@ -79 +79 @@
+-  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId)) environment.SARA_REPARODYNAMIC_CODING_MODE = input.environment.SARA_REPARODYNAMIC_CODING_MODE ?? "";
++  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId)) environment.SARA_REPARODYNAMIC_CODING_MODE = input.environment.SARA_REPARODYNAMIC_CODING_MODE ?? "";
+@@ -83 +83,2 @@
+-    args: ["--import", "tsx", active.benchmarkId === HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId
++    args: ["--import", "tsx", active.benchmarkId === OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId
++      ? "scripts/benchmark-observed-reuse.ts" : active.benchmarkId === HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId
+--- a/src/coding-benchmark-readiness.ts
++++ b/src/coding-benchmark-readiness.ts
+@@ -65,0 +66,10 @@
++// Owner-requested fresh qualification after failed d89f2a9c. Old exposure is never reclaimed.
++export const OBSERVED_REUSE_BENCHMARK_GRANT = Object.freeze({
++  benchmarkId: "68990425-bf42-4ec5-a4f1-e6af301780ac",
++  registrationSourceRevision: "4adf3c149030d2984807753caac24d62521d6b80",
++  maximumSpendUsd: 0.15,
++  maximumModelSpendUsdPerArm: 0.05,
++  unresolvedExposureUsd: 0,
++  activationSha256: "19af2967caa26e9c325a5ff25eb84e52db2916e2cbad8e2cec082bb0d2be6abe",
++});
++
+@@ -66,0 +77,2 @@
++  if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
++      === OBSERVED_REUSE_BENCHMARK_GRANT.activationSha256) return OBSERVED_REUSE_BENCHMARK_GRANT;
+@@ -106 +118 @@
+-  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
++  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
+@@ -131 +143 @@
+-    ...([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) ? {
++    ...([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) ? {
+@@ -136,0 +149,3 @@
++    } : {}),
++    ...(active.benchmarkId === OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId ? {
++      providerDeadlineMilliseconds: 60000, dispatchAccountingV2: true, providerBodyBoundBytes: 1048576,
+--- a/src/gemini-worker.ts
++++ b/src/gemini-worker.ts
+@@ -0,0 +1 @@
++import { readBoundedProviderBody } from "./bounded-provider-body.ts";
+@@ -29 +30,16 @@
+-    return Buffer.byteLength(prompt, "utf8");
++    if (!prompt.trim() || Buffer.byteLength(prompt, "utf8") > 4 * 1024 * 1024) throw new Error("GEMINI_TOKEN_INPUT_BOUND");
++    const controller = new AbortController();
++    const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
++    try {
++      const response = await this.#fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:countTokens", {
++        method: "POST", redirect: "error",
++        headers: { "content-type": "application/json", "x-goog-api-key": this.#apiKey },
++        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }] }), signal: controller.signal,
++      });
++      if (!response.ok) { if (response.body) void response.body.cancel().catch(() => {}); throw new Error("GEMINI_TOKEN_HTTP_FAILURE"); }
++      const body: unknown = JSON.parse(await readBoundedProviderBody(response, controller.signal, 65536));
++      const count = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).totalTokens : null;
++      if (!Number.isSafeInteger(count) || (count as number) < 0) throw new Error("GEMINI_TOKEN_ACCOUNTING_INVALID");
++      return count as number; // Provider tokenizer result; completed generation usage remains the billing evidence.
++    } catch { throw new Error("GEMINI_TOKEN_COUNT_UNAVAILABLE"); }
++    finally { clearTimeout(timer); }
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -0,0 +1 @@
++import { observeSelfBuildHttp } from "./self-build-http-timing.ts";
+@@ -183,0 +185,5 @@
++observeSelfBuildHttp(server, {
++  ...(process.env.RAILWAY_GIT_COMMIT_SHA ? { sourceRevision: process.env.RAILWAY_GIT_COMMIT_SHA } : {}),
++  emit: value => console.log(`SARA self-build HTTP timing ${JSON.stringify(value)}`),
++  onTelemetryFailure: () => console.error("SARA self-build timing telemetry unavailable; no acceptance decision changed."),
++});
