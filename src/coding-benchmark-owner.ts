@@ -1,3 +1,4 @@
+import { readCodingBenchmarkEvidence, type BenchmarkEvidence } from "./coding-benchmark-evidence.ts";
 import type { CodingBenchmarkRelayIdentity } from "./coding-benchmark-github-relay.ts";
 import { spawn } from "node:child_process";
 import { readFile, realpath } from "node:fs/promises";
@@ -32,10 +33,20 @@ export async function persistentBenchmarkStateDirectory(stateDirectory: string |
 
 export async function ownerCodingBenchmarkReadiness(input: OwnerBenchmarkInput) {
   const readiness = inspectCodingBenchmarkReadiness(input);
-  try { await persistentBenchmarkStateDirectory(input.stateDirectory); }
-  catch { readiness.blockers.push("PERSISTENT_BENCHMARK_STORAGE_UNAVAILABLE"); }
+  let executionEvidence: BenchmarkEvidence | null = null;
+  try {
+    const directory = await persistentBenchmarkStateDirectory(input.stateDirectory);
+    try {
+      executionEvidence = await readCodingBenchmarkEvidence(directory, readiness.benchmarkId);
+      if (executionEvidence.status !== "not_started") {
+        readiness.blockers.push("BENCHMARK_EXECUTION_ALREADY_CLAIMED");
+        readiness.availableAuthorizationUsd = 0;
+        readiness.unresolvedExposureUsd = readiness.maximumSpendUsd;
+      }
+    } catch { readiness.blockers.push("BENCHMARK_EVIDENCE_UNAVAILABLE"); readiness.availableAuthorizationUsd = 0; }
+  } catch { readiness.blockers.push("PERSISTENT_BENCHMARK_STORAGE_UNAVAILABLE"); }
   readiness.ready = readiness.blockers.length === 0;
-  return { ...readiness,
+  return { ...readiness, executionEvidence,
     ...(input.launcher ? { launcher: structuredClone(input.launcher) } : {}),
     authenticatedLaunchPath: "/api/coding-benchmark/run",
     execution: "existing_matched_cli_only",
