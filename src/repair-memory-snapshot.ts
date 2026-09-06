@@ -1,4 +1,4 @@
-import { Buffer } from "node:buffer";
+import { Buffer, isUtf8 } from "node:buffer";
 
 const MAX_ENTRY_BYTES = 2 * 1024 * 1024;
 const MAX_RETAINED_BYTES = 4 * 1024 * 1024;
@@ -18,17 +18,26 @@ export class ExactByteSnapshotCache<T> {
   constructor(decode: (text: string) => T) { this.#decode = decode; }
 
   decode(key: string, bytes: Buffer): T {
+    return this.project(key, bytes, value => value);
+  }
+
+  /** Synchronous read-only projection. Only the selected result is copied; the
+   * cached plain-data graph is deeply frozen, never shared as mutable authority.
+   * Callers still reread/validate current file bytes under their existing lock.
+   */
+  project<R>(key: string, bytes: Buffer, select: (value: T) => R): R {
     const cached = this.#entries.get(key);
     if (cached && cached.bytes.equals(bytes)) {
       this.#entries.delete(key); this.#entries.set(key, cached);
-      return structuredClone(cached.value);
+      return structuredClone(select(cached.value));
     }
-    // Changed or invalid bytes must never leave a stale entry eligible.
     this.#remove(key);
-    const value = this.#decode(bytes.toString("utf8"));
+    // Buffer.toString replaces malformed sequences. Reject them before parsing
+    // so corrupt bytes cannot be accepted as legitimate replacement characters.
+    if (!isUtf8(bytes)) throw new Error("REPAIR_MEMORY_INVALID_UTF8");
+    const value = freezePlainData(structuredClone(this.#decode(bytes.toString("utf8"))));
     if (bytes.length <= MAX_ENTRY_BYTES) {
-      // Own both representations; neither input nor returned mutable values can poison reuse.
-      const snapshot = { bytes: Buffer.from(bytes), value: structuredClone(value) };
+      const snapshot = { bytes: Buffer.from(bytes), value };
       while (this.#entries.size >= MAX_ENTRIES || this.#retainedBytes + bytes.length > MAX_RETAINED_BYTES) {
         const oldest = this.#entries.keys().next().value;
         if (oldest === undefined) break;
@@ -36,13 +45,27 @@ export class ExactByteSnapshotCache<T> {
       }
       this.#entries.set(key, snapshot); this.#retainedBytes += snapshot.bytes.length;
     }
-    return value;
+    return structuredClone(select(value));
   }
 
   #remove(key: string): void {
     const entry = this.#entries.get(key);
     if (entry) { this.#entries.delete(key); this.#retainedBytes -= entry.bytes.length; }
   }
+}
+
+/** Object.freeze does not immobilize Map/Date/typed-array internal state.
+ * This cache is for structurally validated plain records, arrays and primitives.
+ */
+function freezePlainData<T>(value: T, seen = new WeakSet<object>()): T {
+  if (value === null || typeof value !== "object") return value;
+  if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) {
+    throw new Error("REPAIR_MEMORY_SNAPSHOT_NOT_PLAIN_DATA");
+  }
+  if (seen.has(value)) return value;
+  seen.add(value);
+  for (const child of Object.values(value)) freezePlainData(child, seen);
+  return Object.freeze(value);
 }
 
 type BoundedReader = {
