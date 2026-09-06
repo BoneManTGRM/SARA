@@ -7,6 +7,7 @@ import type { AddressInfo } from "node:net";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
 import { createSaraServer } from "../src/server.ts";
 import { sha256 } from "../src/canonical.ts";
+import { FreshTypecheckCompilerHost } from "../src/verification-typecheck-host.ts";
 import { candidate } from "./helpers/repair-memory-fixture.ts";
 import type { WorkerModelClient } from "../src/model-router.ts";
 import type { CodingRepairReuseSummary } from "../src/reusable-coding-candidate-generator.ts";
@@ -15,7 +16,12 @@ test("the real authenticated self-build route learns once and reuses after a com
   const root = await mkdtemp(join(tmpdir(), "sara-reuse-http-"));
   const token = "local-reuse-fixture-only";
   const hash = sha256(token);
-  let modelCalls = 0, countCalls = 0;
+  let modelCalls = 0, countCalls = 0, freshTypecheckHosts = 0;
+  const createHost = FreshTypecheckCompilerHost.prototype.createHost;
+  FreshTypecheckCompilerHost.prototype.createHost = function(options) {
+    freshTypecheckHosts++;
+    return createHost.call(this, options);
+  };
   const modelClient: WorkerModelClient = { routeKey: "openai:gpt-5.6-luna:paid", maximumWallTimeMs: 1000,
     async countInputTokens() { countCalls++; return 100; },
     async execute(input) {
@@ -56,11 +62,15 @@ test("the real authenticated self-build route learns once and reuses after a com
     const directory = join(root, "coding-repair-receipts");
     const summaries: CodingRepairReuseSummary[] = [];
     for (const id of await readdir(directory)) summaries.push(JSON.parse(await readFile(join(directory, id, "reuse.json"), "utf8")).summary);
+    assert.equal(freshTypecheckHosts, 6, "each job runs three fresh canary compiler hosts; kernel is separate");
     assert.equal(summaries.length, 2);
     assert.equal(summaries.filter(s => s.hits === 1 && s.modelRequests === 0).length, 1);
     assert.equal(summaries.filter(s => s.learnedRecipeId !== null).length, 1);
     assert(summaries.every(s => s.finalFreshVerification));
     const warm = summaries.find(s => s.hits === 1)!;
     assert.equal(warm.reusedRecipes.length, 1); assert.equal(warm.reusedRecipes[0].outcome, "verified_complete");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally {
+    FreshTypecheckCompilerHost.prototype.createHost = createHost;
+    await rm(root, { recursive: true, force: true });
+  }
 });
