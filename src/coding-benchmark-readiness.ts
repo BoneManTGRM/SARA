@@ -22,7 +22,20 @@ export const ADDITIONAL_CODING_BENCHMARK_GRANT = Object.freeze({
   activationSha256: "8e2feaaa7d017d3fedc304c36d40062efffeaf49b7840d3ed32362caf0fc4bba",
 });
 
+// Separately approved post-PR111 trial. Historical grant objects and receipts
+// remain immutable; activation uses a fresh identity, never a replay allowance.
+export const POST_FIX_CODING_BENCHMARK_GRANT = Object.freeze({
+  benchmarkId: "88390661-7819-42f5-a7d3-eb2f3d985e5f",
+  registrationSourceRevision: "adea96e56de8f9b64d96e301ab401abcec23e759",
+  maximumSpendUsd: 0.15,
+  maximumModelSpendUsdPerArm: 0.075,
+  unresolvedExposureUsd: 0,
+  activationSha256: "9dfb3e2c40f14cc997373ad074b84dc80090c1b1ddf1e42f32cd7a57edea4d60",
+});
+
 export function activeCodingBenchmarkContinuation(environment: Record<string, string | undefined>) {
+  if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
+      === POST_FIX_CODING_BENCHMARK_GRANT.activationSha256) return POST_FIX_CODING_BENCHMARK_GRANT;
   return environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
     === ADDITIONAL_CODING_BENCHMARK_GRANT.activationSha256
     ? ADDITIONAL_CODING_BENCHMARK_GRANT
@@ -55,7 +68,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   if (!input.constitutionVerified) blockers.push("CONSTITUTION_UNVERIFIED");
   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
   if (active.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
-  const additional = active.benchmarkId === ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId;
+  const additional = active.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId;
   return {
     schemaVersion: additional ? 2 : 1,
     benchmarkId: active.benchmarkId,
