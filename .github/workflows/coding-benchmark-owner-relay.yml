@@ -1,5 +1,4 @@
-name: Authorized maximum-observed SARA repair reuse pilot
-# A prior preflight returned 401 with zero POST attempts; no paid execution is being replayed.
+name: Authorized hardened SARA real reuse comparison
 on:
   push:
     branches: [verify/coding-benchmark-owner-relay-20260905]
@@ -8,7 +7,7 @@ permissions:
   contents: read
   id-token: write
 concurrency:
-  group: sara-maximum-reuse-eb659a8f
+  group: sara-hardened-reuse-d89f2a9c
   cancel-in-progress: false
 jobs:
   compare-once:
@@ -19,18 +18,19 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: One exact-scope launch then GET-only original evidence recovery
+      - name: Exact new-grant preflight then one POST and GET-only recovery
         env:
-          EXPECTED_RUNTIME: d29d0bacaa423cd998d420e34826390ba313e077
+          EXPECTED_RUNTIME: 4adf3c149030d2984807753caac24d62521d6b80
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo 'aa23ac3b05d0e61f60c6acc127010acb9ae5758672a71b60edba75df712e5b8e  scripts/launch-hardened-reuse-d89f2a9c.py' | sha256sum -c -
           echo 'e84185e39c5ae32a23814c827e0bde334299facf188c218da9446436c2ed389f  scripts/launch-max-reuse-eb659a8f.py' | sha256sum -c -
-          python3 scripts/launch-max-reuse-eb659a8f.py
+          python3 scripts/launch-hardened-reuse-d89f2a9c.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: sara-maximum-reuse-pilot-${{ github.run_id }}
-          path: /tmp/sara-maximum-reuse-eb659a8f
-          if-no-files-found: error
+          name: sara-hardened-reuse-live-${{ github.run_id }}
+          path: /tmp/sara-hardened-reuse-d89f2a9c
           retention-days: 14
+          if-no-files-found: error
