@@ -1,34 +1,34 @@
-name: One-use authenticated benchmark connection proof
+name: One-use authenticated coding speed trial
 on:
   push:
     branches: [verify/coding-benchmark-owner-relay-20260905]
     paths:
       - .github/workflows/coding-benchmark-owner-relay.yml
-      - scripts/probe-coding-benchmark-owner-relay.py
 permissions:
   contents: read
   id-token: write
 jobs:
-  prove-corrected-connection-without-paid-execution:
-    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 3
+  launch-additional-matched-trial:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Verify exact probe and exercise existing authenticated rejection path
+      - name: Launch exactly one separately authorized matched trial
         env:
-          EXPECTED_RUNTIME: 9fa4945bd8becab34ee536ce86dc45d6c8a5bd43
+          EXPECTED_RUNTIME: 2c21426a52373cb2982e9759deb7e0f81f98df63
           PYTHONOPTIMIZE: '0'
         run: |
+          set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo 'a3720c2e77a95c0004f73f6e51a1df829a5dd6b29ba3cdf6c31bf0bbc177689f  scripts/probe-coding-benchmark-owner-relay.py' | sha256sum -c -
-          python3 scripts/probe-coding-benchmark-owner-relay.py
+          sleep 55
+          python3 scripts/launch-additional-coding-benchmark-relay.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sara-authenticated-benchmark-connection-${{ github.run_id }}-1
+          name: sara-additional-coding-benchmark-launch-${{ github.run_id }}
           path: /tmp/sara-relay-live-proof
           if-no-files-found: error
           retention-days: 7
