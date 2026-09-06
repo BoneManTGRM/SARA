@@ -1,4 +1,5 @@
 name: Authorized maximum-observed SARA repair reuse pilot
+# A prior preflight returned 401 with zero POST attempts; no paid execution is being replayed.
 on:
   push:
     branches: [verify/coding-benchmark-owner-relay-20260905]
