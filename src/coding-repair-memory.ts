@@ -103,10 +103,10 @@ export class DurableCodingRepairMemory {
   readonly directory: string;
   constructor(stateDirectory: string) { this.directory = resolve(stateDirectory, "coding-repair-memory-v1"); }
 
-  async #transaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>): Promise<T> {
-    return withMemoryQueue(this.directory, () => this.#filesystemTransaction(action));
+  async #transaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>, readOnly = false): Promise<T> {
+    return withMemoryQueue(this.directory, () => this.#filesystemTransaction(action, readOnly));
   }
-  async #filesystemTransaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>): Promise<T> {
+  async #filesystemTransaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>, readOnly: boolean): Promise<T> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     if (await realpath(this.directory) !== this.directory) throw new Error("REPAIR_MEMORY_DIRECTORY_SYMLINK");
     const dir = await open(this.directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -125,18 +125,24 @@ export class DurableCodingRepairMemory {
       lockHeld = true;
       await dir.sync();
       let records: Recipe[] = [];
+      let projected: MemoryTransaction<T> | undefined;
       try {
         const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
         try {
           const stat = await file.stat();
           if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_BYTES || (stat.mode & 0o077) !== 0) throw new Error("REPAIR_MEMORY_FILE_BOUNDARY");
           const bytes = await readExactMemoryBytes(file, stat.size);
-          records = recordSnapshots.decode(this.directory, bytes);
+          if (readOnly) {
+            // Only lookup/assertReusable use this path. Frozen snapshot prevents
+            // mutation; only their small result is copied, not the entire store.
+            projected = recordSnapshots.project(this.directory, bytes, action);
+          } else records = recordSnapshots.decode(this.directory, bytes);
         } finally { await file.close(); }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      const { value, changed } = action(records);
+      const { value, changed } = projected ?? action(records);
+      if (readOnly && changed) throw new Error("REPAIR_MEMORY_READ_ONLY_TRANSITION");
       // A duplicate acknowledgement still rereads/validates under the lock.
       // Only an actual state transition needs another durable file replacement.
       if (changed) {
@@ -216,7 +222,7 @@ export class DurableCodingRepairMemory {
       const after = { ...candidate, files: candidate.files.map(f => ({ ...f, content: replacements.get(f.path) ?? f.content })) };
       if (codingRepairCandidateDigest(after) !== r.verifiedArtifactDigest) throw new Error("REPAIR_MEMORY_RESULT_MISMATCH");
       return { value: { key, id: r.id, verifiedArtifactDigest: r.verifiedArtifactDigest, proposal }, changed: false };
-    });
+    }, true);
   }
 
   async assertReusable(hit: RepairMemoryIdentity): Promise<void> {
@@ -227,7 +233,7 @@ export class DurableCodingRepairMemory {
       if (!record || record.quarantineDigest !== null || record.id !== id || record.verifiedArtifactDigest !== verifiedArtifactDigest)
         throw new Error("REPAIR_MEMORY_REVOKED_DURING_RUN");
       return { value: undefined, changed: false };
-    });
+    }, true);
   }
 
   async quarantine(key: string, failureDigest: string): Promise<void> {

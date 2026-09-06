@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { sha256 } from "./canonical.ts";
-import { ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
+import { HARDENED_REUSE_BENCHMARK_GRANT, ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
 
 const MAX_FILES = 128;
 const MAX_FILE_BYTES = 1_048_576;
@@ -19,7 +19,7 @@ export type BenchmarkEvidence = {
  * Raw bounded files preserve interrupted writes without inventing valid receipts.
  */
 export async function readCodingBenchmarkEvidence(stateDirectory: string, benchmarkId: string): Promise<BenchmarkEvidence> {
-  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
+  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
     throw new Error("BENCHMARK_EVIDENCE_SCOPE_REJECTED");
   }
   const empty: BenchmarkEvidence = { schemaVersion: 1, status: "not_started", replayAllowed: false, files: [] };
@@ -42,7 +42,7 @@ export async function readCodingBenchmarkEvidence(stateDirectory: string, benchm
     ["snapshots", /^[a-f0-9]{64}\.json$/u],
     ["trace", /^(?:(?:owner-launch-(?:claim|exit)|terminal-accounting|trial-registration)|(?:luna(?:_reparodynamic)?-(?:(?:count-)?[0-9]{4}-(?:reservation|response|error)|event-[0-9]{4}-(?:verification|model_request|model_response|model_failure))))\.json$/u],
   ];
-  if (benchmarkId === REUSE_SPEED_BENCHMARK_GRANT.benchmarkId) {
+  if ([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
     rules.push(["reuse-state/jobs", /^(regenerate|ordinary_memory|optimized)-[0-3]\.json$/u],
       ["reuse-state/trace", /^(reuse-registration|reuse-summary|reuse-budget-[0-9]{4}-(reservation|response|error))\.json$/u]);
   }
