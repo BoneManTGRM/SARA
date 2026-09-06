@@ -28,6 +28,7 @@ import { createReusableCodingCandidateGenerator } from "./reusable-coding-candid
 import { DurableCodingRepairMemory, codingRepairMemoryScope } from "./coding-repair-memory.ts";
 import { persistCodingRepairReuse } from "./coding-repair-reuse-receipt.ts";
 import { createLunaCodingRepairModel } from "./luna-coding-repair-model.ts";
+import { createAdaptiveCodingRepairModel, persistRepairFormatDecision } from "./adaptive-coding-repair-model.ts";
 import { verifyGenomeLabProgramCandidate } from "./genome-lab-verifier.ts";
 import { persistCodingRepairReceipt, persistCodingRepairRun } from "./coding-repair-receipt-store.ts";
 
@@ -541,10 +542,12 @@ async function handleSelfBuild(
       scope: (context) => codingRepairMemoryScope(owner.id, context),
       onReuse: (summary) => persistCodingRepairReuse({ stateDirectory: options.reparodynamicCoding!.stateDirectory, runId, summary }),
       mode: options.reparodynamicCoding.mode,
-      model: (context) => createLunaCodingRepairModel({
-        client: options.reparodynamicCoding!.modelClient,
-        context,
-      }),
+      model: (context) => options.reparodynamicCoding!.mode === "canary"
+        ? createAdaptiveCodingRepairModel({ client: options.reparodynamicCoding!.modelClient, context,
+          onFormat: (decision) => persistRepairFormatDecision({
+            stateDirectory: options.reparodynamicCoding!.stateDirectory, runId, decision }),
+        })
+        : createLunaCodingRepairModel({ client: options.reparodynamicCoding!.modelClient, context }),
       verify: (candidate, context) => verifyGenomeLabProgramCandidate({
         candidate,
         objective: context.objective,
