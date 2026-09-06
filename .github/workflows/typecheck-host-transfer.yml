@@ -1,0 +1,72 @@
+name: Verify exact fresh typecheck host
+on:
+  push:
+    branches: [perf/fresh-typecheck-host-20260906]
+    paths: [.github/workflows/typecheck-host-transfer.yml]
+permissions:
+  contents: read
+jobs:
+  transfer:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Apply exact candidate and remove transport
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sara-typecheck-transfer
+          python3 - <<'PY'
+          import base64,gzip,hashlib,pathlib
+          encoded=''.join((pathlib.Path('.sara-typecheck-transfer')/('part'+str(i))).read_text(encoding='ascii') for i in range(3))
+          assert len(encoded)==12392
+          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert len(patch)==31502
+          assert hashlib.sha256(patch).hexdigest()=='5a72f57070a12b724789f19c868eae5052df722f1dd204b1c7651090f8167bec'
+          pathlib.Path('/tmp/sara-typecheck-transfer/candidate.patch').write_bytes(patch)
+          PY
+          git apply --index /tmp/sara-typecheck-transfer/candidate.patch
+          git rm .github/workflows/typecheck-host-transfer.yml .sara-typecheck-transfer/part0 .sara-typecheck-transfer/part1 .sara-typecheck-transfer/part2
+          test "$(git write-tree)" = 65110bcd4cba8d71b00ee5abcbddef2cba1f603a
+          test -z "$(git ls-files node_modules)"
+      - run: npm ci --ignore-scripts
+      - name: Full credential-free verification
+        run: |
+          set -euo pipefail
+          npm run verify | tee /tmp/sara-typecheck-transfer/verify.log
+          git diff --exit-code
+          test "$(git write-tree)" = 65110bcd4cba8d71b00ee5abcbddef2cba1f603a
+      - name: Publish only this verified branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = BoneManTGRM/SARA
+          test "$GITHUB_REF" = refs/heads/perf/fresh-typecheck-host-20260906
+          test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'SARA verified source transfer'
+          git config user.email 'source-transfer@users.noreply.github.com'
+          git commit -m 'Use fresh error-preserving compiler hosts for canary repair verification'
+          test "$(git rev-parse HEAD^{tree})" = 65110bcd4cba8d71b00ee5abcbddef2cba1f603a
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/perf/fresh-typecheck-host-20260906
+          unset AUTH GH_TOKEN
+          git rev-parse HEAD > /tmp/sara-typecheck-transfer/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-typecheck-transfer/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/sara-typecheck-transfer/source.tar.gz
+          cd /tmp/sara-typecheck-transfer
+          sha256sum candidate.patch source.tar.gz verify.log > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: sara-fresh-typecheck-transfer-${{ github.run_id }}
+          path: /tmp/sara-typecheck-transfer/
+          if-no-files-found: error
+          retention-days: 14
