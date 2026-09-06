@@ -1,0 +1,42 @@
+name: Native canary dependency capture
+on:
+  push:
+    branches: [perf/native-verified-canary-20260906]
+    paths: [.github/workflows/native-canary-dependencies.yml]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Install exact compiler in isolated scratch directory
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sara-native-capture/compiler
+          cd /tmp/sara-native-capture/compiler
+          printf '%s\n' '{"name":"sara-native-checker","private":true,"version":"1.0.0","dependencies":{"typescript":"7.0.2"}}' > package.json
+          npm install --ignore-scripts --no-audit --no-fund
+          node - <<'JS'
+          const assert=require('node:assert/strict');const lock=require('./package-lock.json');
+          assert.equal(lock.packages['node_modules/typescript'].version,'7.0.2');
+          assert.equal(lock.packages['node_modules/typescript'].integrity,'sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==');
+          assert.equal(lock.packages['node_modules/@typescript/typescript-linux-x64'].integrity,'sha512-EYdf2cNg7rgCWJnxCdJ+F3V39O8ihb37eHAu1LK8oAFizgTQbPOK7zHHXbPt8rX24COqODXeI3sIf0fCXG7H/A==');
+          JS
+          node_modules/.bin/tsc --version > ../version.txt
+          test "$(cat ../version.txt)" = 'Version 7.0.2'
+          cd ..
+          tar -czf compiler.tar.gz compiler
+          sha256sum compiler.tar.gz version.txt > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sara-native-pinned-dependencies
+          path: |
+            /tmp/sara-native-capture/compiler.tar.gz
+            /tmp/sara-native-capture/version.txt
+            /tmp/sara-native-capture/SHA256SUMS
+          retention-days: 7
