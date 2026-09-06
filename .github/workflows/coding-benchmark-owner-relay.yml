@@ -1,4 +1,4 @@
-name: Read-only completed coding trial evidence
+name: Authorized post-fix SARA coding comparison
 on:
   push:
     branches: [verify/coding-benchmark-owner-relay-20260905]
@@ -6,27 +6,30 @@ on:
 permissions:
   contents: read
   id-token: write
+concurrency:
+  group: sara-postfix-88390661
+  cancel-in-progress: false
 jobs:
-  retrieve-without-replay:
-    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 5
+  compare-once:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 6
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Save completed grant receipts through GET only
+      - name: Launch once and retain terminal receipts
         env:
-          EXPECTED_RUNTIME: 7984a94080dcc900983c1c521cd3f13d8f6f2e50
+          EXPECTED_RUNTIME: 5009c6304a5aca2e7bef0d85caeadd1044965454
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo '65832ff18b60b19dbad0216e930d8eb83678376d10b3bd7f4c7faaa515cec526  scripts/collect-completed-coding-benchmark.py' | sha256sum -c -
-          python3 scripts/collect-completed-coding-benchmark.py
-      - uses: actions/upload-artifact@v4
+          echo '4da241eafa0a0dabe8fd623bfb3f0456120ccbcb5da808619fd017bb4caa7d00  scripts/launch-post-fix-comparison.py' | sha256sum -c -
+          python3 scripts/launch-post-fix-comparison.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: sara-completed-trial-evidence-${{ github.run_id }}
-          path: /tmp/sara-completed-trial-evidence
+          name: sara-postfix-comparison-${{ github.run_id }}
+          path: /tmp/sara-postfix-comparison-88390661
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
