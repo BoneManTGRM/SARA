@@ -122,3 +122,38 @@ Five new concurrency/revocation regressions first failed on the original PR113
 source before these fixes, then passed. Additional regressions cover bounded
 queue overflow, corrupted-state recovery and retained interrupted locks. These
 are credential-free tests, not a new paid comparison or a 35x performance claim.
+
+
+## Bounded cold-learning coordination
+
+A same-process coordinator now covers the first repair cycle when an exact
+eligible recipe is not yet in memory. Its identity binds the private directory,
+existing owner/task/source/test/failure scope, generator ID, strategy and remaining
+model allowance. A leader runs its own unchanged bounded controller. Followers
+receive only a completion notification, then read the durable recipe again and
+execute their own fresh baseline/repair/final checks. The kernel still performs
+its own verification. Warm reads without a learner remain parallel. No source,
+allowance, token usage, authorization or PASS is shared by the coordinator.
+
+Followers are released after required run and reuse receipts and return-boundary
+checks. A newly learned recipe is quarantined (or the store is durably disabled
+by the existing quarantine mechanism) if a later mandatory callback fails.
+Leader failure, missing/revoked/ineligible results, coordinator saturation or
+follower timeout abort that follower without another model dispatch. Later
+separately authorized jobs retain normal admission and accounting controls.
+
+Limits: 32 active identities, 32 waiters per identity and 128 waiters total.
+A follower times out after a nominal 30 seconds; Node event-loop scheduling can
+delay timers, so this is not a hard real-time guarantee. Timeout removes its
+listener but never steals or evicts an unresolved leader. Coordination is local,
+not persisted or distributed; filesystem locks are not held over model/verifier
+work. No startup flags, budgets, historical grants, protected tests or frozen
+benchmark implementation change. Coordinator source contributes to reuse scope.
+
+Run proof/cold-repair-learning.ts with SARA_CONTROL_ROOT pointing to the exact
+PR114 source and a new SARA_COLD_EVIDENCE_DIRECTORY. The control wrapper digest
+is pinned. All generation is scripted; compilation and behavioral verification
+are real. Cold waiting and storage are included. Fewer generator calls do not
+establish live latency gains. Ordinary memory with equivalent single-flight
+coordination can supply the same mechanism; no unique Reparodynamics effect or
+35x performance is asserted.
