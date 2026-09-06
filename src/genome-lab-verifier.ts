@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { posix } from "node:path";
 import { canonicalJson, sha256 } from "./canonical.ts";
-import { assertBoundedProgramSource, buildVerifiedSkillCandidate, GenomeLabSourceError, validateProgramCandidateStructure } from "./genome-lab.ts";
+import { assertBoundedProgramSource, buildVerifiedSkillCandidate, GenomeLabSourceError, GenomeLabTypecheckError, GenomeLabBehaviorError, validateProgramCandidateStructure } from "./genome-lab.ts";
 import type { CodingFailureKind, CodingFailureSignal, ProgramVerificationResult } from "./coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "./types.ts";
 
@@ -171,20 +171,19 @@ export async function verifyGenomeLabProgramCandidate(input: {
       failures: [failure], completedChecks: ["source_policy", "artifact_integrity"], evidenceDigests: [failure.evidenceDigest],
     };
   }
-  // Reject inadmissible source before loading the TypeScript semantic graph or
-  // creating a workspace. Keep the established critical-capability classification.
-  // The builder still independently repeats this exact guard before execution.
-  if (!input.candidate.files.some(file => PROHIBITED_SOURCE.test(file.content))) {
-    const paths = new Set(input.candidate.files.map(file => file.path));
-    try {
-      for (const file of input.candidate.files) assertBoundedProgramSource(file.path, file.content, paths);
-    } catch (error) {
-      if (error instanceof GenomeLabSourceError) return sourceRejection(input.candidate, error);
-      throw error;
-    }
+  // Keep the existing critical capability path. Other eligible candidates use
+  // the builder's fresh compiler, rather than constructing a duplicate virtual Program.
+  if (input.candidate.files.some(file => PROHIBITED_SOURCE.test(file.content))) {
+    return verifyProgramCandidate({ candidate: input.candidate, experimentalCompilerCache: input.experimentalCompilerCache });
   }
-  const initial = await verifyProgramCandidate({ candidate: input.candidate, experimentalCompilerCache: input.experimentalCompilerCache });
-  if (initial.failures.length > 0) return initial;
+  const paths = new Set(input.candidate.files.map(file => file.path));
+  try {
+    for (const file of input.candidate.files) assertBoundedProgramSource(file.path, file.content, paths);
+  } catch (error) {
+    if (error instanceof GenomeLabSourceError) return sourceRejection(input.candidate, error);
+    throw error;
+  }
+  const artifactDigest = programArtifactDigest(input.candidate);
   const root = await mkdtemp(join(tmpdir(), "sara-reparodynamic-verify-"));
   try {
     await buildVerifiedSkillCandidate(
@@ -212,13 +211,29 @@ export async function verifyGenomeLabProgramCandidate(input: {
     return {
       passed: true,
       score: 1,
-      artifactDigest: initial.artifactDigest,
+      artifactDigest,
       failures: [],
       completedChecks,
-      evidenceDigests: [sha256(canonicalJson({ artifactDigest: initial.artifactDigest, completedChecks, result: "PASS" }))],
+      evidenceDigests: [sha256(canonicalJson({ artifactDigest, completedChecks, result: "PASS" }))],
     };
   } catch (error) {
     if (error instanceof GenomeLabSourceError) return sourceRejection(input.candidate, error);
+    if (error instanceof GenomeLabTypecheckError) {
+      const failures = error.diagnostics.map(diagnostic => signal({
+        kind: diagnostic.code >= 1000 && diagnostic.code < 2000 ? "syntax" : "type",
+        code: `TS${diagnostic.code}`, file: diagnostic.file, line: diagnostic.line, column: diagnostic.column,
+        note: `Compiler diagnostic digest: ${diagnostic.messageDigest}`,
+      }));
+      return { passed: false, score: 0.6, artifactDigest, failures,
+        completedChecks: ["source_policy", "syntax", "typecheck", "artifact_integrity"],
+        evidenceDigests: [...new Set(failures.map(failure => failure.evidenceDigest))] };
+    }
+    if (!(error instanceof GenomeLabBehaviorError)) {
+      const failure = signal({ kind: "unknown", code: "GENOME_LAB_VERIFICATION_INFRASTRUCTURE_FAILURE",
+        note: "Verification infrastructure did not produce a complete verified artifact.", severity: "high" });
+      return { passed: false, score: 0.6, artifactDigest, failures: [failure],
+        completedChecks: ["source_policy", "syntax", "artifact_integrity"], evidenceDigests: [failure.evidenceDigest] };
+    }
     const failure = signal({
       kind: "behavior",
       code: "GENOME_LAB_RUNTIME_FAILURE",
@@ -226,7 +241,7 @@ export async function verifyGenomeLabProgramCandidate(input: {
       severity: "high",
     });
     return {
-      ...initial,
+      artifactDigest,
       passed: false,
       score: 0.8,
       failures: [failure],

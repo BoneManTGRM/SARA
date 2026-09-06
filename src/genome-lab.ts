@@ -51,6 +51,34 @@ const BLOCKED_IDENTIFIERS = new Set([
 ]);
 const BLOCKED_PROPERTIES = new Set(["__proto__", "constructor", "prototype"]);
 
+export type GenomeLabCompilerDiagnostic = Readonly<{
+  code: number; file: string; line: number; column: number; messageDigest: string;
+}>;
+
+export class GenomeLabTypecheckError extends Error {
+  readonly diagnostics: readonly GenomeLabCompilerDiagnostic[];
+  constructor(diagnostics: readonly ts.Diagnostic[], projectDirectory: string) {
+    super(`Generated program failed TypeScript verification with ${diagnostics.length} error(s).`);
+    this.name = "GenomeLabTypecheckError";
+    const root = `${projectDirectory.replaceAll("\\", "/")}/`;
+    this.diagnostics = Object.freeze(diagnostics.map(diagnostic => {
+      const location = diagnostic.file && diagnostic.start !== undefined
+        ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start) : undefined;
+      const absolutePath = diagnostic.file?.fileName.replaceAll("\\", "/") ?? "";
+      return Object.freeze({ code: diagnostic.code, file: absolutePath.startsWith(root) ? absolutePath.slice(root.length) : "",
+        line: location ? location.line + 1 : 0, column: location ? location.character + 1 : 0,
+        messageDigest: sha256(ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")) });
+    }));
+  }
+}
+
+export class GenomeLabBehaviorError extends Error {
+  constructor(cause: unknown) {
+    super("The isolated Genome Lab behavioral verification failed.", { cause });
+    this.name = "GenomeLabBehaviorError";
+  }
+}
+
 export type GenomeLabSourceDiagnostic = {
   kind: "policy" | "syntax";
   code: "GENOME_LAB_SOURCE_SYNTAX" | "GENOME_LAB_MODULE_LOADING" | "GENOME_LAB_MODULE_SPECIFIER"
@@ -423,7 +451,7 @@ async function buildVerifiedProgramCandidate(
     }
     const diagnostics = semanticDiagnostics(projectFiles, experimentalCompilerCache);
     if (diagnostics.length > 0) {
-      throw new Error(`Generated program failed TypeScript verification with ${diagnostics.length} error(s).`);
+      throw new GenomeLabTypecheckError(diagnostics, projectDirectory);
     }
     const runtimeVerifierPath = join(runtimeDirectory, "program-verification.mjs");
     await writeFile(
@@ -448,7 +476,7 @@ async function buildVerifiedProgramCandidate(
         maxBuffer: 128 * 1024,
         encoding: "utf8",
       },
-    );
+    ).catch((error: unknown) => { throw new GenomeLabBehaviorError(error); });
     const verification = {
       result: "PASS",
       command: "kernel:isolated-typescript-program-verification",
