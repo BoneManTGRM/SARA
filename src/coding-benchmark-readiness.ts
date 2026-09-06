@@ -33,7 +33,19 @@ export const POST_FIX_CODING_BENCHMARK_GRANT = Object.freeze({
   activationSha256: "9dfb3e2c40f14cc997373ad074b84dc80090c1b1ddf1e42f32cd7a57edea4d60",
 });
 
+// New owner request: one current-component pilot, not a historical grant replay.
+export const CURRENT_CODING_BENCHMARK_GRANT = Object.freeze({
+  benchmarkId: "90add88e-27a3-4f9b-9437-7e41e5878433",
+  registrationSourceRevision: "3388b92103a4f864a366597ad96d615882658e16",
+  maximumSpendUsd: 0.15,
+  maximumModelSpendUsdPerArm: 0.075,
+  unresolvedExposureUsd: 0,
+  activationSha256: "49135ba940f93ec15e8a8e62556c0d531463567a1d282955c122c7e39ad46bad",
+});
+
 export function activeCodingBenchmarkContinuation(environment: Record<string, string | undefined>) {
+  if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
+      === CURRENT_CODING_BENCHMARK_GRANT.activationSha256) return CURRENT_CODING_BENCHMARK_GRANT;
   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
       === POST_FIX_CODING_BENCHMARK_GRANT.activationSha256) return POST_FIX_CODING_BENCHMARK_GRANT;
   return environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
@@ -67,6 +79,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   if (!sourceIdentified) blockers.push("SOURCE_IDENTITY_UNAVAILABLE");
   if (!input.constitutionVerified) blockers.push("CONSTITUTION_UNVERIFIED");
   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
+  if (active.benchmarkId === CURRENT_CODING_BENCHMARK_GRANT.benchmarkId && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
   if (active.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
   const additional = active.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId;
   return {
@@ -87,6 +100,10 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
     } } : {}),
     model: "gpt-5.6-luna", reasoning: "medium", maximumAttemptsPerArm: 3,
     order: ["luna_reparodynamic", "luna"], compactOutput: false, compilerCaching: false,
+    ...(active.benchmarkId === CURRENT_CODING_BENCHMARK_GRANT.benchmarkId ? {
+      experiment: "current_components_cold_pilot", adaptiveOutputAvailable: true, nativeIntermediateChecks: true,
+      finalLegacyRequired: true, kernelJobMeasured: false, persistentReuseMeasured: false,
+    } : {}),
     evidenceRequired: additional
       ? "This grant is separate and one-use. Preserve the prior $0.15 unresolved hold and never replay the historical benchmark."
       : "Authoritative pre-deploy execution or provider request/usage evidence for the original task, source and deployment. Missing receipts are insufficient.",
