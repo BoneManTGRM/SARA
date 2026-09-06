@@ -29,7 +29,7 @@ function changedLines(before: string, after: string): number {
 function identity(r: RecipeBody): string {
   return sha256(canonicalJson({ key: r.key, verifiedArtifactDigest: r.verifiedArtifactDigest, changes: r.changes, changedLines: r.changedLines }));
 }
-function recordKey(candidate: ProgramCandidateProposal, verification: ProgramVerificationResult, scope: string): string {
+export function codingRepairMemoryKey(candidate: ProgramCandidateProposal, verification: ProgramVerificationResult, scope: string): string {
   if (!isEvidenceDigest(scope)) throw new Error("REPAIR_MEMORY_INVALID_SCOPE");
   validateProgramCandidateStructure(candidate);
   assertCodingRepairVerification(verification);
@@ -161,7 +161,7 @@ export class DurableCodingRepairMemory {
   async learn(input: { before: ProgramCandidateProposal; beforeVerification: ProgramVerificationResult;
     after: ProgramCandidateProposal; verification: ProgramVerificationResult; scope: string }): Promise<string> {
     input = structuredClone(input);
-    const key = recordKey(input.before, input.beforeVerification, input.scope);
+    const key = codingRepairMemoryKey(input.before, input.beforeVerification, input.scope);
     validateProgramCandidateStructure(input.after);
     assertCodingRepairVerification(input.verification);
     if (!input.verification.passed || input.verification.artifactDigest !== codingRepairCandidateDigest(input.after)) throw new Error("REPAIR_MEMORY_UNVERIFIED");
@@ -195,7 +195,7 @@ export class DurableCodingRepairMemory {
   async lookup(candidate: ProgramCandidateProposal, verification: ProgramVerificationResult,
     scope: string, strategy: "surgical" | "deep"): Promise<RepairMemoryHit | null> {
     candidate = structuredClone(candidate); verification = structuredClone(verification);
-    const key = recordKey(candidate, verification, scope);
+    const key = codingRepairMemoryKey(candidate, verification, scope);
     if (strategy !== "surgical" && strategy !== "deep") return null;
     return this.#transaction(false, records => {
       const r = records.find(record => record.key === key);
@@ -252,7 +252,7 @@ export class DurableCodingRepairMemory {
 export async function codingRepairMemoryScope(ownerId: string, context: Parameters<CandidateGenerator["generate"]>[0]): Promise<string> {
   const paths = ["genome-lab.ts", "genome-lab-verifier.ts", "coding-repair-controller.ts", "coding-repair-policy.ts",
     "coding-repair-prompt.ts", "luna-coding-repair-model.ts", "reparodynamic-candidate-generator.ts", "coding-repair-memory.ts",
-    "reusable-coding-candidate-generator.ts", "experimental-v5/coding-repair-verification.ts", "kernel.ts", "server.ts", "../package-lock.json"];
+    "reusable-coding-candidate-generator.ts", "coding-repair-singleflight.ts", "experimental-v5/coding-repair-verification.ts", "kernel.ts", "server.ts", "../package-lock.json"];
   const implementation = await Promise.all(paths.map(async path => [path, sha256(await readFile(new URL(path, import.meta.url), "utf8"))]));
   return sha256(canonicalJson({ schemaVersion: 1, ownerId, objective: context.objective,
     acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest,
