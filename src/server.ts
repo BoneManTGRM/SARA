@@ -24,7 +24,9 @@ import type { CandidateProposal, MutationStage } from "./types.ts";
 import { compileAuthorizedAutomatedReadinessDelivery } from "./authorized-readiness-delivery.ts";
 import type { WorkerModelClient } from "./model-router.ts";
 import type { ReparodynamicCodingMode } from "./coding-repair-types.ts";
-import { createReparodynamicCandidateGenerator } from "./reparodynamic-candidate-generator.ts";
+import { createReusableCodingCandidateGenerator } from "./reusable-coding-candidate-generator.ts";
+import { DurableCodingRepairMemory, codingRepairMemoryScope } from "./coding-repair-memory.ts";
+import { persistCodingRepairReuse } from "./coding-repair-reuse-receipt.ts";
 import { createLunaCodingRepairModel } from "./luna-coding-repair-model.ts";
 import { verifyGenomeLabProgramCandidate } from "./genome-lab-verifier.ts";
 import { persistCodingRepairReceipt, persistCodingRepairRun } from "./coding-repair-receipt-store.ts";
@@ -533,8 +535,11 @@ async function handleSelfBuild(
   };
   const runId = randomUUID();
   const generator = options.reparodynamicCoding && proposal.candidateKind === "typescript_program"
-    ? createReparodynamicCandidateGenerator({
+    ? createReusableCodingCandidateGenerator({
       base: baseGenerator,
+      memory: new DurableCodingRepairMemory(options.reparodynamicCoding.stateDirectory),
+      scope: (context) => codingRepairMemoryScope(owner.id, context),
+      onReuse: (summary) => persistCodingRepairReuse({ stateDirectory: options.reparodynamicCoding!.stateDirectory, runId, summary }),
       mode: options.reparodynamicCoding.mode,
       model: (context) => createLunaCodingRepairModel({
         client: options.reparodynamicCoding!.modelClient,
