@@ -252,7 +252,7 @@ export class DurableCodingRepairMemory {
 export async function codingRepairMemoryScope(ownerId: string, context: Parameters<CandidateGenerator["generate"]>[0]): Promise<string> {
   const paths = ["genome-lab.ts", "genome-lab-verifier.ts", "coding-repair-controller.ts", "coding-repair-policy.ts",
     "coding-repair-prompt.ts", "luna-coding-repair-model.ts", "reparodynamic-candidate-generator.ts", "coding-repair-memory.ts",
-    "reusable-coding-candidate-generator.ts", "coding-repair-singleflight.ts", "repair-memory-snapshot.ts", "experimental-v5/coding-repair-verification.ts", "kernel.ts", "server.ts", "../package-lock.json"];
+    "reusable-coding-candidate-generator.ts", "coding-repair-singleflight.ts", "repair-memory-snapshot.ts", "fresh-typecheck-host.ts", "experimental-compiler-cache.ts", "experimental-v5/coding-repair-verification.ts", "kernel.ts", "server.ts", "../package-lock.json"];
   const implementation = await Promise.all(paths.map(async path => [path, sha256(await readFile(new URL(path, import.meta.url), "utf8"))]));
   return sha256(canonicalJson({ schemaVersion: 1, ownerId, objective: context.objective,
     acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest,

@@ -29,6 +29,7 @@ import { DurableCodingRepairMemory, codingRepairMemoryScope } from "./coding-rep
 import { persistCodingRepairReuse } from "./coding-repair-reuse-receipt.ts";
 import { createLunaCodingRepairModel } from "./luna-coding-repair-model.ts";
 import { verifyGenomeLabProgramCandidate } from "./genome-lab-verifier.ts";
+import { codingTypecheckHost } from "./fresh-typecheck-host.ts";
 import { persistCodingRepairReceipt, persistCodingRepairRun } from "./coding-repair-receipt-store.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -546,6 +547,7 @@ async function handleSelfBuild(
         context,
       }),
       verify: (candidate, context) => verifyGenomeLabProgramCandidate({
+        experimentalCompilerCache: codingTypecheckHost(options.reparodynamicCoding!.mode),
         candidate,
         objective: context.objective,
         acceptanceCriteria: context.acceptanceCriteria,
