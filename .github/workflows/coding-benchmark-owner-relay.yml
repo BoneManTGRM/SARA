@@ -1,4 +1,4 @@
-name: Authorized post-fix SARA coding comparison
+name: Authorized current-component SARA coding pilot
 on:
   push:
     branches: [verify/coding-benchmark-owner-relay-20260905]
@@ -7,29 +7,29 @@ permissions:
   contents: read
   id-token: write
 concurrency:
-  group: sara-postfix-88390661
+  group: sara-current-pilot-90add88e
   cancel-in-progress: false
 jobs:
   compare-once:
-    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 6
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Launch once and retain terminal receipts
+      - name: Launch once after exact-scope readiness; recover original receipts
         env:
-          EXPECTED_RUNTIME: 5009c6304a5aca2e7bef0d85caeadd1044965454
+          EXPECTED_RUNTIME: 1366afc9ff9991b6f42a9136cdb8ba7b63a6668f
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo '4da241eafa0a0dabe8fd623bfb3f0456120ccbcb5da808619fd017bb4caa7d00  scripts/launch-post-fix-comparison.py' | sha256sum -c -
-          python3 scripts/launch-post-fix-comparison.py
+          echo 'cbcb38fc3ece2996086a780fe02501a56caa1cd847d892d84b60dafc14217550  scripts/launch-current-pilot-90add88e.py' | sha256sum -c -
+          python3 scripts/launch-current-pilot-90add88e.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: sara-postfix-comparison-${{ github.run_id }}
-          path: /tmp/sara-postfix-comparison-88390661
+          name: sara-current-coding-pilot-${{ github.run_id }}
+          path: /tmp/sara-current-pilot-90add88e
           if-no-files-found: error
           retention-days: 14
