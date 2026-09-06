@@ -1,0 +1,70 @@
+name: Verify adaptive repair format candidate
+on:
+  push:
+    branches: [perf/adaptive-repair-format-20260906]
+    paths: [.github/workflows/adaptive-format-transfer.yml]
+permissions:
+  contents: read
+jobs:
+  transfer:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Apply digest-bound candidate
+        env:
+          PATCH_BASE64: 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
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sara-adaptive-transfer
+          python3 - <<'PY'
+          import os,base64,gzip,hashlib,pathlib
+          patch=gzip.decompress(base64.b64decode(os.environ['PATCH_BASE64'],validate=True))
+          assert len(patch)==36681
+          assert hashlib.sha256(patch).hexdigest()=='894a78ccbd8119c51586a3e40669426b4b4823695034a753fc25c85abd5211a2'
+          pathlib.Path('/tmp/sara-adaptive-transfer/candidate.patch').write_bytes(patch)
+          PY
+          git apply --index /tmp/sara-adaptive-transfer/candidate.patch
+          git rm .github/workflows/adaptive-format-transfer.yml
+          test "$(git write-tree)" = aa64df8341183b95530a9289be206fc759083aa0
+          test -z "$(git ls-files node_modules)"
+      - run: npm ci --ignore-scripts
+      - name: Verify without provider credentials
+        run: |
+          set -euo pipefail
+          npm run verify | tee /tmp/sara-adaptive-transfer/verify.log
+          git diff --exit-code
+          test "$(git write-tree)" = aa64df8341183b95530a9289be206fc759083aa0
+      - name: Publish verified candidate on this branch only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/perf/adaptive-repair-format-20260906
+          test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'SARA verified source transfer'
+          git config user.email 'source-transfer@users.noreply.github.com'
+          git commit -m 'Select digest-bound compact edits for large canary repairs'
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/perf/adaptive-repair-format-20260906
+          unset AUTH GH_TOKEN
+          git rev-parse HEAD > /tmp/sara-adaptive-transfer/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-adaptive-transfer/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/sara-adaptive-transfer/source.tar.gz
+          cd /tmp/sara-adaptive-transfer
+          sha256sum candidate.patch source.tar.gz verify.log > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: sara-adaptive-format-transfer-${{ github.run_id }}
+          path: /tmp/sara-adaptive-transfer/
+          if-no-files-found: error
+          retention-days: 14
