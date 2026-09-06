@@ -1,0 +1,81 @@
+name: Verify durable repair reuse source
+on:
+  push:
+    branches: [perf/durable-repair-reuse-20260906]
+    paths: [.github/workflows/durable-repair-reuse-transfer.yml]
+permissions:
+  contents: read
+jobs:
+  transfer:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Reconstruct only the digest-bound source candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = 5009c6304a5aca2e7bef0d85caeadd1044965454
+          mkdir -p /tmp/sara-durable-transfer
+          for sha in 609f9d1899d7811d98728ba256a815a5816a9500 ef7d6f4781aa548902bc3ae3daa68008ce6d4bff 15344dde3650c1c2f8cef15a8585f60d052fae9b; do
+            gh api "repos/BoneManTGRM/SARA/git/blobs/$sha" > "/tmp/sara-durable-transfer/$sha.json"
+          done
+          python3 - <<'PY'
+          import base64,gzip,hashlib,json,pathlib
+          root=pathlib.Path('/tmp/sara-durable-transfer')
+          chunks=[]
+          for sha in ['609f9d1899d7811d98728ba256a815a5816a9500','ef7d6f4781aa548902bc3ae3daa68008ce6d4bff','15344dde3650c1c2f8cef15a8585f60d052fae9b']:
+              v=json.loads((root/(sha+'.json')).read_text())
+              b=base64.b64decode(v['content'])
+              assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest()==sha
+              chunks.append(b)
+          patch=gzip.decompress(base64.b64decode(b''.join(chunks),validate=True))
+          assert hashlib.sha256(patch).hexdigest()=='f9d8fa475c5372364390fe719e4eaae1c8bdfaf55e9bed30ead3db57a0ef5ed4'
+          (root/'candidate.patch').write_bytes(patch)
+          PY
+          git apply --index /tmp/sara-durable-transfer/candidate.patch
+          git rm .github/workflows/durable-repair-reuse-transfer.yml
+          test "$(git write-tree)" = c1be7279d28bf8346e5268ffb11fe8a5ea7d5ce6
+      - run: npm ci --ignore-scripts
+      - name: Verify candidate with no provider credentials
+        run: |
+          set -euo pipefail
+          npm run verify | tee /tmp/sara-durable-transfer/verify.log
+          git diff --exit-code
+          test "$(git write-tree)" = c1be7279d28bf8346e5268ffb11fe8a5ea7d5ce6
+      - name: Publish verified source to this branch only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/perf/durable-repair-reuse-20260906
+          test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'SARA verified source transfer'
+          git config user.email 'source-transfer@users.noreply.github.com'
+          git commit -m 'Learn and reuse exact-source repairs with fresh verification and durable quarantine'
+          test "$(git rev-parse HEAD^{tree})" = c1be7279d28bf8346e5268ffb11fe8a5ea7d5ce6
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/perf/durable-repair-reuse-20260906
+          unset AUTH GH_TOKEN
+          git rev-parse HEAD > /tmp/sara-durable-transfer/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-durable-transfer/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/sara-durable-transfer/source.tar.gz
+          cd /tmp/sara-durable-transfer
+          sha256sum candidate.patch source.tar.gz verify.log > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: sara-durable-reuse-source-${{ github.run_id }}
+          path: /tmp/sara-durable-transfer/
+          retention-days: 14
+          if-no-files-found: error
