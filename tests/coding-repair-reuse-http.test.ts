@@ -9,6 +9,8 @@ import { createSaraServer } from "../src/server.ts";
 import { sha256 } from "../src/canonical.ts";
 import { candidate } from "./helpers/repair-memory-fixture.ts";
 import type { WorkerModelClient } from "../src/model-router.ts";
+import { FreshTypecheckHost } from "../src/fresh-typecheck-host.ts";
+import * as ts from "typescript";
 import type { CodingRepairReuseSummary } from "../src/reusable-coding-candidate-generator.ts";
 
 test("the real authenticated self-build route learns once and reuses after a complete kernel/server restart", async () => {
@@ -16,6 +18,11 @@ test("the real authenticated self-build route learns once and reuses after a com
   const token = "local-reuse-fixture-only";
   const hash = sha256(token);
   let modelCalls = 0, countCalls = 0;
+  const hosts: ts.CompilerHost[] = [];
+  const createHost = FreshTypecheckHost.prototype.createHost;
+  FreshTypecheckHost.prototype.createHost = function(options) {
+    const host = createHost.call(this, options); hosts.push(host); return host;
+  };
   const modelClient: WorkerModelClient = { routeKey: "openai:gpt-5.6-luna:paid", maximumWallTimeMs: 1000,
     async countInputTokens() { countCalls++; return 100; },
     async execute(input) {
@@ -61,6 +68,9 @@ test("the real authenticated self-build route learns once and reuses after a com
     assert.equal(summaries.filter(s => s.learnedRecipeId !== null).length, 1);
     assert(summaries.every(s => s.finalFreshVerification));
     const warm = summaries.find(s => s.hits === 1)!;
+    assert.equal(hosts.length, 6, "three fresh canary hosts per job, including final verification");
+    assert.equal(new Set(hosts).size, hosts.length);
+    assert(hosts.every(h => h.jsDocParsingMode === ts.JSDocParsingMode.ParseForTypeErrors));
     assert.equal(warm.reusedRecipes.length, 1); assert.equal(warm.reusedRecipes[0].outcome, "verified_complete");
-  } finally { await rm(root, { recursive: true, force: true }); }
+  } finally { FreshTypecheckHost.prototype.createHost = createHost; await rm(root, { recursive: true, force: true }); }
 });
