@@ -33,10 +33,10 @@ it("surfaces computed element access as a source-policy rejection instead of a r
   });
 
   assert.equal(result.passed, false);
-  assert.equal(result.score, 0.6);
+  assert.equal(result.score, 0.2);
   assert.equal(result.failures.length, 1);
   assert.equal(result.failures[0]?.kind, "policy");
-  assert.equal(result.failures[0]?.code, "GENOME_LAB_SOURCE_POLICY_REJECTED");
+  assert.equal(result.failures[0]?.code, "GENOME_LAB_COMPUTED_ACCESS");
   assert.equal(result.failures[0]?.file, "src/value.ts");
   assert.equal(result.failures.some((failure) => failure.code === "GENOME_LAB_RUNTIME_FAILURE"), false);
   assert.equal(result.completedChecks.includes("behavior_tests"), false);

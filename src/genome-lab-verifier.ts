@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { posix } from "node:path";
 import { canonicalJson, sha256 } from "./canonical.ts";
-import { buildVerifiedSkillCandidate, validateProgramCandidateStructure } from "./genome-lab.ts";
+import { assertBoundedProgramSource, buildVerifiedSkillCandidate, GenomeLabSourceError, GenomeLabTypecheckError, GenomeLabBehaviorError, validateProgramCandidateStructure } from "./genome-lab.ts";
 import type { CodingFailureKind, CodingFailureSignal, ProgramVerificationResult } from "./coding-repair-types.ts";
 import type { ProgramCandidateProposal } from "./types.ts";
 
@@ -88,21 +88,21 @@ function programArtifactDigest(candidate: ProgramCandidateProposal): string {
   return sha256(canonicalJson({ schemaVersion: 1, files }));
 }
 
-function boundedProgramPolicyFailure(error: unknown): CodingFailureSignal | null {
-  const message = error instanceof Error ? error.message : "";
-  const match = /^Generated program is not a bounded isolated candidate: (src\/[a-z0-9][a-z0-9._/-]*|tests\/[a-z0-9][a-z0-9._/-]*\.test\.ts): (.+)\.$/u.exec(message);
-  if (!match) return null;
-  const [, path, reason] = match;
-  const sourcePath = path?.startsWith("src/") ? path : "";
-  return signal({
-    kind: "policy",
-    code: "GENOME_LAB_SOURCE_POLICY_REJECTED",
-    file: sourcePath,
-    note: sourcePath
-      ? `Candidate violates bounded source policy: ${reason}.`
-      : "Candidate violates bounded source policy.",
+function sourceRejection(candidate: ProgramCandidateProposal, error: GenomeLabSourceError): ProgramVerificationResult {
+  const diagnostic = error.diagnostic;
+  const visibleSource = diagnostic.file.startsWith("src/");
+  const failure = signal({
+    kind: diagnostic.kind,
+    code: visibleSource ? diagnostic.code : "GENOME_LAB_PROTECTED_SOURCE_REJECTED",
+    file: visibleSource ? diagnostic.file : "",
+    line: visibleSource ? diagnostic.line : 0,
+    column: visibleSource ? diagnostic.column : 0,
+    note: "Candidate rejected by the unchanged isolated-source guard before behavioral execution.",
     severity: "high",
   });
+  // Only integrity passed. Neither type checking nor behavior was performed.
+  return { passed: false, score: 0.2, artifactDigest: programArtifactDigest(candidate), failures: [failure],
+    completedChecks: [diagnostic.kind === "syntax" ? "syntax" : "source_policy", "artifact_integrity"], evidenceDigests: [failure.evidenceDigest] };
 }
 
 export async function verifyProgramCandidate(input: {
@@ -158,6 +158,8 @@ export async function verifyGenomeLabProgramCandidate(input: {
   maximumBudgetUsd?: number;
   experimentalCompilerCache?: ExperimentalCompilerCache;
 }): Promise<ProgramVerificationResult> {
+  // Bind every stage to one immutable-by-ownership input snapshot across awaits.
+  input = { ...input, candidate: structuredClone(input.candidate), acceptanceCriteria: [...input.acceptanceCriteria] };
   // Missing modules cannot be created through the bounded existing-file repair contract.
   // Use the same structural validator as Genome Lab, without weakening its restrictions.
   try {
@@ -169,8 +171,19 @@ export async function verifyGenomeLabProgramCandidate(input: {
       failures: [failure], completedChecks: ["source_policy", "artifact_integrity"], evidenceDigests: [failure.evidenceDigest],
     };
   }
-  const initial = await verifyProgramCandidate({ candidate: input.candidate, experimentalCompilerCache: input.experimentalCompilerCache });
-  if (initial.failures.length > 0) return initial;
+  // Keep the existing critical capability path. Other eligible candidates use
+  // the builder's fresh compiler, rather than constructing a duplicate virtual Program.
+  if (input.candidate.files.some(file => PROHIBITED_SOURCE.test(file.content))) {
+    return verifyProgramCandidate({ candidate: input.candidate, experimentalCompilerCache: input.experimentalCompilerCache });
+  }
+  const paths = new Set(input.candidate.files.map(file => file.path));
+  try {
+    for (const file of input.candidate.files) assertBoundedProgramSource(file.path, file.content, paths);
+  } catch (error) {
+    if (error instanceof GenomeLabSourceError) return sourceRejection(input.candidate, error);
+    throw error;
+  }
+  const artifactDigest = programArtifactDigest(input.candidate);
   const root = await mkdtemp(join(tmpdir(), "sara-reparodynamic-verify-"));
   try {
     await buildVerifiedSkillCandidate(
@@ -198,22 +211,28 @@ export async function verifyGenomeLabProgramCandidate(input: {
     return {
       passed: true,
       score: 1,
-      artifactDigest: initial.artifactDigest,
+      artifactDigest,
       failures: [],
       completedChecks,
-      evidenceDigests: [sha256(canonicalJson({ artifactDigest: initial.artifactDigest, completedChecks, result: "PASS" }))],
+      evidenceDigests: [sha256(canonicalJson({ artifactDigest, completedChecks, result: "PASS" }))],
     };
   } catch (error) {
-    const policyFailure = boundedProgramPolicyFailure(error);
-    if (policyFailure) {
-      return {
-        ...initial,
-        passed: false,
-        score: 0.6,
-        failures: [policyFailure],
+    if (error instanceof GenomeLabSourceError) return sourceRejection(input.candidate, error);
+    if (error instanceof GenomeLabTypecheckError) {
+      const failures = error.diagnostics.map(diagnostic => signal({
+        kind: diagnostic.code >= 1000 && diagnostic.code < 2000 ? "syntax" : "type",
+        code: `TS${diagnostic.code}`, file: diagnostic.file, line: diagnostic.line, column: diagnostic.column,
+        note: `Compiler diagnostic digest: ${diagnostic.messageDigest}`,
+      }));
+      return { passed: false, score: 0.6, artifactDigest, failures,
         completedChecks: ["source_policy", "syntax", "typecheck", "artifact_integrity"],
-        evidenceDigests: [policyFailure.evidenceDigest],
-      };
+        evidenceDigests: [...new Set(failures.map(failure => failure.evidenceDigest))] };
+    }
+    if (!(error instanceof GenomeLabBehaviorError)) {
+      const failure = signal({ kind: "unknown", code: "GENOME_LAB_VERIFICATION_INFRASTRUCTURE_FAILURE",
+        note: "Verification infrastructure did not produce a complete verified artifact.", severity: "high" });
+      return { passed: false, score: 0.6, artifactDigest, failures: [failure],
+        completedChecks: ["source_policy", "syntax", "artifact_integrity"], evidenceDigests: [failure.evidenceDigest] };
     }
     const failure = signal({
       kind: "behavior",
@@ -222,7 +241,7 @@ export async function verifyGenomeLabProgramCandidate(input: {
       severity: "high",
     });
     return {
-      ...initial,
+      artifactDigest,
       passed: false,
       score: 0.8,
       failures: [failure],

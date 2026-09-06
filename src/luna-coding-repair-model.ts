@@ -1,3 +1,4 @@
+import { passingVerificationChecks } from "./coding-repair-lessons.ts";
 import { expandCodingRepairEdits } from "./coding-repair-edits.ts";
 import { buildCodingRepairPrompt, validateCodingRepairProposal } from "./coding-repair-prompt.ts";
 import { INITIAL_CODING_REPAIR_LIMITS } from "./coding-repair-policy.ts";
@@ -56,14 +57,7 @@ export function createLunaCodingRepairModel(input: {
         candidate: request.candidate,
         artifactDigest: request.verification.artifactDigest,
         failures: request.verification.failures,
-        previouslyPassingChecks: request.verification.completedChecks.filter((check) => {
-          if (check === "syntax") return !request.verification.failures.some((failure) => failure.kind === "syntax");
-          if (check === "typecheck") return !request.verification.failures.some((failure) => failure.kind === "type");
-          if (check === "behavior_tests") {
-            return !request.verification.failures.some((failure) => failure.kind === "test" || failure.kind === "behavior");
-          }
-          return true;
-        }),
+        previouslyPassingChecks: passingVerificationChecks(request.verification),
         remainingCycles: INITIAL_CODING_REPAIR_LIMITS.maximumCycles - request.cycle + 1,
         remainingCostUsd: request.remainingCostUsd,
         verifiedLessons: input.context.memoryContext.memories.map((memory) => memory.statement),
