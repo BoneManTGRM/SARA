@@ -1,34 +1,32 @@
-name: One-use authenticated coding speed trial
+name: Read-only completed coding trial evidence
 on:
   push:
     branches: [verify/coding-benchmark-owner-relay-20260905]
-    paths:
-      - .github/workflows/coding-benchmark-owner-relay.yml
+    paths: [.github/workflows/coding-benchmark-owner-relay.yml]
 permissions:
   contents: read
   id-token: write
 jobs:
-  launch-additional-matched-trial:
-    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+  retrieve-without-replay:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1 && github.run_number == 5
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Launch exactly one separately authorized matched trial
+      - name: Save completed grant receipts through GET only
         env:
-          EXPECTED_RUNTIME: 2c21426a52373cb2982e9759deb7e0f81f98df63
-          PYTHONOPTIMIZE: '0'
+          EXPECTED_RUNTIME: 7984a94080dcc900983c1c521cd3f13d8f6f2e50
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          sleep 55
-          python3 scripts/launch-additional-coding-benchmark-relay.py
+          echo '65832ff18b60b19dbad0216e930d8eb83678376d10b3bd7f4c7faaa515cec526  scripts/collect-completed-coding-benchmark.py' | sha256sum -c -
+          python3 scripts/collect-completed-coding-benchmark.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sara-additional-coding-benchmark-launch-${{ github.run_id }}
-          path: /tmp/sara-relay-live-proof
+          name: sara-completed-trial-evidence-${{ github.run_id }}
+          path: /tmp/sara-completed-trial-evidence
           if-no-files-found: error
           retention-days: 7
