@@ -9,87 +9,110 @@ export type ProtectedBenchmarkFile = Readonly<{
   content: string;
 }>;
 
-const source = `export type LedgerEntry = Readonly<{
-  category: string;
-  amount: number;
+const source = `export type Booking = Readonly<{
+  start: number;
+  end: number;
 }>;
 
-export type LedgerSummary = Readonly<{
-  category: string;
-  total: number;
-  count: number;
+export type TimeWindow = Readonly<{
+  start: number;
+  end: number;
 }>;
 
-export function summarizeLedger(entries: readonly LedgerEntry[]): LedgerSummary[] {
-  const totals = new Map<string, { total: number; count: number }>();
-  for (const entry of entries) {
-    const key = entry.category;
-    const current = totals.get(key) ?? { total: 0, count: 0 };
-    current.total += entry.amount;
-    current.count += 1;
-    totals.set(key, current);
+export function freeWindows(
+  dayStart: number,
+  dayEnd: number,
+  bookings: readonly Booking[],
+): TimeWindow[] {
+  const free: TimeWindow[] = [];
+  let cursor = dayStart;
+  for (const booking of bookings) {
+    if (booking.start > cursor) free.push({ start: cursor, end: booking.start });
+    cursor = Math.max(cursor, booking.end);
   }
-  return Array.from(totals.entries()).map(([category, value]) => ({
-    category,
-    total: value.total,
-    count: value.count,
-  }));
+  if (cursor < dayEnd) free.push({ start: cursor, end: dayEnd });
+  return free;
 }
 `;
 
 const protectedTest = `import assert from "node:assert/strict";
 import { test } from "node:test";
-import { summarizeLedger, type LedgerEntry } from "../src/summarize-ledger.ts";
+import { freeWindows, type Booking } from "../src/free-windows.ts";
 
-test("normalizes and groups equivalent categories", () => {
+test("clips, sorts and merges overlapping or touching bookings", () => {
   assert.deepEqual(
-    summarizeLedger([
-      { category: " Food ", amount: 2.5 },
-      { category: "FOOD", amount: 1.5 },
-      { category: "  home   office ", amount: 4 },
-      { category: "HOME OFFICE", amount: 1 },
+    freeWindows(9, 17, [
+      { start: 14, end: 15 },
+      { start: 8, end: 10 },
+      { start: 9.5, end: 11 },
+      { start: 15, end: 16 },
+      { start: 18, end: 19 },
+      { start: 12, end: 13 },
     ]),
     [
-      { category: "food", total: 4, count: 2 },
-      { category: "home office", total: 5, count: 2 },
+      { start: 11, end: 12 },
+      { start: 13, end: 14 },
+      { start: 16, end: 17 },
     ],
   );
 });
 
-test("drops invalid entries and returns categories in lexical order", () => {
+test("ignores invalid bookings and handles an entirely busy day", () => {
   assert.deepEqual(
-    summarizeLedger([
-      { category: "zeta", amount: 3 },
-      { category: "   ", amount: 100 },
-      { category: "alpha", amount: 2 },
-      { category: "beta", amount: Number.NaN },
-      { category: "gamma", amount: Number.POSITIVE_INFINITY },
+    freeWindows(0, 10, [
+      { start: Number.NaN, end: 2 },
+      { start: 4, end: Number.POSITIVE_INFINITY },
+      { start: 7, end: 7 },
+      { start: 8, end: 3 },
+      { start: -5, end: 20 },
     ]),
-    [
-      { category: "alpha", total: 2, count: 1 },
-      { category: "zeta", total: 3, count: 1 },
-    ],
+    [],
   );
 });
 
-test("does not mutate the caller's entries", () => {
-  const entries: LedgerEntry[] = [
-    { category: " B ", amount: 2 },
-    { category: "a", amount: 1 },
+test("returns no windows for invalid day bounds", () => {
+  assert.deepEqual(freeWindows(Number.NaN, 10, []), []);
+  assert.deepEqual(freeWindows(10, Number.POSITIVE_INFINITY, []), []);
+  assert.deepEqual(freeWindows(10, 10, []), []);
+  assert.deepEqual(freeWindows(11, 10, []), []);
+});
+
+test("does not mutate bookings and returns deterministic ascending gaps", () => {
+  const bookings: Booking[] = [
+    { start: 5, end: 6 },
+    { start: 1, end: 2 },
+    { start: 3, end: 4 },
   ];
-  const before = structuredClone(entries);
-  summarizeLedger(entries);
-  assert.deepEqual(entries, before);
+  const before = structuredClone(bookings);
+  assert.deepEqual(freeWindows(0, 7, bookings), [
+    { start: 0, end: 1 },
+    { start: 2, end: 3 },
+    { start: 4, end: 5 },
+    { start: 6, end: 7 },
+  ]);
+  assert.deepEqual(bookings, before);
+});
+
+test("clips partially overlapping bookings without producing zero-width gaps", () => {
+  assert.deepEqual(freeWindows(9, 17, [
+    { start: 7, end: 9 },
+    { start: 10, end: 12 },
+    { start: 12, end: 12.5 },
+    { start: 16.5, end: 19 },
+  ]), [
+    { start: 9, end: 10 },
+    { start: 12.5, end: 16.5 },
+  ]);
 });
 `;
 
 export const LIVE_CODING_BENCHMARK_PROTECTED_FILES: readonly ProtectedBenchmarkFile[] = Object.freeze([
-  Object.freeze({ path: "tests/summarize-ledger.test.ts", content: protectedTest }),
+  Object.freeze({ path: "tests/free-windows.test.ts", content: protectedTest }),
 ]);
 
 const liveCodingBenchmarkCorpus: CodingBenchmarkCorpus = {
   schemaVersion: 1,
-  corpusId: "sara-live-summarize-ledger-v1",
+  corpusId: "sara-live-free-windows-v1",
   version: 1,
   origin: "internally_authored",
   evidenceScope: "LAB_SYNTHETIC_ONLY",
@@ -97,32 +120,26 @@ const liveCodingBenchmarkCorpus: CodingBenchmarkCorpus = {
   cases: [
     {
       schemaVersion: 1,
-      caseId: "live-summarize-ledger-001",
+      caseId: "live-free-windows-001",
       taskClass: "synthetic",
-      taskFamily: "collection-normalization-aggregation",
-      objective: "Repair summarizeLedger(entries) so it creates a deterministic summary of valid ledger entries without mutating the input.",
+      taskFamily: "interval-normalization-merging",
+      objective: "Repair freeWindows(dayStart, dayEnd, bookings) so it deterministically returns all free time inside a valid day without mutating caller data.",
       acceptanceCriteria: [
-        "Normalize each category by trimming outer whitespace, lowercasing, and collapsing every internal whitespace run to one space.",
-        "Ignore entries whose normalized category is empty or whose amount is not finite.",
-        "Group entries by normalized category and return each category with its numeric total and count.",
-        "Sort the returned summaries by category using ascending lexical order.",
-        "Do not mutate the caller's entries or entry objects.",
+        "If dayStart or dayEnd is non-finite, or dayStart is greater than or equal to dayEnd, return an empty array.",
+        "Ignore bookings with non-finite endpoints or with end less than or equal to start.",
+        "Clip valid bookings to the day interval and ignore bookings that do not overlap the day.",
+        "Sort and merge overlapping or touching clipped bookings before calculating gaps.",
+        "Return positive-width free windows in ascending order and do not mutate the bookings array or its objects.",
       ],
       baseline: {
         schemaVersion: 1,
         candidateKind: "typescript_program",
-        programName: "Ledger Summary Repair",
-        summary: "Normalizes and aggregates bounded ledger entries.",
+        programName: "Free Window Repair",
+        summary: "Computes free intervals from bounded bookings.",
         limitations: ["Benchmark-only isolated TypeScript candidate."],
         files: [
-          {
-            path: "src/index.ts",
-            content: 'export * from "./summarize-ledger.ts";\n',
-          },
-          {
-            path: "src/summarize-ledger.ts",
-            content: source,
-          },
+          { path: "src/index.ts", content: 'export * from "./free-windows.ts";\n' },
+          { path: "src/free-windows.ts", content: source },
         ],
       },
     },
@@ -139,18 +156,13 @@ export const LIVE_CODING_BENCHMARK_CORPUS: CodingBenchmarkCorpus = Object.freeze
 export function liveCodingBenchmarkCorpusDigest(): string {
   return sha256(canonicalJson({
     corpus: LIVE_CODING_BENCHMARK_CORPUS,
-    protectedFiles: LIVE_CODING_BENCHMARK_PROTECTED_FILES.map((file) => ({
-      path: file.path,
-      contentDigest: sha256(file.content),
-    })),
+    protectedFiles: LIVE_CODING_BENCHMARK_PROTECTED_FILES.map((file) => ({ path: file.path, contentDigest: sha256(file.content) })),
   }));
 }
 
 function assertModelWritableCandidate(candidate: ProgramCandidateProposal): void {
-  const expected = new Set(["src/index.ts", "src/summarize-ledger.ts"]);
-  if (candidate.files.length !== expected.size) {
-    throw new Error("Live benchmark candidate changed the frozen writable file set.");
-  }
+  const expected = new Set(["src/index.ts", "src/free-windows.ts"]);
+  if (candidate.files.length !== expected.size) throw new Error("Live benchmark candidate changed the frozen writable file set.");
   for (const file of candidate.files) {
     if (!expected.delete(file.path) || file.path.startsWith("tests/")) {
       throw new Error("Live benchmark candidate attempted to access a protected acceptance file.");
@@ -162,39 +174,20 @@ function assertModelWritableCandidate(candidate: ProgramCandidateProposal): void
 function sanitizeProtectedVerifierFailures(result: ProgramVerificationResult): ProgramVerificationResult {
   const protectedFailures = result.failures.filter((failure) => failure.file.startsWith("tests/"));
   if (!protectedFailures.length) return result;
-  const evidenceDigest = sha256(canonicalJson({
-    artifactDigest: result.artifactDigest,
-    code: "PROTECTED_ACCEPTANCE_FAILURE",
-    protectedFailureCount: protectedFailures.length,
-  }));
+  const evidenceDigest = sha256(canonicalJson({ artifactDigest: result.artifactDigest, code: "PROTECTED_ACCEPTANCE_FAILURE", protectedFailureCount: protectedFailures.length }));
   const genericFailure: CodingFailureSignal = {
-    kind: "behavior",
-    code: "PROTECTED_ACCEPTANCE_FAILURE",
-    file: "",
-    line: 0,
-    column: 0,
+    kind: "behavior", code: "PROTECTED_ACCEPTANCE_FAILURE", file: "", line: 0, column: 0,
     evidenceDigest,
-    fingerprint: sha256(canonicalJson({
-      code: "PROTECTED_ACCEPTANCE_FAILURE",
-      artifactDigest: result.artifactDigest,
-    })),
-    severity: "high",
-    existedBeforeRepair: true,
+    fingerprint: sha256(canonicalJson({ code: "PROTECTED_ACCEPTANCE_FAILURE", artifactDigest: result.artifactDigest })),
+    severity: "high", existedBeforeRepair: true,
   };
   return {
     ...result,
-    failures: [
-      ...result.failures.filter((failure) => !failure.file.startsWith("tests/")),
-      genericFailure,
-    ],
-    evidenceDigests: [
-      ...new Set([
-        ...result.failures
-          .filter((failure) => !failure.file.startsWith("tests/"))
-          .map((failure) => failure.evidenceDigest),
-        evidenceDigest,
-      ]),
-    ],
+    failures: [...result.failures.filter((failure) => !failure.file.startsWith("tests/")), genericFailure],
+    evidenceDigests: [...new Set([
+      ...result.failures.filter((failure) => !failure.file.startsWith("tests/")).map((failure) => failure.evidenceDigest),
+      evidenceDigest,
+    ])],
   };
 }
 
@@ -210,10 +203,7 @@ export async function verifyLiveCodingBenchmarkCandidate(input: {
     ...structuredClone(input.candidate),
     files: [
       ...structuredClone(input.candidate.files),
-      ...LIVE_CODING_BENCHMARK_PROTECTED_FILES.map((file) => ({
-        path: file.path,
-        content: file.content,
-      })),
+      ...LIVE_CODING_BENCHMARK_PROTECTED_FILES.map((file) => ({ path: file.path, content: file.content })),
     ],
   };
   return sanitizeProtectedVerifierFailures(await verifyGenomeLabProgramCandidate({

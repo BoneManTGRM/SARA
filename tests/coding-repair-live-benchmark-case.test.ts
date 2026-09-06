@@ -39,20 +39,38 @@ describe("fresh live coding benchmark task", () => {
 
   it("accepts a known-correct verifier fixture without treating it as benchmark output", async () => {
     const candidate = structuredClone(benchmarkCase.baseline);
-    const implementation = candidate.files.find((file) => file.path === "src/summarize-ledger.ts")!;
-    implementation.content = `export type LedgerEntry = Readonly<{ category: string; amount: number }>;
-export type LedgerSummary = Readonly<{ category: string; total: number; count: number }>;
-export function summarizeLedger(entries: readonly LedgerEntry[]): LedgerSummary[] {
-  const totals = new Map<string, { total: number; count: number }>();
-  for (const entry of entries) {
-    const category = entry.category.trim().toLowerCase().replace(/\\s+/gu, " ");
-    if (!category || !Number.isFinite(entry.amount)) continue;
-    const previous = totals.get(category) ?? { total: 0, count: 0 };
-    totals.set(category, { total: previous.total + entry.amount, count: previous.count + 1 });
+    const implementation = candidate.files.find((file) => file.path === "src/free-windows.ts")!;
+    implementation.content = `export type Booking = Readonly<{ start: number; end: number }>;
+export type TimeWindow = Readonly<{ start: number; end: number }>;
+
+export function freeWindows(
+  dayStart: number,
+  dayEnd: number,
+  bookings: readonly Booking[],
+): TimeWindow[] {
+  if (!Number.isFinite(dayStart) || !Number.isFinite(dayEnd) || dayStart >= dayEnd) return [];
+
+  const busy = bookings
+    .filter((booking) => Number.isFinite(booking.start) && Number.isFinite(booking.end) && booking.end > booking.start)
+    .map((booking) => ({ start: Math.max(dayStart, booking.start), end: Math.min(dayEnd, booking.end) }))
+    .filter((booking) => booking.end > booking.start)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const booking of busy) {
+    const previous = merged.at(-1);
+    if (previous && booking.start <= previous.end) previous.end = Math.max(previous.end, booking.end);
+    else merged.push({ ...booking });
   }
-  return Array.from(totals.entries())
-    .map(([category, value]) => ({ category, total: value.total, count: value.count }))
-    .sort((left, right) => left.category.localeCompare(right.category));
+
+  const free: TimeWindow[] = [];
+  let cursor = dayStart;
+  for (const booking of merged) {
+    if (booking.start > cursor) free.push({ start: cursor, end: booking.start });
+    cursor = Math.max(cursor, booking.end);
+  }
+  if (cursor < dayEnd) free.push({ start: cursor, end: dayEnd });
+  return free;
 }
 `;
     const result = await verification(candidate);
@@ -62,14 +80,14 @@ export function summarizeLedger(entries: readonly LedgerEntry[]): LedgerSummary[
 
   it("rejects candidate attempts to add or replace protected acceptance files", async () => {
     const candidate = structuredClone(benchmarkCase.baseline);
-    candidate.files.push({ path: "tests/summarize-ledger.test.ts", content: "throw new Error('forged');\n" });
+    candidate.files.push({ path: "tests/free-windows.test.ts", content: "throw new Error('forged');\n" });
     await assert.rejects(() => verification(candidate), /protected acceptance file|writable file set/);
   });
 
   it("sanitizes protected-test type failures before they can become repair feedback", async () => {
     const candidate = structuredClone(benchmarkCase.baseline);
-    const implementation = candidate.files.find((file) => file.path === "src/summarize-ledger.ts")!;
-    implementation.content = "export function summarizeLedger(): number { return 0; }\n";
+    const implementation = candidate.files.find((file) => file.path === "src/free-windows.ts")!;
+    implementation.content = "export function freeWindows(): number { return 0; }\n";
     const result = await verification(candidate);
     assert.equal(result.passed, false);
     assert.equal(result.failures.some((failure) => failure.file.startsWith("tests/")), false);

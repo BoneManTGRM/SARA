@@ -1,9 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { sha256 } from "./canonical.ts";
 
-// One continuation, not a reusable spending grant. Only reviewed authoritative
-// execution/provider evidence may change this record. Environment flags, a new
-// UUID and missing files cannot clear the historical exposure.
+// Historical unresolved authorization remains the default and can never be
+// cleared by a new UUID or missing evidence.
 export const CODING_BENCHMARK_CONTINUATION = Object.freeze({
   benchmarkId: "41267154-ba42-496a-bb79-1656898ac716",
   originalSourceRevision: "30a7cb3c21a77b65bf7ba2c4c393897850e61eeb",
@@ -13,6 +12,22 @@ export const CODING_BENCHMARK_CONTINUATION = Object.freeze({
   unresolvedExposureUsd: 0.15,
   historicalResolutionEvidence: null,
 });
+
+export const ADDITIONAL_CODING_BENCHMARK_GRANT = Object.freeze({
+  benchmarkId: "33d94c9a-0de6-41d9-a843-fe9880994242",
+  registrationSourceRevision: "9fa4945bd8becab34ee536ce86dc45d6c8a5bd43",
+  maximumSpendUsd: 0.15,
+  maximumModelSpendUsdPerArm: 0.075,
+  unresolvedExposureUsd: 0,
+  activationSha256: "8e2feaaa7d017d3fedc304c36d40062efffeaf49b7840d3ed32362caf0fc4bba",
+});
+
+export function activeCodingBenchmarkContinuation(environment: Record<string, string | undefined>) {
+  return environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
+    === ADDITIONAL_CODING_BENCHMARK_GRANT.activationSha256
+    ? ADDITIONAL_CODING_BENCHMARK_GRANT
+    : CODING_BENCHMARK_CONTINUATION;
+}
 
 type ReadinessInput = {
   environment: Record<string, string | undefined>;
@@ -26,6 +41,7 @@ export class CodingBenchmarkNotReadyError extends Error {
 
 export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   const env = input.environment;
+  const active = activeCodingBenchmarkContinuation(env);
   const token = env.SARA_OWNER_TOKEN?.trim() ?? "";
   const expected = env.SARA_OWNER_TOKEN_SHA256?.trim().toLowerCase() ?? "";
   const ownerAuthenticated = token.length > 0 && /^[a-f0-9]{64}$/u.test(expected)
@@ -38,41 +54,46 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   if (!sourceIdentified) blockers.push("SOURCE_IDENTITY_UNAVAILABLE");
   if (!input.constitutionVerified) blockers.push("CONSTITUTION_UNVERIFIED");
   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
-  if (CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
+  if (active.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
+  const additional = active.benchmarkId === ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId;
   return {
-    schemaVersion: 1, benchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
-    ready: blockers.length === 0, blockers,
+    schemaVersion: additional ? 2 : 1,
+    benchmarkId: active.benchmarkId,
+    ready: blockers.length === 0,
+    blockers,
     sourceRevision: sourceIdentified ? sourceRevision : null,
-    maximumSpendUsd: 0.15, maximumModelSpendUsdPerArm: 0.075,
-    unresolvedExposureUsd: CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd,
+    maximumSpendUsd: active.maximumSpendUsd,
+    maximumModelSpendUsdPerArm: active.maximumModelSpendUsdPerArm,
+    unresolvedExposureUsd: active.unresolvedExposureUsd,
     confirmedChargeUsd: null,
-    availableAuthorizationUsd: Math.max(0, 0.15 - CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd),
+    availableAuthorizationUsd: Math.max(0, active.maximumSpendUsd - active.unresolvedExposureUsd),
+    ...(additional ? { historicalHold: {
+      benchmarkId: CODING_BENCHMARK_CONTINUATION.benchmarkId,
+      unresolvedExposureUsd: CODING_BENCHMARK_CONTINUATION.unresolvedExposureUsd,
+      confirmedChargeUsd: null,
+    } } : {}),
     model: "gpt-5.6-luna", reasoning: "medium", maximumAttemptsPerArm: 3,
-    order: ["luna_reparodynamic", "luna"],
-    compactOutput: false, compilerCaching: false,
-    evidenceRequired: "Authoritative pre-deploy execution or provider request/usage evidence for the original task, source and deployment. Missing receipts are insufficient.",
+    order: ["luna_reparodynamic", "luna"], compactOutput: false, compilerCaching: false,
+    evidenceRequired: additional
+      ? "This grant is separate and one-use. Preserve the prior $0.15 unresolved hold and never replay the historical benchmark."
+      : "Authoritative pre-deploy execution or provider request/usage evidence for the original task, source and deployment. Missing receipts are insufficient.",
   };
 }
 
 export function assertCodingBenchmarkDispatch(input: ReadinessInput & { benchmarkId: string }): void {
-  if (input.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId) {
-    throw new CodingBenchmarkNotReadyError("BENCHMARK_SCOPE_MISMATCH");
-  }
+  const active = activeCodingBenchmarkContinuation(input.environment);
+  if (input.benchmarkId !== active.benchmarkId) throw new CodingBenchmarkNotReadyError("BENCHMARK_SCOPE_MISMATCH");
   const readiness = inspectCodingBenchmarkReadiness(input);
   if (!readiness.ready) throw new CodingBenchmarkNotReadyError(readiness.blockers.join(","));
 }
 
-/** CLI invocations must use the existing owner authority and a live kernel read,
- * not a synthetic emergency-stop flag or a newly booted competing event writer. */
 export async function assertCodingBenchmarkRuntimeAuthority(input: {
   benchmarkId: string;
   environment: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
 }): Promise<void> {
   const port = Number(input.environment.PORT);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new CodingBenchmarkNotReadyError("OWNER_RUNTIME_UNAVAILABLE");
-  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new CodingBenchmarkNotReadyError("OWNER_RUNTIME_UNAVAILABLE");
   const response = await (input.fetchImpl ?? fetch)(`http://127.0.0.1:${port}/health`, {
     method: "GET", redirect: "error", signal: AbortSignal.timeout(5_000),
   });
