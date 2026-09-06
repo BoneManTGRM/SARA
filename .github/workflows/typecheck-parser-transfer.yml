@@ -1,0 +1,72 @@
+name: Verify fresh type-error parser candidate
+on:
+  push:
+    branches: [perf/typecheck-parser-20260906]
+    paths: [.github/workflows/typecheck-parser-transfer.yml]
+permissions:
+  contents: read
+jobs:
+  transfer:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Reconstruct exact candidate and remove transport files
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sara-parser-transfer
+          python3 - <<'PY'
+          import base64,gzip,hashlib,pathlib
+          encoded=''.join(pathlib.Path('.sara-parser-transfer/part'+str(i)).read_text(encoding='ascii') for i in range(2))
+          assert len(encoded)==11600
+          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert len(patch)==28410
+          assert hashlib.sha256(patch).hexdigest()=='dbc5ee8632c751d0601973c5ccd5ef140d7ebf52e1873abf00ce43f25544aa78'
+          pathlib.Path('/tmp/sara-parser-transfer/candidate.patch').write_bytes(patch)
+          PY
+          git apply --index /tmp/sara-parser-transfer/candidate.patch
+          git rm .github/workflows/typecheck-parser-transfer.yml .sara-parser-transfer/part0 .sara-parser-transfer/part1
+          test "$(git write-tree)" = 10829b97ff237642ca4f5715f3d56264082d56c3
+          test -z "$(git ls-files node_modules)"
+      - run: npm ci --ignore-scripts
+      - name: Complete credential-free verification
+        run: |
+          set -euo pipefail
+          npm run verify | tee /tmp/sara-parser-transfer/verify.log
+          git diff --exit-code
+          test "$(git write-tree)" = 10829b97ff237642ca4f5715f3d56264082d56c3
+      - name: Publish only this verified branch source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = BoneManTGRM/SARA
+          test "$GITHUB_REF" = refs/heads/perf/typecheck-parser-20260906
+          test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'SARA verified source transfer'
+          git config user.email 'source-transfer@users.noreply.github.com'
+          git commit -m 'Use fresh tsc type-error comment parsing in the coding canary'
+          test "$(git rev-parse HEAD^{tree})" = 10829b97ff237642ca4f5715f3d56264082d56c3
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/perf/typecheck-parser-20260906
+          unset AUTH GH_TOKEN
+          git rev-parse HEAD > /tmp/sara-parser-transfer/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-parser-transfer/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/sara-parser-transfer/source.tar.gz
+          cd /tmp/sara-parser-transfer
+          sha256sum candidate.patch source.tar.gz verify.log > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: sara-typecheck-parser-transfer-${{ github.run_id }}
+          path: /tmp/sara-parser-transfer/
+          if-no-files-found: error
+          retention-days: 14
