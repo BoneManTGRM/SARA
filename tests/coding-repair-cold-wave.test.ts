@@ -159,3 +159,19 @@ test("a lookup that began before election cannot bypass a later uncommitted lead
   const result = await observedFollowing; await leading;
   assert.equal(result.error, null); assert.deepEqual(result.value, candidate(true)); assert.equal(o.counter.calls, 1);
 }));
+
+test("an ambiguous learning commit is quarantined if the required receipt then fails", () => fixture(async root => {
+  class AmbiguousCommit extends DurableCodingRepairMemory {
+    override async learn(input: Parameters<DurableCodingRepairMemory["learn"]>[0]): Promise<string> {
+      await super.learn(input);
+      throw new Error("simulated post-commit acknowledgement failure");
+    }
+  }
+  const o = setup(root);
+  await assert.rejects(createReusableCodingCandidateGenerator({ ...o, memory: new AmbiguousCommit(root),
+    onReuse: () => { throw new Error("mandatory reuse receipt failed"); },
+  }).generate(context), /mandatory reuse receipt failed/);
+  assert.equal(o.counter.calls, 1);
+  assert.equal(await new DurableCodingRepairMemory(root).lookup(candidate(), check(candidate()), scope, "surgical"), null,
+    "a committed entry cannot outlive a fatal receipt failure merely because learning acknowledgement failed");
+}));

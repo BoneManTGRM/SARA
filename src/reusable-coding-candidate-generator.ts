@@ -118,9 +118,11 @@ export function createReusableCodingCandidateGenerator(input: Options & {
         if (summary.finalFreshVerification && summary.modelRequests && !summary.memoryUnavailable && summary.scopeDigest) {
           const learnStarted = performance.now();
           try {
+            // The store may commit before its acknowledgement fails. Track the
+            // prospective key before awaiting it so a later fatal receipt can revoke it.
+            learnedKey = codingRepairMemoryKey(run.baseline, run.baselineVerification, summary.scopeDigest);
             summary.learnedRecipeId = await input.memory.learn({ before: run.baseline, beforeVerification: run.baselineVerification,
               after: run.champion, verification: run.verification, scope: summary.scopeDigest });
-            learnedKey = codingRepairMemoryKey(run.baseline, run.baselineVerification, summary.scopeDigest);
           } catch { summary.memoryUnavailable = true; } // Capacity/conflict/storage failure never permits reuse.
           summary.reuseMilliseconds += performance.now() - learnStarted;
         }
