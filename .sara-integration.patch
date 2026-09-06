@@ -1,0 +1,173 @@
+diff --git a/src/coding-benchmark-evidence.ts b/src/coding-benchmark-evidence.ts
+index 153e496..f2469b5 100644
+--- a/src/coding-benchmark-evidence.ts
++++ b/src/coding-benchmark-evidence.ts
+@@ -2,7 +2,7 @@ import { constants } from "node:fs";
+ import { lstat, open, readdir, realpath } from "node:fs/promises";
+ import { isAbsolute, join, resolve } from "node:path";
+ import { sha256 } from "./canonical.ts";
+-import { ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
++import { HARDENED_REUSE_BENCHMARK_GRANT, ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
+ 
+ const MAX_FILES = 128;
+ const MAX_FILE_BYTES = 1_048_576;
+@@ -19,7 +19,7 @@ export type BenchmarkEvidence = {
+  * Raw bounded files preserve interrupted writes without inventing valid receipts.
+  */
+ export async function readCodingBenchmarkEvidence(stateDirectory: string, benchmarkId: string): Promise<BenchmarkEvidence> {
+-  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
++  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
+     throw new Error("BENCHMARK_EVIDENCE_SCOPE_REJECTED");
+   }
+   const empty: BenchmarkEvidence = { schemaVersion: 1, status: "not_started", replayAllowed: false, files: [] };
+@@ -42,7 +42,7 @@ export async function readCodingBenchmarkEvidence(stateDirectory: string, benchm
+     ["snapshots", /^[a-f0-9]{64}\.json$/u],
+     ["trace", /^(?:(?:owner-launch-(?:claim|exit)|terminal-accounting|trial-registration)|(?:luna(?:_reparodynamic)?-(?:(?:count-)?[0-9]{4}-(?:reservation|response|error)|event-[0-9]{4}-(?:verification|model_request|model_response|model_failure))))\.json$/u],
+   ];
+-  if (benchmarkId === REUSE_SPEED_BENCHMARK_GRANT.benchmarkId) {
++  if ([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
+     rules.push(["reuse-state/jobs", /^(regenerate|ordinary_memory|optimized)-[0-3]\.json$/u],
+       ["reuse-state/trace", /^(reuse-registration|reuse-summary|reuse-budget-[0-9]{4}-(reservation|response|error))\.json$/u]);
+   }
+diff --git a/src/coding-benchmark-owner.ts b/src/coding-benchmark-owner.ts
+index 98bb57d..2eb300b 100644
+--- a/src/coding-benchmark-owner.ts
++++ b/src/coding-benchmark-owner.ts
+@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { codingBenchmarkAuthorityDigest } from "./coding-repair-benchmark-command.ts";
+ import { writeBenchmarkAudit } from "./coding-benchmark-audit.ts";
+-import { REUSE_SPEED_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, activeCodingBenchmarkContinuation, assertCodingBenchmarkDispatch, CodingBenchmarkNotReadyError, inspectCodingBenchmarkReadiness } from "./coding-benchmark-readiness.ts";
++import { HARDENED_REUSE_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, activeCodingBenchmarkContinuation, assertCodingBenchmarkDispatch, CodingBenchmarkNotReadyError, inspectCodingBenchmarkReadiness } from "./coding-benchmark-readiness.ts";
+ 
+ const root = fileURLToPath(new URL("../", import.meta.url));
+ type OwnerBenchmarkInput = {
+@@ -49,7 +49,7 @@ export async function ownerCodingBenchmarkReadiness(input: OwnerBenchmarkInput)
+   return { ...readiness, executionEvidence,
+     ...(input.launcher ? { launcher: structuredClone(input.launcher) } : {}),
+     authenticatedLaunchPath: "/api/coding-benchmark/run",
+-    execution: readiness.benchmarkId === REUSE_SPEED_BENCHMARK_GRANT.benchmarkId
++    execution: [REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId)
+       ? "maximum_observed_reuse_pilot" : readiness.benchmarkId === CURRENT_CODING_BENCHMARK_GRANT.benchmarkId
+       ? "current_components_cold_pilot" : "existing_matched_cli_only",
+     authorityDigest: readiness.sourceRevision ? codingBenchmarkAuthorityDigest({
+@@ -76,11 +76,12 @@ export function codingBenchmarkLaunchSpec(input: {
+   for (const key of ["OPENAI_API_KEY", "SARA_OWNER_TOKEN", "SARA_OWNER_TOKEN_SHA256", "SARA_STATE_DIRECTORY", "PORT", "RAILWAY_GIT_COMMIT_SHA", "SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256"]) {
+     const value = input.environment[key]; if (value !== undefined) environment[key] = value;
+   }
+-  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId)) environment.SARA_REPARODYNAMIC_CODING_MODE = input.environment.SARA_REPARODYNAMIC_CODING_MODE ?? "";
++  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId)) environment.SARA_REPARODYNAMIC_CODING_MODE = input.environment.SARA_REPARODYNAMIC_CODING_MODE ?? "";
+   environment.SARA_CODING_BENCHMARK_SOURCE_REVISION = input.sourceRevision;
+   environment.SARA_CODING_BENCHMARK_AUTHORITY_SHA256 = authorityDigest;
+   return { command: process.execPath, cwd: root, environment,
+-    args: ["--import", "tsx", active.benchmarkId === REUSE_SPEED_BENCHMARK_GRANT.benchmarkId
++    args: ["--import", "tsx", active.benchmarkId === HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId
++      ? "scripts/benchmark-hardened-reuse.ts" : active.benchmarkId === REUSE_SPEED_BENCHMARK_GRANT.benchmarkId
+       ? "scripts/benchmark-reuse-speed.ts" : active.benchmarkId === CURRENT_CODING_BENCHMARK_GRANT.benchmarkId
+       ? "scripts/benchmark-current-coding-evidence.ts" : "scripts/benchmark-matched-coding-evidence.ts", "--live", "--acknowledge-lab-only",
+       "--benchmark-id", benchmarkId, "--max-spend-usd", String(active.maximumSpendUsd),
+diff --git a/src/coding-benchmark-readiness.ts b/src/coding-benchmark-readiness.ts
+index 664ac91..f81a086 100644
+--- a/src/coding-benchmark-readiness.ts
++++ b/src/coding-benchmark-readiness.ts
+@@ -53,7 +53,19 @@ export const REUSE_SPEED_BENCHMARK_GRANT = Object.freeze({
+   activationSha256: "f0dc109379b29efc9ec0468ad3fdb94bcf3d93e34002a5cd9dac984c29205182",
+ });
+ 
++// Explicit new owner request: harden, then run a new live comparison. Old grants remain immutable.
++export const HARDENED_REUSE_BENCHMARK_GRANT = Object.freeze({
++  benchmarkId: "d89f2a9c-3e8e-4e91-a41d-3f0836c1b3ea",
++  registrationSourceRevision: "478ed987bcf3d6959fd2cd2294f97596d94e4b5a",
++  maximumSpendUsd: 0.15,
++  maximumModelSpendUsdPerArm: 0.05,
++  unresolvedExposureUsd: 0,
++  activationSha256: "f5a1918d1b396a8344b2cf1d38282726b656c09ea8cb6f9c7b220826c81f63e8",
++});
++
+ export function activeCodingBenchmarkContinuation(environment: Record<string, string | undefined>) {
++  if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
++      === HARDENED_REUSE_BENCHMARK_GRANT.activationSha256) return HARDENED_REUSE_BENCHMARK_GRANT;
+   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
+       === REUSE_SPEED_BENCHMARK_GRANT.activationSha256) return REUSE_SPEED_BENCHMARK_GRANT;
+   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
+@@ -91,7 +103,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
+   if (!sourceIdentified) blockers.push("SOURCE_IDENTITY_UNAVAILABLE");
+   if (!input.constitutionVerified) blockers.push("CONSTITUTION_UNVERIFIED");
+   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
+-  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
++  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
+   if (active.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
+   const additional = active.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId;
+   return {
+@@ -116,7 +128,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
+       experiment: "current_components_cold_pilot", adaptiveOutputAvailable: true, nativeIntermediateChecks: true,
+       finalLegacyRequired: true, kernelJobMeasured: false, persistentReuseMeasured: false,
+     } : {}),
+-    ...(active.benchmarkId === REUSE_SPEED_BENCHMARK_GRANT.benchmarkId ? {
++    ...([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) ? {
+       experiment: "maximum_observed_reuse_pilot", arms: ["regenerate", "ordinary_memory", "optimized"],
+       jobsPerArm: 4, maximumAttemptsPerArm: 12, maximumAttemptsPerJob: 3,
+       adaptiveOutputAvailable: true, nativeIntermediateChecks: true, finalLegacyRequired: true,
+diff --git a/src/coding-repair-memory.ts b/src/coding-repair-memory.ts
+index d45187c..a90b254 100644
+--- a/src/coding-repair-memory.ts
++++ b/src/coding-repair-memory.ts
+@@ -103,10 +103,10 @@ export class DurableCodingRepairMemory {
+   readonly directory: string;
+   constructor(stateDirectory: string) { this.directory = resolve(stateDirectory, "coding-repair-memory-v1"); }
+ 
+-  async #transaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>): Promise<T> {
+-    return withMemoryQueue(this.directory, () => this.#filesystemTransaction(action));
++  async #transaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>, readOnly = false): Promise<T> {
++    return withMemoryQueue(this.directory, () => this.#filesystemTransaction(action, readOnly));
+   }
+-  async #filesystemTransaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>): Promise<T> {
++  async #filesystemTransaction<T>(action: (records: Recipe[]) => MemoryTransaction<T>, readOnly: boolean): Promise<T> {
+     await mkdir(this.directory, { recursive: true, mode: 0o700 });
+     if (await realpath(this.directory) !== this.directory) throw new Error("REPAIR_MEMORY_DIRECTORY_SYMLINK");
+     const dir = await open(this.directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+@@ -125,18 +125,24 @@ export class DurableCodingRepairMemory {
+       lockHeld = true;
+       await dir.sync();
+       let records: Recipe[] = [];
++      let projected: MemoryTransaction<T> | undefined;
+       try {
+         const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+         try {
+           const stat = await file.stat();
+           if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_BYTES || (stat.mode & 0o077) !== 0) throw new Error("REPAIR_MEMORY_FILE_BOUNDARY");
+           const bytes = await readExactMemoryBytes(file, stat.size);
+-          records = recordSnapshots.decode(this.directory, bytes);
++          if (readOnly) {
++            // Only lookup/assertReusable use this path. Frozen snapshot prevents
++            // mutation; only their small result is copied, not the entire store.
++            projected = recordSnapshots.project(this.directory, bytes, action);
++          } else records = recordSnapshots.decode(this.directory, bytes);
+         } finally { await file.close(); }
+       } catch (error) {
+         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+       }
+-      const { value, changed } = action(records);
++      const { value, changed } = projected ?? action(records);
++      if (readOnly && changed) throw new Error("REPAIR_MEMORY_READ_ONLY_TRANSITION");
+       // A duplicate acknowledgement still rereads/validates under the lock.
+       // Only an actual state transition needs another durable file replacement.
+       if (changed) {
+@@ -216,7 +222,7 @@ export class DurableCodingRepairMemory {
+       const after = { ...candidate, files: candidate.files.map(f => ({ ...f, content: replacements.get(f.path) ?? f.content })) };
+       if (codingRepairCandidateDigest(after) !== r.verifiedArtifactDigest) throw new Error("REPAIR_MEMORY_RESULT_MISMATCH");
+       return { value: { key, id: r.id, verifiedArtifactDigest: r.verifiedArtifactDigest, proposal }, changed: false };
+-    });
++    }, true);
+   }
+ 
+   async assertReusable(hit: RepairMemoryIdentity): Promise<void> {
+@@ -227,7 +233,7 @@ export class DurableCodingRepairMemory {
+       if (!record || record.quarantineDigest !== null || record.id !== id || record.verifiedArtifactDigest !== verifiedArtifactDigest)
+         throw new Error("REPAIR_MEMORY_REVOKED_DURING_RUN");
+       return { value: undefined, changed: false };
+-    });
++    }, true);
+   }
+ 
+   async quarantine(key: string, failureDigest: string): Promise<void> {
