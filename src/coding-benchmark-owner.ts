@@ -91,7 +91,9 @@ export async function launchOwnerCodingBenchmark(input: OwnerBenchmarkInput & { 
     claimedAt: new Date().toISOString(), launch: "existing_cli", replayAllowed: false,
     launcher: input.launcher ? structuredClone(input.launcher) : { authentication: "owner_token" },
   });
-  const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.environment, stdio: "ignore", timeout: 300_000 });
+  // Preserve the benchmark's sanitized result/error stream in Railway logs so a
+  // one-use launch remains observable without exposing credentials or model source.
+  const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.environment, stdio: ["ignore", "inherit", "inherit"], timeout: 300_000 });
   child.once("exit", (code, signal) => {
     void writeBenchmarkAudit(journal, "owner-launch-exit.json", { code, signal, exitedAt: new Date().toISOString(), replayAllowed: false })
       .catch(() => { console.error("Benchmark launch exit evidence failed; reservation remains held."); });
