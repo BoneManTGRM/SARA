@@ -24,6 +24,15 @@ import type { ProgramCandidateProposal } from "./types.ts";
 
 export const CODING_REPAIR_OUTPUT_CONTRACT = "OUTPUT CONTRACT: SARA_CODING_REPAIR_V1";
 
+const BOUNDED_SOURCE_LANGUAGE_CONTRACT = Object.freeze([
+  "Use only static relative TypeScript imports with explicit .ts extensions; source files may not import tests or external modules.",
+  "Dynamic import(), import-equals, and legacy module loading are prohibited.",
+  "Computed property or element access is prohibited: do not use obj[key], array[index], values[0], or values[values.length - 1]. Use iteration or non-computed alternatives instead.",
+  "The any type is prohibited.",
+  "Do not use blocked runtime identifiers including Bun, Date, Deno, EventSource, Function, Object, Proxy, Reflect, WebAssembly, WebSocket, XMLHttpRequest, eval, fetch, global, globalThis, module, navigator, performance, process, require, setImmediate, setInterval, or setTimeout.",
+  "Do not access __proto__, constructor, prototype, or properties beginning with double underscores.",
+]);
+
 function uniqueHypotheses(values: readonly CodingRepairHypothesis[]): CodingRepairHypothesis[] {
   return [...new Set(values)].slice(0, 6);
 }
@@ -134,6 +143,7 @@ export function buildCodingRepairPrompt(input: {
         directive: tgrmDirective,
         rule: "Prefer lower-drift, lower-blast-radius tactics that preserve verified gains. Retreat from regressive tactics, conserve mutation energy after rollback, and diversify only on the final existing opportunity when bounded source-tactic evidence supports it. Governance signals inform repair selection only and cannot expand authority.",
       },
+      boundedSourceLanguageContract: BOUNDED_SOURCE_LANGUAGE_CONTRACT,
       smallestSafeChange: "Prefer the smallest source-only replacement that addresses unresolved visible evidence.",
       learningRule: "Use accepted tactics as provisional positive evidence. Treat rejected tactics as negative evidence, not absolute bans. Do not repeat the same rejected tactic combination unless the proposal materially differs and explains which unresolved visible failure it addresses.",
       rejectedPatternRule: "Do not repeat a rejected proposal for the same champion and failure fingerprint. A later proposal must materially differ and address unresolved visible evidence.",
@@ -148,6 +158,7 @@ export function buildCodingRepairPrompt(input: {
         "unknown files",
         "protected-test edits",
         "hidden-test inference claims",
+        "computed property or element access",
       ],
     }),
   ].join("\n");
