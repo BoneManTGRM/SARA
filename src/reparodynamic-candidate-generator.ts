@@ -1,4 +1,3 @@
-import type { RepairReuseSession } from "./coding-repair-reuse.ts";
 import { runCodingRepairController, type CodingRepairModel } from "./coding-repair-controller.ts";
 import { INITIAL_CODING_REPAIR_LIMITS } from "./coding-repair-policy.ts";
 import type { CodingRepairRun, ProgramVerificationResult, ReparodynamicCodingMode } from "./coding-repair-types.ts";
@@ -36,7 +35,6 @@ export function createReparodynamicCandidateGenerator(input: {
     candidate: ProgramCandidateProposal,
     context: Parameters<CandidateGenerator["generate"]>[0],
   ): Promise<ProgramVerificationResult>;
-  reuse?: (context: Parameters<CandidateGenerator["generate"]>[0]) => Promise<RepairReuseSession>;
   onReceipt?: Parameters<typeof runCodingRepairController>[0]["onReceipt"];
   onRun?: (run: CodingRepairRun) => Promise<void> | void;
   onFallback?: (event: ReparodynamicCodingFallbackEvent) => Promise<void> | void;
@@ -51,21 +49,16 @@ export function createReparodynamicCandidateGenerator(input: {
       let modelInvoked = false;
       let receiptPersistenceFailed = false;
       let run: CodingRepairRun;
-      let reuse: RepairReuseSession | undefined;
       try {
-        reuse = input.mode === "canary" ? await input.reuse?.(context) : undefined;
         const model = typeof input.model === "function" ? input.model(context) : input.model;
         run = await runCodingRepairController({
           baseline,
-          verify: (candidate) => reuse ? reuse.verify(candidate) : input.verify(candidate, context),
+          verify: (candidate) => input.verify(candidate, context),
           model: {
             async propose(request) {
-              const fallback: CodingRepairModel = { async propose(value) {
-                // Only a true model dispatch crosses the possibly-paid boundary.
-                modelInvoked = true;
-                return model.propose(value);
-              } };
-              return reuse ? reuse.propose(request, fallback) : fallback.propose(request);
+              // Crossing this boundary can spend money, even if no response is received.
+              modelInvoked = true;
+              return model.propose(request);
             },
           },
           ...(input.onReceipt ? { onReceipt: async (receipt: Parameters<NonNullable<typeof input.onReceipt>>[0]) => {
@@ -76,13 +69,12 @@ export function createReparodynamicCandidateGenerator(input: {
           } } : {}),
         });
       } catch (error) {
-        if (modelInvoked || receiptPersistenceFailed || reuse) throw error;
+        if (modelInvoked || receiptPersistenceFailed) throw error;
         await recordFallback(input.onFallback, { mode: input.mode, reasonCode: "pre_dispatch_error" });
         return baseline;
       }
       // Mandatory run persistence is outside the recoverable controller boundary.
-      if (reuse) await reuse.finish(run, async () => { await input.onRun?.(structuredClone(run)); });
-      else await input.onRun?.(structuredClone(run));
+      await input.onRun?.(structuredClone(run));
       if (input.mode === "shadow") return baseline;
       if (run.state !== "VERIFIED_CANDIDATE") {
         await recordFallback(input.onFallback, { mode: "canary", reasonCode: "unverified_candidate" });
