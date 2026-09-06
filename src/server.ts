@@ -1,3 +1,4 @@
+import type { NativeCodingVerifier } from "./native-coding-verifier.ts";
 import { authenticateCodingBenchmarkRelay, type CodingBenchmarkRelayIdentity } from "./coding-benchmark-github-relay.ts";
 import { ownerCodingBenchmarkReadiness, launchOwnerCodingBenchmark } from "./coding-benchmark-owner.ts";
 import { CodingBenchmarkNotReadyError } from "./coding-benchmark-readiness.ts";
@@ -20,7 +21,7 @@ import { readRepositoryReadinessReportArtifact } from "./repository-readiness-re
 import { readRevenueNicoArtifact, readRevenueNicoPackage } from "./revenue-nico-artifacts.ts";
 import { listSaraTools } from "./tool-registry.ts";
 import type { NicoArtifactFormat, NicoArtifactIdentity, NicoOperator } from "./nico-operator.ts";
-import type { CandidateProposal, MutationStage } from "./types.ts";
+import type { CandidateGenerator, ProgramCandidateProposal, CandidateProposal, MutationStage } from "./types.ts";
 import { compileAuthorizedAutomatedReadinessDelivery } from "./authorized-readiness-delivery.ts";
 import type { WorkerModelClient } from "./model-router.ts";
 import type { ReparodynamicCodingMode } from "./coding-repair-types.ts";
@@ -59,6 +60,7 @@ export type ServerOptions = {
   reparodynamicCoding?: {
     mode: ReparodynamicCodingMode;
     modelClient: WorkerModelClient;
+    nativeVerifier?: NativeCodingVerifier;
     stateDirectory: string;
   };
 };
@@ -549,13 +551,23 @@ async function handleSelfBuild(
             stateDirectory: options.reparodynamicCoding!.stateDirectory, runId, decision }),
         })
         : createLunaCodingRepairModel({ client: options.reparodynamicCoding!.modelClient, context }),
-      verify: (candidate, context) => verifyGenomeLabProgramCandidate({
-        experimentalCompilerCache: codingTypecheckHost(options.reparodynamicCoding!.mode),
-        candidate,
-        objective: context.objective,
-        acceptanceCriteria: context.acceptanceCriteria,
-        constitutionDigest: context.constitutionDigest,
-      }),
+      verify: (candidate, context) => options.reparodynamicCoding!.mode === "canary" && options.reparodynamicCoding!.nativeVerifier
+        ? options.reparodynamicCoding!.nativeVerifier.verify({ candidate, objective: context.objective,
+          acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest }, async () => {
+          const status = await kernel.getStatus();
+          if (status.emergencyStopped || !status.constitution.verified || status.constitution.digest !== context.constitutionDigest) {
+            throw new Error("VERIFICATION_AUTHORITY_REVOKED");
+          }
+        })
+        : verifyGenomeLabProgramCandidate({ experimentalCompilerCache: codingTypecheckHost(options.reparodynamicCoding!.mode),
+          candidate, objective: context.objective, acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest }),
+      ...(options.reparodynamicCoding!.mode === "canary" && options.reparodynamicCoding!.nativeVerifier ? {
+        // Native loop checks are provisional: the original compiler must accept
+        // the entire final program before learning or returning it to the kernel.
+        verifyFinal: (candidate: ProgramCandidateProposal, context: Parameters<CandidateGenerator["generate"]>[0]) =>
+          verifyGenomeLabProgramCandidate({ experimentalCompilerCache: codingTypecheckHost("canary"),
+            candidate, objective: context.objective, acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest }),
+      } : {}),
       onReceipt: (receipt) => persistCodingRepairReceipt({
         stateDirectory: options.reparodynamicCoding!.stateDirectory,
         runId,

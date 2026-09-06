@@ -17,6 +17,7 @@ export type CodingRepairReuseSummary = { schemaVersion: 1; scopeDigest: string |
 /** Wrap the normal controller, not the frozen benchmark. Model calls still obey its original limits. */
 export function createReusableCodingCandidateGenerator(input: Options & {
   memory: DurableCodingRepairMemory;
+  verifyFinal?: Options["verify"];
   learningCoordinator?: RepairLearningCoordinator;
   scope(context: Parameters<CandidateGenerator["generate"]>[0]): Promise<string>;
   onReuse(summary: CodingRepairReuseSummary): Promise<void> | void;
@@ -100,9 +101,9 @@ export function createReusableCodingCandidateGenerator(input: Options & {
         await input.onReceipt?.(receipt);
       },
       onRun: async run => {
-        if (run.state === "VERIFIED_CANDIDATE" && run.receipts.length) {
+        if (run.state === "VERIFIED_CANDIDATE" && (run.receipts.length || input.verifyFinal)) {
           try {
-            const checked = await input.verify(structuredClone(run.champion), context);
+            const checked = await (input.verifyFinal ?? input.verify)(structuredClone(run.champion), context);
             assertCodingRepairVerification(checked);
             if (!checked.passed || checked.artifactDigest !== codingRepairCandidateDigest(run.champion) ||
                 checked.artifactDigest !== run.verification.artifactDigest) throw new Error("REPAIR_REUSE_FINAL_VERIFICATION_FAILED");
