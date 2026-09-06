@@ -1,0 +1,72 @@
+name: Verify exact maximum-reuse pilot source
+on:
+  push:
+    branches: [bench/maximum-reuse-eb659a8f]
+    paths: [.github/workflows/reuse-speed-transfer.yml]
+permissions:
+  contents: read
+jobs:
+  transfer:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.16.0'
+      - name: Reconstruct exact source without running a paid pilot
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/sara-reuse-transfer
+          python3 - <<'PY'
+          import base64,gzip,hashlib,pathlib
+          encoded=''.join((pathlib.Path('.reuse-transfer')/('part'+str(i))).read_text(encoding='ascii') for i in range(4))
+          assert len(encoded)==15988
+          patch=gzip.decompress(base64.b64decode(encoded,validate=True))
+          assert len(patch)==43329
+          assert hashlib.sha256(patch).hexdigest()=='a26bb13ad029c2b33438ce2ae1991d934b38f7c68d4448df4986626a392c3800'
+          pathlib.Path('/tmp/sara-reuse-transfer/candidate.patch').write_bytes(patch)
+          PY
+          git apply --index /tmp/sara-reuse-transfer/candidate.patch
+          git rm .github/workflows/reuse-speed-transfer.yml .reuse-transfer/part0 .reuse-transfer/part1 .reuse-transfer/part2 .reuse-transfer/part3
+          test "$(git write-tree)" = 77593a30551c6661227400704ac18754b3dcbeb6
+          test -z "$(git ls-files node_modules tools/native-checker/node_modules)"
+      - run: npm ci --ignore-scripts
+      - run: node scripts/build-native-checker.mjs
+      - name: Full verification with mocked providers and no production credentials
+        run: |
+          set -euo pipefail
+          npm run verify | tee /tmp/sara-reuse-transfer/verify.log
+          git diff --exit-code
+          test "$(git write-tree)" = 77593a30551c6661227400704ac18754b3dcbeb6
+      - name: Capture and publish this verified branch only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = BoneManTGRM/SARA
+          test "$GITHUB_REF" = refs/heads/bench/maximum-reuse-eb659a8f
+          test "$(git ls-remote origin "$GITHUB_REF" | cut -f1)" = "$GITHUB_SHA"
+          git config user.name 'SARA verified source transfer'
+          git config user.email 'source-transfer@users.noreply.github.com'
+          git commit -m 'Add one capped three-control live learned-repair throughput pilot'
+          test "$(git rev-parse HEAD^{tree})" = 77593a30551c6661227400704ac18754b3dcbeb6
+          git rev-parse HEAD > /tmp/sara-reuse-transfer/commit.txt
+          git rev-parse HEAD^{tree} > /tmp/sara-reuse-transfer/tree.txt
+          git archive --format=tar HEAD | gzip -n > /tmp/sara-reuse-transfer/source.tar.gz
+          (cd /tmp/sara-reuse-transfer && sha256sum candidate.patch source.tar.gz verify.log > SHA256SUMS)
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $AUTH" push origin HEAD:refs/heads/bench/maximum-reuse-eb659a8f
+          unset AUTH GH_TOKEN
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: sara-maximum-reuse-source-${{ github.run_id }}
+          path: /tmp/sara-reuse-transfer/
+          if-no-files-found: error
+          retention-days: 14
