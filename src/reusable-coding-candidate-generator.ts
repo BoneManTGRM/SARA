@@ -135,6 +135,13 @@ export function createReusableCodingCandidateGenerator(input: Options & {
         // Rolled-back hits are excluded so verified model fallback remains valid.
         if (summary.finalFreshVerification) {
           for (const hit of accepted.values()) await input.memory.assertReusable(hit);
+          // A cold learner can also be revoked while the mandatory reuse receipt
+          // is awaiting I/O. Do not return it or release followers as committed
+          // merely because this process originally wrote the verified recipe.
+          if (summary.learnedRecipeId !== null && learnedKey !== undefined) {
+            await input.memory.assertReusable({ key: learnedKey, id: summary.learnedRecipeId,
+              verifiedArtifactDigest: run.verification.artifactDigest });
+          }
         }
       },
     });
