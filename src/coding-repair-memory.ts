@@ -1,4 +1,5 @@
 import { constants } from "node:fs";
+import { ExactByteSnapshotCache, readExactMemoryBytes } from "./repair-memory-snapshot.ts";
 import { mkdir, open, readFile, realpath, rename, rmdir, unlink, lstat } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { resolve, join } from "node:path";
@@ -66,6 +67,16 @@ function validateRecords(value: unknown): asserts value is Recipe[] {
   }
 }
 
+// One bounded process-local cache with a fixed, context-independent structural validator.
+// Every transaction still reads current bytes under the unchanged filesystem lock.
+const recordSnapshots = new ExactByteSnapshotCache<Recipe[]>(text => {
+  const state = JSON.parse(text);
+  if (!state || state.schemaVersion !== 1 || Object.keys(state).sort().join() !== "digest,records,schemaVersion" ||
+      sha256(canonicalJson(state.records)) !== state.digest) throw new Error("REPAIR_MEMORY_CORRUPT");
+  validateRecords(state.records);
+  return state.records;
+});
+
 // Bound and serialize only short local cache I/O, never model or verifier work.
 // The existing filesystem lock still guards other processes and crash recovery.
 type MemoryQueue = { tail: Promise<void>; pending: number };
@@ -117,19 +128,8 @@ export class DurableCodingRepairMemory {
         try {
           const stat = await file.stat();
           if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_BYTES || (stat.mode & 0o077) !== 0) throw new Error("REPAIR_MEMORY_FILE_BOUNDARY");
-          const bytes = Buffer.alloc(MAX_BYTES + 1);
-          let length = 0;
-          while (length < bytes.length) {
-            const result = await file.read(bytes, length, bytes.length - length, null);
-            if (!result.bytesRead) break;
-            length += result.bytesRead;
-          }
-          if (length > MAX_BYTES) throw new Error("REPAIR_MEMORY_SIZE");
-          const state = JSON.parse(bytes.subarray(0, length).toString("utf8"));
-          if (state.schemaVersion !== 1 || Object.keys(state).sort().join() !== "digest,records,schemaVersion" ||
-              sha256(canonicalJson(state.records)) !== state.digest) throw new Error("REPAIR_MEMORY_CORRUPT");
-          validateRecords(state.records);
-          records = state.records;
+          const bytes = await readExactMemoryBytes(file, stat.size);
+          records = recordSnapshots.decode(this.directory, bytes);
         } finally { await file.close(); }
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -252,7 +252,7 @@ export class DurableCodingRepairMemory {
 export async function codingRepairMemoryScope(ownerId: string, context: Parameters<CandidateGenerator["generate"]>[0]): Promise<string> {
   const paths = ["genome-lab.ts", "genome-lab-verifier.ts", "coding-repair-controller.ts", "coding-repair-policy.ts",
     "coding-repair-prompt.ts", "luna-coding-repair-model.ts", "reparodynamic-candidate-generator.ts", "coding-repair-memory.ts",
-    "reusable-coding-candidate-generator.ts", "coding-repair-singleflight.ts", "experimental-v5/coding-repair-verification.ts", "kernel.ts", "server.ts", "../package-lock.json"];
+    "reusable-coding-candidate-generator.ts", "coding-repair-singleflight.ts", "repair-memory-snapshot.ts", "experimental-v5/coding-repair-verification.ts", "kernel.ts", "server.ts", "../package-lock.json"];
   const implementation = await Promise.all(paths.map(async path => [path, sha256(await readFile(new URL(path, import.meta.url), "utf8"))]));
   return sha256(canonicalJson({ schemaVersion: 1, ownerId, objective: context.objective,
     acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest,
