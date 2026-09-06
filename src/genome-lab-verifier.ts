@@ -88,6 +88,23 @@ function programArtifactDigest(candidate: ProgramCandidateProposal): string {
   return sha256(canonicalJson({ schemaVersion: 1, files }));
 }
 
+function boundedProgramPolicyFailure(error: unknown): CodingFailureSignal | null {
+  const message = error instanceof Error ? error.message : "";
+  const match = /^Generated program is not a bounded isolated candidate: (src\/[a-z0-9][a-z0-9._/-]*|tests\/[a-z0-9][a-z0-9._/-]*\.test\.ts): (.+)\.$/u.exec(message);
+  if (!match) return null;
+  const [, path, reason] = match;
+  const sourcePath = path?.startsWith("src/") ? path : "";
+  return signal({
+    kind: "policy",
+    code: "GENOME_LAB_SOURCE_POLICY_REJECTED",
+    file: sourcePath,
+    note: sourcePath
+      ? `Candidate violates bounded source policy: ${reason}.`
+      : "Candidate violates bounded source policy.",
+    severity: "high",
+  });
+}
+
 export async function verifyProgramCandidate(input: {
   candidate: ProgramCandidateProposal;
   behaviorCheck?: (candidate: ProgramCandidateProposal) => Promise<CodingFailureSignal[]>;
@@ -186,7 +203,18 @@ export async function verifyGenomeLabProgramCandidate(input: {
       completedChecks,
       evidenceDigests: [sha256(canonicalJson({ artifactDigest: initial.artifactDigest, completedChecks, result: "PASS" }))],
     };
-  } catch {
+  } catch (error) {
+    const policyFailure = boundedProgramPolicyFailure(error);
+    if (policyFailure) {
+      return {
+        ...initial,
+        passed: false,
+        score: 0.6,
+        failures: [policyFailure],
+        completedChecks: ["source_policy", "syntax", "typecheck", "artifact_integrity"],
+        evidenceDigests: [policyFailure.evidenceDigest],
+      };
+    }
     const failure = signal({
       kind: "behavior",
       code: "GENOME_LAB_RUNTIME_FAILURE",
