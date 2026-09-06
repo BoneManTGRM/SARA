@@ -66,12 +66,34 @@ function validateRecords(value: unknown): asserts value is Recipe[] {
   }
 }
 
+// Bound and serialize only short local cache I/O, never model or verifier work.
+// The existing filesystem lock still guards other processes and crash recovery.
+type MemoryQueue = { tail: Promise<void>; pending: number };
+const memoryQueues = new Map<string, MemoryQueue>();
+let pendingMemoryOperations = 0;
+async function withMemoryQueue<T>(directory: string, operation: () => Promise<T>): Promise<T> {
+  const queue = memoryQueues.get(directory) ?? { tail: Promise.resolve(), pending: 0 };
+  if (queue.pending >= 32 || pendingMemoryOperations >= 128) throw new Error("REPAIR_MEMORY_QUEUE_FULL");
+  const previous = queue.tail;
+  let release!: () => void;
+  queue.tail = new Promise<void>(resolve => { release = resolve; });
+  queue.pending++; pendingMemoryOperations++; memoryQueues.set(directory, queue);
+  try { await previous; return await operation(); }
+  finally {
+    queue.pending--; pendingMemoryOperations--; release();
+    if (queue.pending === 0) memoryQueues.delete(directory);
+  }
+}
+
 /** Private bounded proposal store, never a PASS cache. Crash locks intentionally disable reuse. */
 export class DurableCodingRepairMemory {
   readonly directory: string;
   constructor(stateDirectory: string) { this.directory = resolve(stateDirectory, "coding-repair-memory-v1"); }
 
   async #transaction<T>(write: boolean, action: (records: Recipe[]) => T): Promise<T> {
+    return withMemoryQueue(this.directory, () => this.#filesystemTransaction(write, action));
+  }
+  async #filesystemTransaction<T>(write: boolean, action: (records: Recipe[]) => T): Promise<T> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     if (await realpath(this.directory) !== this.directory) throw new Error("REPAIR_MEMORY_DIRECTORY_SYMLINK");
     const dir = await open(this.directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
@@ -190,6 +212,16 @@ export class DurableCodingRepairMemory {
       const after = { ...candidate, files: candidate.files.map(f => ({ ...f, content: replacements.get(f.path) ?? f.content })) };
       if (codingRepairCandidateDigest(after) !== r.verifiedArtifactDigest) throw new Error("REPAIR_MEMORY_RESULT_MISMATCH");
       return { key, id: r.id, verifiedArtifactDigest: r.verifiedArtifactDigest, proposal };
+    });
+  }
+
+  async assertReusable(hit: RepairMemoryHit): Promise<void> {
+    const { key, id, verifiedArtifactDigest } = hit;
+    if (![key, id, verifiedArtifactDigest].every(isEvidenceDigest)) throw new Error("REPAIR_MEMORY_INVALID_HIT");
+    await this.#transaction(false, records => {
+      const record = records.find(r => r.key === key);
+      if (!record || record.quarantineDigest !== null || record.id !== id || record.verifiedArtifactDigest !== verifiedArtifactDigest)
+        throw new Error("REPAIR_MEMORY_REVOKED_DURING_RUN");
     });
   }
 

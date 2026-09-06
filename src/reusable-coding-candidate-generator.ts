@@ -28,6 +28,7 @@ export function createReusableCodingCandidateGenerator(input: Options & {
     try { summary.scopeDigest = await input.scope(context); } catch { summary.memoryUnavailable = true; }
     let pending: RepairMemoryHit | null = null;
     const used = new Map<string, RepairMemoryHit>();
+    const accepted = new Map<string, RepairMemoryHit>();
     let underlying: CodingRepairModel | undefined;
     const generator = createReparodynamicCandidateGenerator({ ...input,
       model: { async propose(request) {
@@ -54,7 +55,7 @@ export function createReusableCodingCandidateGenerator(input: Options & {
           if (receipt.outcome !== "verified_complete" || receipt.afterArtifactDigest !== hit.verifiedArtifactDigest) {
             await input.memory.quarantine(hit.key, sha256(canonicalJson(receipt)));
             summary.quarantines++;
-          }
+          } else accepted.set(hit.key, hit);
         }
         await input.onReceipt?.(receipt);
       },
@@ -85,6 +86,12 @@ export function createReusableCodingCandidateGenerator(input: Options & {
         // This boundary excludes this last receipt write and the subsequent kernel check.
         summary.totalElapsedMilliseconds = performance.now() - started;
         await input.onReuse(structuredClone(summary));
+        // Mandatory callbacks yield to other jobs. Recheck accepted recipes after
+        // them; a previously written success summary never authorizes a return.
+        // Rolled-back hits are excluded so verified model fallback remains valid.
+        if (summary.finalFreshVerification) {
+          for (const hit of accepted.values()) await input.memory.assertReusable(hit);
+        }
       },
     });
     return generator.generate(context);

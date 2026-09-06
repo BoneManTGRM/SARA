@@ -95,3 +95,30 @@ record cold/new and eligible-repeat workloads separately, preserve all failures,
 charge learning/fallback/verification/storage, and include an equivalent ordinary-
 memory comparison before attributing an advantage specifically to Reparodynamics.
 Historical grants/results and their original source/test pins remain untouched.
+
+
+## Converged concurrency and return-boundary protections
+
+The previously separate PR114 candidate was not deployed as a competing store.
+Its two fixes were reimplemented on this PR113 store without dropping owner or
+failure-fingerprint keys, private-file permissions, the 2MiB bound, atomic
+writes, or durable store disablement after uncertain quarantine.
+
+A bounded FIFO serializes short local transactions across store objects: 32
+outstanding operations per directory, 128 total. It prevents contended warm
+lookups from unnecessarily becoming model calls. Models and verification never
+run inside that queue. Saturation or a different process's existing lock remains
+an optional cache failure; no lock is stolen, and cold simultaneous generation
+is not deduplicated.
+
+After all mandatory run and reuse-summary callbacks, every accepted recipe is
+read and checked again for revocation and exact identity. Failed/rolled-back
+hits are not treated as accepted contributions to a subsequent verified model
+fallback. The earlier summary is not authority to return a revoked candidate.
+This is not an atomic guarantee against revocation after the last check; the
+kernel still independently verifies and retains its SHADOW/promotion barriers.
+
+Five new concurrency/revocation regressions first failed on the original PR113
+source before these fixes, then passed. Additional regressions cover bounded
+queue overflow, corrupted-state recovery and retained interrupted locks. These
+are credential-free tests, not a new paid comparison or a 35x performance claim.
