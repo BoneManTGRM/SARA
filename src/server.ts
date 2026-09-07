@@ -60,6 +60,8 @@ export type ServerOptions = {
   reparodynamicCoding?: {
     mode: ReparodynamicCodingMode;
     modelClient: WorkerModelClient;
+    /** Trusted host factory; never selected by request body. */
+    modelClientForRun?: (runId: string) => WorkerModelClient;
     nativeVerifier?: NativeCodingVerifier;
     stateDirectory: string;
   };
@@ -538,6 +540,7 @@ async function handleSelfBuild(
     },
   };
   const runId = randomUUID();
+  const codingClient = options.reparodynamicCoding?.modelClientForRun?.(runId) ?? options.reparodynamicCoding?.modelClient;
   const generator = options.reparodynamicCoding && proposal.candidateKind === "typescript_program"
     ? createReusableCodingCandidateGenerator({
       base: baseGenerator,
@@ -546,11 +549,11 @@ async function handleSelfBuild(
       onReuse: (summary) => persistCodingRepairReuse({ stateDirectory: options.reparodynamicCoding!.stateDirectory, runId, summary }),
       mode: options.reparodynamicCoding.mode,
       model: (context) => options.reparodynamicCoding!.mode === "canary"
-        ? createAdaptiveCodingRepairModel({ client: options.reparodynamicCoding!.modelClient, context,
+        ? createAdaptiveCodingRepairModel({ client: codingClient!, context,
           onFormat: (decision) => persistRepairFormatDecision({
             stateDirectory: options.reparodynamicCoding!.stateDirectory, runId, decision }),
         })
-        : createLunaCodingRepairModel({ client: options.reparodynamicCoding!.modelClient, context }),
+        : createLunaCodingRepairModel({ client: codingClient!, context }),
       verify: (candidate, context) => options.reparodynamicCoding!.mode === "canary" && options.reparodynamicCoding!.nativeVerifier
         ? options.reparodynamicCoding!.nativeVerifier.verify({ candidate, objective: context.objective,
           acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest }, async () => {

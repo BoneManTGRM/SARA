@@ -1,3 +1,6 @@
+import { KernelBuildQueue } from "./kernel-build-queue.ts";
+import { performance } from "node:perf_hooks";
+import { KernelVerificationPool } from "./kernel-verification-pool.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -442,6 +445,8 @@ export type SaraStatus = {
 export class SaraKernel {
   private mutationTail: Promise<void> = Promise.resolve();
   readonly #store: KernelEventStore;
+  #verificationPool?: KernelVerificationPool;
+  readonly #buildQueue = new KernelBuildQueue();
   readonly #constitution: SaraConstitution;
   readonly #ownerTokenSha256: string;
   readonly constitutionDigest: string;
@@ -477,8 +482,11 @@ export class SaraKernel {
     ownerTokenSha256?: string;
     constitutionPath?: string;
     bootstrapRevenueCapabilities?: boolean;
+    /** Trusted boot configuration only; never derived from a coding request. */
+    selfBuildVerificationWorkers?: 0 | 1 | 2;
     now?: () => Date;
   }): Promise<SaraKernel> {
+    if (![0, 1, 2].includes(options.selfBuildVerificationWorkers ?? 0)) throw new Error("KERNEL_VERIFICATION_WORKERS_INVALID");
     const requestedOwnerTokenSha256 = options.ownerTokenSha256 ?? process.env.SARA_OWNER_TOKEN_SHA256;
     if (
       requestedOwnerTokenSha256 !== undefined &&
@@ -544,9 +552,16 @@ export class SaraKernel {
           }
         }
       }
+      if (options.selfBuildVerificationWorkers) {
+        kernel.#verificationPool = new KernelVerificationPool(options.stateDirectory, { concurrency: options.selfBuildVerificationWorkers });
+      }
       return kernel;
     });
   }
+
+  /** Drains owned verifier work; never retries or aborts generated-code cleanup. */
+  async closeVerificationWorkers(): Promise<void> { await Promise.all([this.#verificationPool?.close(), this.#buildQueue.close()]); }
+  verificationWorkerStatus() { return this.#verificationPool?.snapshot() ?? null; }
 
   authenticateOwnerToken(token: string): Principal {
     const received = createHash("sha256").update(token, "utf8").digest();
@@ -1709,11 +1724,19 @@ export class SaraKernel {
     evidence: MutationEvidence;
     artifactRelativePath: string;
     generatorId: string;
+    timing: { schemaVersion: 1; boundary: string; totalMilliseconds: number; generationMilliseconds: number;
+      kernelVerificationMilliseconds: number; acceptanceAndReceiptsMilliseconds: number; pooled: boolean };
   }> {
+    const cycleStarted = performance.now();
+    let generationMilliseconds = 0, kernelVerificationMilliseconds = 0, acceptanceAndReceiptsMilliseconds = 0;
+    let uncommittedArtifact: string | undefined;
+    let acceptanceStarted = false;
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$/.test(generator.id)) {
       throw new Error("Candidate generator id must be 2–128 safe identifier characters.");
     }
     assertMoney(generator.maximumCostUsd, "Candidate generator maximum cost");
+    generator = { id: generator.id, external: generator.external, maximumCostUsd: generator.maximumCostUsd,
+      generate: generator.generate.bind(generator) };
 
     const handoff = await this.serializeMutation(async () => {
       await this.authorize(principal, {
@@ -1754,19 +1777,43 @@ export class SaraKernel {
         memoryContextDigest: memoryContext.contextDigest,
         memoryIds: memoryContext.memories.map((memory) => memory.id),
       });
-      return { ...compiled, memoryContext };
+      return { ...compiled, memoryContext, admissionStopEpoch: state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null };
     });
 
     try {
-      const proposal = await generator.generate({
+      const generationStarted = performance.now();
+      // Copy the untrusted result before authority checks or disk I/O can yield.
+      const proposal = structuredClone(await generator.generate({
         objective: handoff.objective,
         acceptanceCriteria: [...handoff.acceptanceCriteria],
         missingCapabilities: [...handoff.missingCapabilities],
         constitutionDigest: handoff.constitutionDigest,
         memoryContext: structuredClone(handoff.memoryContext),
+      }));
+      generationMilliseconds = performance.now() - generationStarted;
+      const pooled = Boolean(this.#verificationPool && proposal.candidateKind === "typescript_program");
+      const candidateId = randomUUID();
+      let authorityEpoch: string | null = null;
+      const beforeVerification = () => this.serializeMutation(async () => {
+        await this.authorize(principal, { action: "sandbox_development", targetId: `self-build:${jobId}:${generator.id}:dispatch`, external: false });
+        const state = await this.state();
+        if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("SELF_BUILD_JOB_NOT_RUNNING");
+        authorityEpoch = state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null;
+        if (authorityEpoch !== handoff.admissionStopEpoch) throw new Error("SELF_BUILD_AUTHORITY_CHANGED_DURING_GENERATION");
       });
-
-      return await this.serializeMutation(async () => {
+      const verificationStarted = performance.now();
+      // Neither cooperative verification nor workers may hold the event-store
+      // mutation lock while compiling/executing a candidate. Both are bounded.
+      const prepared = pooled
+        ? await this.#verificationPool!.verify({ handoff, candidate: proposal as import("./types.ts").ProgramCandidateProposal, candidateId }, beforeVerification)
+        : await this.#buildQueue.run(async () => {
+          await beforeVerification();
+          return buildVerifiedSkillCandidate(handoff, proposal, `${this.#store.stateDirectory}/genome-lab`, candidateId);
+        });
+      kernelVerificationMilliseconds = performance.now() - verificationStarted;
+      uncommittedArtifact = prepared.artifactDirectory;
+      const acceptanceClock = performance.now();
+      const result = await this.serializeMutation(async () => {
         await this.authorize(principal, {
           action: "sandbox_development",
           targetId: `self-build:${jobId}:${generator.id}:verify`,
@@ -1777,13 +1824,11 @@ export class SaraKernel {
         if (!runningJob || runningJob.status !== "running") {
           throw new Error(`Job ${jobId} is no longer running.`);
         }
-        const candidateId = randomUUID();
-        const artifact = await buildVerifiedSkillCandidate(
-          handoff,
-          proposal,
-          `${this.#store.stateDirectory}/genome-lab`,
-          candidateId,
-        );
+        if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== authorityEpoch) {
+          throw new Error("SELF_BUILD_AUTHORITY_CHANGED_DURING_VERIFICATION");
+        }
+        const artifact = prepared;
+        await verifyGenomeLabArtifact(this.#store.stateDirectory, artifact.artifactRelativePath, artifact.candidateDigest);
         const programCandidate = proposal.candidateKind === "typescript_program";
         const candidateName = programCandidate ? proposal.programName : proposal.skillName;
         const mutation: Mutation = {
@@ -1809,6 +1854,9 @@ export class SaraKernel {
           observedAt: new Date().toISOString(),
           attestation: "kernel_executed",
         };
+        // Once acceptance events may reference this artifact, never remove it
+        // on an uncertain later receipt failure; retain evidence for recovery.
+        acceptanceStarted = true;
         await this.#store.append("mutation_created", principal, mutation);
         await this.#store.append("mutation_evidence_recorded", principal, { mutationId: mutation.id, evidence });
         await this.#store.append("mutation_stage_changed", principal, {
@@ -1834,14 +1882,19 @@ export class SaraKernel {
           productionAuthority: false,
         });
         return {
-          job: { ...runningJob, status: "verified" },
-          mutation: { ...mutation, stage: "SHADOW", evidence: [evidence] },
+          job: { ...runningJob, status: "verified" as const },
+          mutation: { ...mutation, stage: "SHADOW" as const, evidence: [evidence] },
           evidence,
           artifactRelativePath: artifact.artifactRelativePath,
           generatorId: generator.id,
         };
       });
+      acceptanceAndReceiptsMilliseconds = performance.now() - acceptanceClock;
+      return { ...result, timing: { schemaVersion: 1, boundary: "kernel_call_through_all_acceptance_event_commits_before_http_serialization",
+        totalMilliseconds: performance.now() - cycleStarted, generationMilliseconds, kernelVerificationMilliseconds,
+        acceptanceAndReceiptsMilliseconds, pooled } };
     } catch (error) {
+      if (uncommittedArtifact && !acceptanceStarted) await rm(uncommittedArtifact, { recursive: true, force: true });
       await this.serializeMutation(async () => {
         const state = await this.state();
         const runningJob = state.jobs.find((candidate) => candidate.id === jobId);

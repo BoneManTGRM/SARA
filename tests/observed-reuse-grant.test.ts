@@ -41,10 +41,11 @@ test('new export remains bounded to fixed job names and isolated from cold grant
     assert.equal((await readCodingBenchmarkEvidence(root,cold.benchmarkId)).files.length,0);
   }finally{await rm(root,{recursive:true,force:true});}
 });
-test('new launcher hardening pins exactly bind the runtime modules',async()=>{
+test('superseded observed launcher pins remain frozen and reject integrated main drift',async()=>{
   const text=await readFile(new URL('../scripts/benchmark-observed-reuse.ts',import.meta.url),'utf8');
   const pins=JSON.parse(text.match(/const hardeningPins = (\{[\s\S]*?\});/)![1]) as Record<string,string>;
   assert.equal(Object.keys(pins).length,8);
-  for(const [path,digest] of Object.entries(pins))assert.equal(sha256(await readFile(new URL('../'+path,import.meta.url))),digest);
+  const drift=[];for(const [path,digest] of Object.entries(pins)){if(sha256(await readFile(new URL('../'+path,import.meta.url)))!==digest)drift.push(path);}
+  assert.deepEqual(drift,['src/coding-repair-memory.ts','src/main.ts']);
   assert(text.includes('OBSERVED_REUSE_BENCHMARK_GRANT as grant'));
 });

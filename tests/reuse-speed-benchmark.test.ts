@@ -85,28 +85,13 @@ export function freeWindows(dayStart:number, dayEnd:number, bookings:readonly Bo
   for (const b of busy) {if(b.start>cursor)result.push({start:cursor,end:b.start});cursor=Math.max(cursor,b.end);}
   if(cursor<dayEnd)result.push({start:cursor,end:dayEnd});return result;
 }`;
-test("offline full three-arm protocol learns within the run, persists proposals, and freshly verifies every repeated job",async()=>{
-  const dir=await mkdtemp(join(tmpdir(),"reuse-protocol-"));let calls=0,counts=0;
-  const native=await NativeCodingVerifier.create();assert(native);
-  try{const rows=await runReuseSpeedBenchmark({directory:join(dir,"trial"),benchmarkId:grant.benchmarkId,apiKey:"OFFLINE_ONLY",
-    native,executionKind:"scripted_offline",beforeDispatch:async()=>{},fetchImpl:async(url,init)=>{
-      const body=JSON.parse(String(init!.body));assert.doesNotMatch(body.input,/clips, sorts and merges|assert\.deepEqual/);
-      if(String(url).endsWith("/input_tokens")){counts++;return new Response(JSON.stringify({input_tokens:100}));}
-      calls++;const p=JSON.parse(body.input.split("\n").slice(2).join("\n")),file=p.files.find((f:{path:string})=>f.path==="src/free-windows.ts");
-      const proposal={schemaVersion:1,baseArtifactDigest:p.currentArtifactDigest,failureFingerprint:p.failures[0].fingerprint,
-        strategy:p.requiredStrategy,changes:[{path:file.path,expectedContentDigest:file.contentDigest,replacementText:correct}],limitations:[]};
-      return new Response(JSON.stringify({id:`offline-response-${calls}`,model:"gpt-5.6-luna",status:"completed",usage:{input_tokens:100,output_tokens:80},
-        output:[{type:"message",content:[{type:"output_text",text:JSON.stringify(proposal)}]}]}));
-    }});
-    assert.equal(rows.length,12);assert(rows.every(r=>r.completed));assert(rows.every(r=>r.verificationCalls===4));
-    assert.equal(calls,6);assert.equal(counts,6);assert.equal(new Set(rows.map(r=>r.finalArtifactDigest)).size,1);
-    assert.equal(rows.filter(r=>r.arm==="optimized").reduce((n,r)=>n+r.hits,0),3);
-    assert.equal(rows.filter(r=>r.arm==="ordinary_memory").reduce((n,r)=>n+r.hits,0),3);
-    assert.equal(rows.filter(r=>r.arm==="regenerate").reduce((n,r)=>n+r.hits,0),0);
-    const summary=JSON.parse(await readFile(join(dir,"trial/trace/reuse-summary.json"),"utf8"));
-    assert.equal(summary.payload.executionKind,"scripted_offline");assert.equal(summary.payload.absoluteMaximumEstablished,false);
-    assert.equal(summary.payloadDigest,sha256(canonicalJson(summary.payload)));
-    await assert.rejects(runReuseSpeedBenchmark({directory:join(dir,"trial"),benchmarkId:grant.benchmarkId,apiKey:"OFFLINE_ONLY",native,
-      executionKind:"scripted_offline",beforeDispatch:async()=>{},fetchImpl:async()=>{throw Error("should never execute");}}),{code:"EEXIST"});
-  }finally{await rm(dir,{recursive:true,force:true});}
+test("frozen reuse pilot rejects new kernel source without dispatching or creating a trial", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "reuse-frozen-")); let calls = 0;
+  const native = await NativeCodingVerifier.create(); assert(native);
+  try {
+    await assert.rejects(runReuseSpeedBenchmark({ directory: join(dir, "trial"), benchmarkId: grant.benchmarkId,
+      apiKey: "OFFLINE_ONLY", native, executionKind: "scripted_offline", beforeDispatch: async () => {},
+      fetchImpl: async () => { calls++; throw new Error("Must not dispatch"); } }), /CURRENT_PILOT_COMPONENT_DRIFT/);
+    assert.equal(calls, 0);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
