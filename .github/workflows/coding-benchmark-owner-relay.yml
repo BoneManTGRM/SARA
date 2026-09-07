@@ -7,7 +7,7 @@ permissions:
   contents: read
   id-token: write
 concurrency:
-  group: sara-full-kernel-a73c932b
+  group: sara-full-kernel-fc9b8552
   cancel-in-progress: false
 jobs:
   compare-once:
@@ -20,16 +20,16 @@ jobs:
           persist-credentials: false
       - name: Exact unused full-kernel grant then one POST and GET-only recovery
         env:
-          EXPECTED_RUNTIME: 67ba0cf9fb6593ab38ba82ef7a3dfe34325d05d3
+          EXPECTED_RUNTIME: 89761c86fac88ef22d2406421ed60736da76b4f0
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo '25f8a05dc335c906648402dbf49c989ba7bfb309b511360227540b3fd9106e48  scripts/launch-kernel-a73c932b.py' | sha256sum -c -
-          python3 scripts/launch-kernel-a73c932b.py
+          echo 'bb53e902bdc79662507e3ad91e19ace8709c6d968c081094f360c5c6e94fbaf7  scripts/launch-kernel-fc9b8552.py' | sha256sum -c -
+          python3 scripts/launch-kernel-fc9b8552.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: sara-full-kernel-live-${{ github.run_id }}
-          path: /tmp/sara-kernel-a73c932b
+          path: /tmp/sara-kernel-fc9b8552
           retention-days: 14
           if-no-files-found: error
