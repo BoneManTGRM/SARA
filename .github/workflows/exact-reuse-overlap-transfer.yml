@@ -1,0 +1,47 @@
+name: Verify exact learned-repair overlap source
+on:
+  push:
+    branches: [feat/exact-reuse-overlap-35x]
+    paths: [.github/workflows/exact-reuse-overlap-transfer.yml]
+permissions:
+  contents: write
+concurrency:
+  group: sara-exact-reuse-overlap-transfer
+  cancel-in-progress: false
+jobs:
+  qualify-and-publish-source:
+    if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Verify frozen base and exact transfer patch
+        run: |
+          set -euo pipefail
+          test "$(git merge-base dd5fac4a4c39617579830ab35dd49600999116d5 HEAD)" = "dd5fac4a4c39617579830ab35dd49600999116d5"
+          echo 'e29f64676ad2dd460e4ed983f19d6fb6c08286089434e40fffd86e90e1ec4f7a  transfer/exact-reuse-overlap.patch' | sha256sum -c -
+          git diff --quiet dd5fac4a4c39617579830ab35dd49600999116d5 HEAD -- src/coding-repair-memory.ts src/kernel.ts src/reusable-coding-candidate-generator.ts src/types.ts tests/coding-repair-memory.test.ts tests/kernel-verification-pool.test.ts tests/reusable-coding-candidate-generator.test.ts docs/work-cards/exact-reuse-overlap.md
+          git apply --check transfer/exact-reuse-overlap.patch
+          git apply --index transfer/exact-reuse-overlap.patch
+          git rm transfer/exact-reuse-overlap.patch
+          git diff --cached --check
+      - name: Install and run complete credential-free verification
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts
+          node scripts/build-native-checker.mjs
+          npm run verify
+      - name: Publish only the verified source changes
+        run: |
+          set -euo pipefail
+          git config user.name 'Reparodynamics'
+          git config user.email 'papadenico@yahoo.com'
+          git status --short
+          git commit -m 'Prototype exact learned-repair verification overlap'
+          git push origin HEAD:feat/exact-reuse-overlap-35x
