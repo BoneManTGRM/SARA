@@ -34,12 +34,12 @@ describe("Gmail OAuth activation", () => {
       fetchImpl: async (input, init) => {
         const url = String(input);
         requests.push({ url, init });
-        if (url.includes("oauth2.googleapis.com/token")) {
+        if (url === "https://oauth2.googleapis.com/token") {
           return Response.json({
             access_token: "access-token-value",
             refresh_token: "refresh-token-value",
             token_type: "Bearer",
-            scope: GMAIL_OAUTH_SCOPES.join(" "),
+            scope: GMAIL_OAUTH_SCOPES.map(scope => scope === "email" ? "https://www.googleapis.com/auth/userinfo.email" : scope).join(" "),
           });
         }
         return Response.json({ email: GMAIL_REPORT_SENDER, email_verified: true });
@@ -85,7 +85,7 @@ describe("Gmail OAuth activation", () => {
     assert.equal(writes, 0);
   });
 
-  it("writes only the refresh-token variable through a Railway project token without echoing it", async () => {
+  it("installs the refresh token and clears the temporary project token without echoing either", async () => {
     let request: { url: string; init?: RequestInit } | undefined;
     const writer = new RailwayRefreshTokenSecretWriter({
       projectToken: "railway-project-token",
@@ -101,7 +101,7 @@ describe("Gmail OAuth activation", () => {
     assert.equal(request?.url, "https://backboard.railway.com/graphql/v2");
     assert.equal(new Headers(request?.init?.headers).get("Project-Access-Token"), "railway-project-token");
     const body = JSON.parse(String(request?.init?.body)) as { variables: { input: { variables: Record<string, string>; skipDeploys: boolean } } };
-    assert.deepEqual(body.variables.input.variables, { SARA_GMAIL_REFRESH_TOKEN: "refresh-token-value" });
+    assert.deepEqual(body.variables.input.variables, { SARA_GMAIL_REFRESH_TOKEN: "refresh-token-value", SARA_RAILWAY_PROJECT_TOKEN: "" });
     assert.equal(body.variables.input.skipDeploys, false);
   });
 });

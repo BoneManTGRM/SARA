@@ -144,7 +144,7 @@ export class GmailOAuthActivation {
 
     try {
       const pending = JSON.parse(await readFile(consuming, "utf8")) as PendingAuthorization;
-      if (pending.version !== 1 || pending.stateSha256 !== sha256(input.state) || Date.parse(pending.expiresAt) <= this.#now().getTime()) {
+      if (pending.version !== 1 || pending.stateSha256 !== sha256(input.state) || (!Number.isFinite(Date.parse(pending.expiresAt)) || Date.parse(pending.expiresAt) <= this.#now().getTime())) {
         throw new Error("Gmail OAuth state is absent, expired, or already used.");
       }
       const tokenResponse = await this.#fetchImpl("https://oauth2.googleapis.com/token", {
@@ -166,12 +166,10 @@ export class GmailOAuthActivation {
       if (typeof tokens.access_token !== "string" || typeof tokens.refresh_token !== "string" || String(tokens.token_type).toLowerCase() !== "bearer") {
         throw new Error("Google did not return the required offline Gmail authorization.");
       }
-      if (typeof tokens.scope === "string") {
-        const granted = new Set(tokens.scope.split(/\s+/u).filter(Boolean));
-        if (!GMAIL_OAUTH_SCOPES.every((scope) => granted.has(scope))) throw new Error("Google did not grant the minimum required Gmail permission.");
-        const allowed = new Set([...GMAIL_OAUTH_SCOPES, "https://www.googleapis.com/auth/userinfo.email"]);
-        if ([...granted].some((scope) => !allowed.has(scope))) throw new Error("Google returned permissions broader than this Gmail capability allows.");
-      }
+      if (typeof tokens.scope !== "string") throw new Error("Google did not return verifiable Gmail permissions.");
+      const granted = new Set(tokens.scope.split(/\s+/u).filter(Boolean).map(scope => scope === "https://www.googleapis.com/auth/userinfo.email" ? "email" : scope));
+      if (!GMAIL_OAUTH_SCOPES.every(scope => granted.has(scope))) throw new Error("Google did not grant the minimum required Gmail permission.");
+      if ([...granted].some(scope => !(GMAIL_OAUTH_SCOPES as readonly string[]).includes(scope))) throw new Error("Google returned permissions broader than this Gmail capability allows.");
       const identityResponse = await this.#fetchImpl("https://openidconnect.googleapis.com/v1/userinfo", {
         headers: { authorization: `Bearer ${tokens.access_token}`, accept: "application/json" },
         redirect: "error",
@@ -237,7 +235,7 @@ export class RailwayRefreshTokenSecretWriter implements RefreshTokenSecretWriter
             projectId: this.#projectId,
             environmentId: this.#environmentId,
             serviceId: this.#serviceId,
-            variables: { [this.#variableName]: refreshToken },
+            variables: { [this.#variableName]: refreshToken, SARA_RAILWAY_PROJECT_TOKEN: "" },
             skipDeploys: false,
           },
         },
@@ -246,7 +244,7 @@ export class RailwayRefreshTokenSecretWriter implements RefreshTokenSecretWriter
       signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) throw new Error("Railway rejected Gmail OAuth secret installation.");
-    const result = await response.json() as { errors?: unknown[]; data?: unknown };
-    if (Array.isArray(result.errors) && result.errors.length > 0) throw new Error("Railway rejected Gmail OAuth secret installation.");
+    const result = await response.json() as { errors?: unknown[]; data?: { variableCollectionUpsert?: unknown } };
+    if ((Array.isArray(result.errors) && result.errors.length > 0) || result.data?.variableCollectionUpsert !== true) throw new Error("Railway rejected Gmail OAuth secret installation.");
   }
 }
