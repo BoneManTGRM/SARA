@@ -26,7 +26,10 @@ jobs:
           set -euo pipefail
           test "$(git merge-base dd5fac4a4c39617579830ab35dd49600999116d5 HEAD)" = "dd5fac4a4c39617579830ab35dd49600999116d5"
           git diff --quiet dd5fac4a4c39617579830ab35dd49600999116d5 HEAD -- src/coding-repair-memory.ts src/kernel.ts src/reusable-coding-candidate-generator.ts src/types.ts tests/coding-repair-memory.test.ts tests/kernel-verification-pool.test.ts tests/reusable-coding-candidate-generator.test.ts docs/work-cards/exact-reuse-overlap.md
-          git apply --index --3way --recount transfer/exact-reuse-overlap.patch
+          # The target bytes are frozen below. Use GNU patch only to tolerate
+          # integration-offset context in two PR126 files; exact hashes remain
+          # the authority and qualification stops on any byte difference.
+          patch --batch --forward --fuzz=3 -p1 < transfer/exact-reuse-overlap.patch
           test "$(git hash-object docs/work-cards/exact-reuse-overlap.md)" = 9ffda9255ee343e7750485b9273f943340b18478
           test "$(git hash-object src/coding-repair-memory.ts)" = adc6b909a86458fefd87b12f45cf964a980d49a9
           test "$(git hash-object src/kernel.ts)" = 796bfa0af0edd0c109299b433212facd1464f745
@@ -35,6 +38,7 @@ jobs:
           test "$(git hash-object tests/coding-repair-memory.test.ts)" = 06a50f79d59ea593e2c1fac85b87764fbefa526c
           test "$(git hash-object tests/kernel-verification-pool.test.ts)" = 1dac35707d39ee6ba86dffd32fbc7a28f40a7518
           test "$(git hash-object tests/reusable-coding-candidate-generator.test.ts)" = f2d29dd1d7b24127b430f0c0614dabf97a7b892c
+          git add docs/work-cards/exact-reuse-overlap.md src/coding-repair-memory.ts src/kernel.ts src/reusable-coding-candidate-generator.ts src/types.ts tests/coding-repair-memory.test.ts tests/kernel-verification-pool.test.ts tests/reusable-coding-candidate-generator.test.ts
           git rm transfer/exact-reuse-overlap.patch
           git diff --cached --check
       - name: Install and run complete credential-free verification
