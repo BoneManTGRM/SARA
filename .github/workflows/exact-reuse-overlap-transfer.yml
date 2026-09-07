@@ -26,8 +26,8 @@ jobs:
           set -euo pipefail
           test "$(git merge-base dd5fac4a4c39617579830ab35dd49600999116d5 HEAD)" = "dd5fac4a4c39617579830ab35dd49600999116d5"
           git diff --quiet dd5fac4a4c39617579830ab35dd49600999116d5 HEAD -- src/coding-repair-memory.ts src/kernel.ts src/reusable-coding-candidate-generator.ts src/types.ts tests/coding-repair-memory.test.ts tests/kernel-verification-pool.test.ts tests/reusable-coding-candidate-generator.test.ts docs/work-cards/exact-reuse-overlap.md
-          git apply --check transfer/exact-reuse-overlap.patch
-          git apply --index transfer/exact-reuse-overlap.patch
+          git apply --check --recount transfer/exact-reuse-overlap.patch
+          git apply --index --recount transfer/exact-reuse-overlap.patch
           test "$(git hash-object docs/work-cards/exact-reuse-overlap.md)" = 9ffda9255ee343e7750485b9273f943340b18478
           test "$(git hash-object src/coding-repair-memory.ts)" = adc6b909a86458fefd87b12f45cf964a980d49a9
           test "$(git hash-object src/kernel.ts)" = 796bfa0af0edd0c109299b433212facd1464f745
