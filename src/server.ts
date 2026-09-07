@@ -1,3 +1,4 @@
+import { handleTelegramNicoProductionRequest } from "./telegram-nico-production.ts";
 import type { NativeCodingVerifier } from "./native-coding-verifier.ts";
 import { authenticateCodingBenchmarkRelay, type CodingBenchmarkRelayIdentity } from "./coding-benchmark-github-relay.ts";
 import { ownerCodingBenchmarkReadiness, launchOwnerCodingBenchmark } from "./coding-benchmark-owner.ts";
@@ -1142,6 +1143,7 @@ async function routeSaraRequest(
   const url = new URL(request.url ?? "/", "http://localhost");
   if (await handlePublicRequest(request, response, url, kernel, options)) return;
   if (await handlePublicDelivery(request, response, url, kernel, options)) return;
+  if (await handleTelegramNicoProductionRequest({request, response, url, kernel, options})) return;
   if (await handlePublicCommerce(request, response, url, kernel, options)) return;
 
   if (request.method === "GET" && url.pathname === "/api/bridge/catalog") {
