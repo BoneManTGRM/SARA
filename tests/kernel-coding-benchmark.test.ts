@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runKernelCodingBenchmark, KERNEL_BENCHMARK_PROTOCOL, assertKernelBenchmarkImplementation } from "../src/kernel-coding-benchmark.ts";
+import { runKernelCodingBenchmark, assertKernelBenchmarkImplementation as assertExactImplementation } from "../src/exact-reuse-kernel-benchmark.ts";
+import { assertKernelBenchmarkImplementation } from "../src/kernel-coding-benchmark.ts";
 import { KERNEL_CODING_BENCHMARK_GRANT as grant, HARDENED_REUSE_BENCHMARK_GRANT as previous,
   activeCodingBenchmarkContinuation, inspectCodingBenchmarkReadiness } from "../src/coding-benchmark-readiness.ts";
 import { codingBenchmarkLaunchSpec } from "../src/coding-benchmark-owner.ts";
@@ -81,7 +82,10 @@ test("mocked and live execution classifications cannot be interchanged", async (
   await assert.rejects(runKernelCodingBenchmark({ ...options, executionKind: "scripted_offline" }), /EXECUTION_KIND/);
   await assert.rejects(runKernelCodingBenchmark({ ...options, executionKind: "live", fetchImpl: model().fetchImpl }), /EXECUTION_KIND/);
 }));
-test("current full-kernel implementation pins match before any execution", async () => { await assertKernelBenchmarkImplementation(); });
+test("historical full-kernel pins reject the new candidate and new pins match", async () => {
+  await assert.rejects(assertKernelBenchmarkImplementation(), /SOURCE_DRIFT/);
+  await assertExactImplementation();
+});
 test("all twelve actual HTTP/kernel jobs complete with six scripted generations and fresh acceptance", async () => inDirectory(async root => {
   const stub = model(); const directory = join(root, "trial");
   const rows = await runKernelCodingBenchmark({ directory, benchmarkId: randomUUID(), apiKey: "SCRIPTED_NEVER_LIVE",

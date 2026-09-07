@@ -58,7 +58,7 @@ test("the real authenticated self-build route learns once and reuses after a com
         assert.equal(modelCalls, 1, "repeat must not invoke the model");
         assert.equal(countCalls, 1, "repeat must also skip token-count requests");
         assert.equal((await fetch(url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: data })).status >= 400, true);
-      } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+      } finally { await new Promise<void>(resolve => server.close(() => resolve())); await kernel.closeVerificationWorkers(); }
     }
     const directory = join(root, "coding-repair-receipts");
     const summaries: CodingRepairReuseSummary[] = [];
@@ -68,7 +68,8 @@ test("the real authenticated self-build route learns once and reuses after a com
     assert.equal(summaries.filter(s => s.learnedRecipeId !== null).length, 1);
     assert(summaries.every(s => s.finalFreshVerification));
     const warm = summaries.find(s => s.hits === 1)!;
-    assert.equal(hosts.length, 6, "three fresh canary hosts per job, including final verification");
+    assert.equal(hosts.length, 4, "cold search has three fresh hosts; exact warm reuse retains one fresh final host");
+    assert.equal(warm.fastExactHits, 1);
     assert.equal(new Set(hosts).size, hosts.length);
     assert(hosts.every(h => h.jsDocParsingMode === ts.JSDocParsingMode.ParseForTypeErrors));
     assert.equal(warm.reusedRecipes.length, 1); assert.equal(warm.reusedRecipes[0].outcome, "verified_complete");

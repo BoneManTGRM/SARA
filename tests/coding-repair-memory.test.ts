@@ -24,6 +24,17 @@ test("an empty store misses; verified repairs survive a fresh store instance", (
   assert.equal((await lookup(memory))?.proposal.changes[0].replacementText, candidate(true).files[1].content);
 }));
 
+test("exact-source lookup uses stored failure metadata only for applicability and still binds source plus scope", () => fixture(async memory => {
+  await memory.learn(training());
+  const hit = await memory.lookupExactSource(candidate(), scope, "surgical");
+  assert(hit); assert.equal(hit.baselineVerification?.passed, false);
+  assert.equal(hit.proposal.baseArtifactDigest, check(candidate()).artifactDigest);
+  assert.equal(hit.proposal.changes[0].replacementText, candidate(true).files[1].content);
+  const changed = candidate(); changed.files[0].content += "// exact-source drift\n";
+  assert.equal(await memory.lookupExactSource(changed, scope, "surgical"), null);
+  assert.equal(await memory.lookupExactSource(candidate(), sha256("different scope"), "surgical"), null);
+}));
+
 test("source, protected tests, metadata, failure fingerprint and scope changes each invalidate reuse", () => fixture(async memory => {
   await memory.learn(training());
   for (const alter of [

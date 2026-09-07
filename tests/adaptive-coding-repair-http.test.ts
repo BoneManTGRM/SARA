@@ -50,7 +50,7 @@ test("owner canary requests a compact cold repair, re-verifies it in the kernel,
         const result=JSON.parse(text);assert.equal(result.mutation.stage,"SHADOW");assert.equal(result.evidence.attestation,"kernel_executed");
         if(!turn)digest=result.mutation.candidateDigest;else assert.equal(result.mutation.candidateDigest,digest);
         assert.equal(modelCalls,1);assert.equal(countCalls,1);
-      }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));}
+      }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));await kernel.closeVerificationWorkers();}
     }
     const runs=await readdir(join(root,"coding-repair-receipts"));let formats=0;let warm=0;
     for(const run of runs){

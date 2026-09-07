@@ -1,3 +1,4 @@
+import { EXACT_REUSE_BENCHMARK_GRANT } from "./exact-reuse-benchmark-grant.ts";
 import { timingSafeEqual } from "node:crypto";
 import { sha256 } from "./canonical.ts";
 
@@ -81,6 +82,8 @@ export const KERNEL_CODING_BENCHMARK_GRANT = Object.freeze({
 
 export function activeCodingBenchmarkContinuation(environment: Record<string, string | undefined>) {
   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
+      === EXACT_REUSE_BENCHMARK_GRANT.activationSha256) return EXACT_REUSE_BENCHMARK_GRANT;
+  if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
       === KERNEL_CODING_BENCHMARK_GRANT.activationSha256) return KERNEL_CODING_BENCHMARK_GRANT;
   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
       === OBSERVED_REUSE_BENCHMARK_GRANT.activationSha256) return OBSERVED_REUSE_BENCHMARK_GRANT;
@@ -123,7 +126,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   if (!sourceIdentified) blockers.push("SOURCE_IDENTITY_UNAVAILABLE");
   if (!input.constitutionVerified) blockers.push("CONSTITUTION_UNVERIFIED");
   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
-  if ([KERNEL_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
+  if ([EXACT_REUSE_BENCHMARK_GRANT.benchmarkId, KERNEL_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
   if (active.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
   const additional = active.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId;
   return {
@@ -158,7 +161,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
     ...(active.benchmarkId === OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId ? {
       providerDeadlineMilliseconds: 60000, dispatchAccountingV2: true, providerBodyBoundBytes: 1048576,
     } : {}),
-    ...(active.benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? {
+    ...([EXACT_REUSE_BENCHMARK_GRANT.benchmarkId, KERNEL_CODING_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) ? {
       experiment: "full_kernel_exact_repeat_pilot", arms: ["regenerate", "ordinary_memory", "optimized"],
       jobsPerArm: 4, maximumAttemptsPerArm: 12, maximumAttemptsPerJob: 3,
       adaptiveOutputAvailable: true, nativeIntermediateChecks: true, finalLegacyRequired: true,
