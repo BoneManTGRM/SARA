@@ -207,17 +207,23 @@ export type ProgramCandidateProposal = {
 
 export type CandidateProposal = SkillCandidateProposal | ProgramCandidateProposal;
 
+export type CandidateGenerationInput = {
+  objective: string;
+  acceptanceCriteria: string[];
+  missingCapabilities: string[];
+  constitutionDigest: string;
+  memoryContext: CandidateMemoryContext;
+};
+
 export type CandidateGenerator = {
   id: string;
   external: boolean;
   maximumCostUsd: number;
-  generate(input: {
-    objective: string;
-    acceptanceCriteria: string[];
-    missingCapabilities: string[];
-    constitutionDigest: string;
-    memoryContext: CandidateMemoryContext;
-  }): Promise<CandidateProposal>;
+  generate(input: CandidateGenerationInput): Promise<CandidateProposal>;
+  /** Optional early handoff of an immutable candidate for independent kernel verification.
+   * The callback is observation-only: successful generation and every normal
+   * acceptance gate remain mandatory, and the returned candidate must match. */
+  generateWithPreview?(input: CandidateGenerationInput, preview: (candidate: CandidateProposal) => void): Promise<CandidateProposal>;
 };
 
 export type MutationStage = "SANDBOX" | "SHADOW" | "CANARY" | "LIMITED_PRODUCTION" | "BROADER_PRODUCTION";

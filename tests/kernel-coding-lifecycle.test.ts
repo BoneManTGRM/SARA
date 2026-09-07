@@ -54,7 +54,7 @@ test("new actual HTTP coding path preserves learning across restart and times ke
         assert(result.timing.totalMilliseconds <= elapsed); assert(result.timing.pooled);
         assert.equal(result.evidence.attestation, "kernel_executed"); assert.equal(result.job.status, "verified"); assert.equal(result.mutation.stage, "SHADOW");
         if (!turn) expectedDigest = result.mutation.candidateDigest; else assert.equal(result.mutation.candidateDigest, expectedDigest);
-        assert.equal(calls, 1); assert.equal(counts, 1); assert.equal(kernel.verificationWorkerStatus()?.completed, 1);
+        assert.equal(calls, 1); assert.equal(counts, 1); assert.equal((turn ? kernel.previewVerificationWorkerStatus() : kernel.verificationWorkerStatus())?.completed, 1);
       } finally { await new Promise<void>(r => server.close(() => r())); await kernel.closeVerificationWorkers(); }
     }
     assert.equal(journals.reduce((s, j) => s + j.snapshot().generationAttempts, 0), 1);

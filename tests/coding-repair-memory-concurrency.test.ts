@@ -24,7 +24,7 @@ test("simultaneous local warm jobs avoid redundant generation without sharing ve
     model: model(counter), verify: async c => { checks++; return check(c); }, memory: new DurableCodingRepairMemory(root),
     scope: async () => scope, onReuse: async () => {},
   }).generate(context)));
-  assert.equal(counter.calls, 0); assert.equal(checks, 24); assert(outputs.every(o => JSON.stringify(o) === JSON.stringify(candidate(true))));
+  assert.equal(counter.calls, 0); assert.equal(checks, 8, "each warm job performs its own fresh final verification"); assert(outputs.every(o => JSON.stringify(o) === JSON.stringify(candidate(true))));
 }));
 test("concurrent learning serializes without losing writers or changing recipe identity", () => fixture(async root => {
   const ids = await Promise.all(Array.from({ length: 8 }, () => new DurableCodingRepairMemory(root).learn(training())));

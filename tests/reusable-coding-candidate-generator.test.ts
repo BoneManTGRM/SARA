@@ -19,14 +19,27 @@ function options(root: string) {
     verify: async (c: ReturnType<typeof candidate>) => check(c), onReuse: async (s: CodingRepairReuseSummary) => { summaries.push(s); } };
 }
 
-test("cold learns, restarted warm lookup avoids the model and still performs three fresh verifications", () => fixture(async root => {
+test("cold learns, restarted exact warm lookup avoids the model and provisional search checks", () => fixture(async root => {
   let calls = 0; const first = options(root); first.verify = async c => { calls++; return check(c); };
   assert.deepEqual(await createReusableCodingCandidateGenerator(first).generate(context), candidate(true));
   assert.equal(first.counter.calls, 1); assert.equal(calls, 3); assert(first.summaries[0].learnedRecipeId);
   const next = options(root); calls = 0; next.verify = async c => { calls++; return check(c); };
   assert.deepEqual(await createReusableCodingCandidateGenerator(next).generate(context), candidate(true));
-  assert.equal(next.counter.calls, 0); assert.equal(calls, 3); assert.equal(next.summaries[0].hits, 1);
-  assert.equal(next.summaries[0].modelRequests, 0); assert(next.summaries[0].finalFreshVerification);
+  assert.equal(next.counter.calls, 0); assert.equal(calls, 1); assert.equal(next.summaries[0].hits, 1);
+  assert.equal(next.summaries[0].fastExactHits, 1); assert.equal(next.summaries[0].modelRequests, 0); assert(next.summaries[0].finalFreshVerification);
+}));
+
+test("exact warm hit previews the repaired candidate before its fresh final verification completes", () => fixture(async root => {
+  const memory = new DurableCodingRepairMemory(root); await memory.learn(training());
+  const o = options(root); let verifying = false; let previewed = false;
+  o.verify = async c => { verifying = true; assert(previewed); return check(c); };
+  const generator = createReusableCodingCandidateGenerator(o);
+  assert(generator.generateWithPreview);
+  const pending = generator.generateWithPreview!(context, c => {
+    assert.equal(verifying, false); assert.deepEqual(c, candidate(true)); previewed = true;
+  });
+  assert.deepEqual(await pending, candidate(true)); assert(previewed);
+  assert.equal(o.counter.calls, 0); assert.equal(o.summaries[0].fastExactHits, 1);
 }));
 
 test("actual isolated compiler and behavioral verifier pass cold and warm without a provider", () => fixture(async root => {
@@ -41,6 +54,7 @@ test("actual isolated compiler and behavioral verifier pass cold and warm withou
 
 test("rejected cached proposal is quarantined and the existing next cycle falls back to the model", () => fixture(async root => {
   await new DurableCodingRepairMemory(root).learn(training()); const o = options(root); let verifies = 0;
+  o.memory.lookupExactSource = async () => null; // Exercise provisional legacy recall.
   o.verify = async c => { verifies++; return check(c, verifies > 2); };
   assert.deepEqual(await createReusableCodingCandidateGenerator(o).generate(context), candidate(true));
   assert.equal(o.counter.calls, 1); assert.equal(o.summaries[0].hits, 1); assert.equal(o.summaries[0].quarantines, 1);
@@ -54,7 +68,7 @@ test("a failed independent final verification is never learned or returned as su
 }));
 
 test("final failure of a warm repair permanently quarantines it", () => fixture(async root => {
-  const o = options(root); await o.memory.learn(training()); let n = 0; o.verify = async c => check(c, ++n === 2);
+  const o = options(root); await o.memory.learn(training()); o.verify = async c => check(c, false);
   await assert.rejects(createReusableCodingCandidateGenerator(o).generate(context), /FINAL_VERIFICATION/);
   assert.equal(o.counter.calls, 0); assert.equal(await o.memory.lookup(candidate(), check(candidate()), scope, "surgical"), null);
 }));

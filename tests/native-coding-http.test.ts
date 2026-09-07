@@ -60,7 +60,7 @@ test("native loop retains original final and kernel checks across cold job and c
         assert.equal(modelCalls, 1, "repeat must not invoke the model");
         assert.equal(countCalls, 1, "repeat must also skip token-count requests");
         assert.equal((await fetch(url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: data })).status >= 400, true);
-      } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+      } finally { await new Promise<void>(resolve => server.close(() => resolve())); await kernel.closeVerificationWorkers(); }
     }
     const directory = join(root, "coding-repair-receipts");
     const summaries: CodingRepairReuseSummary[] = [];

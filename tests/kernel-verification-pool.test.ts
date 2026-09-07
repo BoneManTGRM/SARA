@@ -106,3 +106,49 @@ test("worker input is detached from caller mutations across async admission", ()
 test("arbitrary verifier-worker counts cannot be enabled through boot", async () => {
   await assert.rejects(SaraKernel.boot({ stateDirectory: "/does-not-get-created", selfBuildVerificationWorkers: 8 as 2 }), /WORKERS_INVALID/);
 });
+
+test("early candidate preview overlaps an independent kernel worker without becoming acceptance authority", () => fixture(async (root, k) => {
+  const j = await job(k); const owner = k.authenticateOwnerToken(token); let previewed = false;
+  const proposal = candidate(true);
+  const generator = { id: "preview-fixture-generator", external: false, maximumCostUsd: 0,
+    generate: async () => structuredClone(proposal),
+    generateWithPreview: async (_input: unknown, preview: (c: ReturnType<typeof candidate>) => void) => {
+      preview(structuredClone(proposal)); previewed = true;
+      for (let n = 0; n < 1000 && (k.previewVerificationWorkerStatus()?.dispatched ?? 0) < 1; n++) await delay(1);
+      assert.equal(k.previewVerificationWorkerStatus()?.dispatched, 1);
+      // Hold generator work briefly while the independent kernel worker runs.
+      await delay(20);
+      return structuredClone(proposal);
+    } };
+  const result = await k.runSelfBuildCycle(owner, j.id, generator);
+  assert(previewed); assert.equal(result.job.status, "verified"); assert.equal(result.mutation.stage, "SHADOW");
+  assert.equal(k.previewVerificationWorkerStatus()?.completed, 1);
+  await verifyGenomeLabArtifact(root, result.artifactRelativePath, result.mutation.candidateDigest);
+}, 0));
+
+test("a rejected preview can never bind a different returned candidate", () => fixture(async (root, k) => {
+  const j = await job(k); const owner = k.authenticateOwnerToken(token);
+  const wrong = candidate(false), correct = candidate(true);
+  const generator = { id: "preview-mismatch-generator", external: false, maximumCostUsd: 0,
+    generate: async () => structuredClone(correct),
+    generateWithPreview: async (_input: unknown, preview: (c: ReturnType<typeof candidate>) => void) => {
+      preview(structuredClone(wrong)); return structuredClone(correct);
+    } };
+  const result = await k.runSelfBuildCycle(owner, j.id, generator);
+  assert.equal(result.job.status, "verified");
+  const source = await readFile(join(root, result.artifactRelativePath, "project/src/value.ts"), "utf8");
+  assert.equal(source, correct.files[1].content);
+  assert.equal((await readdir(join(root, "genome-lab"))).length, 1);
+}, 0));
+
+test("generator failure after preview drains and removes speculative artifacts", () => fixture(async (root, k) => {
+  const j = await job(k); const owner = k.authenticateOwnerToken(token), proposal = candidate(true);
+  const generator = { id: "preview-failure-generator", external: false, maximumCostUsd: 0,
+    generate: async () => { throw new Error("generator failed"); },
+    generateWithPreview: async (_input: unknown, preview: (c: ReturnType<typeof candidate>) => void) => {
+      preview(structuredClone(proposal)); throw new Error("generator failed after preview");
+    } };
+  await assert.rejects(k.runSelfBuildCycle(owner, j.id, generator), /generator failed after preview/);
+  assert.equal((await k.getStatus()).mutations.length, 0);
+  assert.deepEqual(await readdir(join(root, "genome-lab")), []);
+}, 0));
