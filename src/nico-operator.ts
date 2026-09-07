@@ -183,7 +183,7 @@ export class NicoOperatorClient implements NicoOperator {
       ...init,
       redirect: "manual",
       signal: AbortSignal.timeout(this.#timeoutMs),
-      headers: { accept: "application/json", ...(init.headers ?? {}) },
+      headers: { accept: "application/json", ...(this.#operatorPassword ? { "x-nico-admin-token": this.#operatorPassword } : {}), ...(init.headers ?? {}) },
     });
     if (response.status >= 300 && response.status < 400) throw new Error("NICO refused a redirected request.");
     if (!response.ok) throw new Error(`NICO request failed with HTTP ${response.status}.`);

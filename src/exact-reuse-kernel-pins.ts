@@ -1,7 +1,7 @@
 // New exact-candidate pins. Historical benchmark pins remain frozen.
 export const KERNEL_BENCHMARK_PINS = Object.freeze({
   "src/kernel.ts": "575735363d6d8054c8e9e268c89e9d1ed851ee9b69b6a7e771c7917a021ea9da",
-  "src/server.ts": "2b7badecc9c53e397fd7f0fe564323620c7c1ffadeca8d5a18209c289bb6b78b",
+  "src/server.ts": "b5dfceaf94d6b7374ae63a4ee04cf013f74c53cce04d00bf3d51c441ed2210b6",
   "src/main.ts": "9cac132ad03a0b1700a986140131f48351f92bc5ecc52d945aa0f9aa2a2bfcf3",
   "src/kernel-build-queue.ts": "6af81816b120a2533a8b5abf1109e60e1e1112a8e5e73f183bc87b6de0fe8ff5",
   "src/kernel-verification-pool.ts": "72d9d89bbbaa32fb8094071c591b7b9b4ed3775b108ba0f4d70207462439509b",
