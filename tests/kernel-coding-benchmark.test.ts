@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runKernelCodingBenchmark, assertKernelBenchmarkImplementation as assertExactImplementation } from "../src/exact-reuse-kernel-benchmark.ts";
+import { runKernelCodingBenchmark, assertKernelBenchmarkImplementation as assertExactImplementation } from "../src/repeat-kernel-benchmark.ts";
+import { assertKernelBenchmarkImplementation as assertConsumedExactImplementation } from "../src/exact-reuse-kernel-benchmark.ts";
 import { assertKernelBenchmarkImplementation } from "../src/kernel-coding-benchmark.ts";
 import { KERNEL_CODING_BENCHMARK_GRANT as grant, HARDENED_REUSE_BENCHMARK_GRANT as previous,
   activeCodingBenchmarkContinuation, inspectCodingBenchmarkReadiness } from "../src/coding-benchmark-readiness.ts";
@@ -84,6 +85,7 @@ test("mocked and live execution classifications cannot be interchanged", async (
 }));
 test("historical full-kernel pins reject the new candidate and new pins match", async () => {
   await assert.rejects(assertKernelBenchmarkImplementation(), /SOURCE_DRIFT/);
+  await assert.rejects(assertConsumedExactImplementation(), /SOURCE_DRIFT/);
   await assertExactImplementation();
 });
 test("all twelve actual HTTP/kernel jobs complete with six scripted generations and fresh acceptance", async () => inDirectory(async root => {
