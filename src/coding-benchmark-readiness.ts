@@ -63,7 +63,15 @@ export const HARDENED_REUSE_BENCHMARK_GRANT = Object.freeze({
   activationSha256: "f5a1918d1b396a8344b2cf1d38282726b656c09ea8cb6f9c7b220826c81f63e8",
 });
 
+// Owner-requested complete HTTP/kernel comparison. This is new authority, not a replay.
+export const KERNEL_CODING_BENCHMARK_GRANT = Object.freeze({
+  benchmarkId: "17430b72-1b04-4b9f-8f1c-e75b8b5f4235", registrationSourceRevision: "4adf3c149030d2984807753caac24d62521d6b80",
+  maximumSpendUsd: 0.15, maximumModelSpendUsdPerArm: 0.05, unresolvedExposureUsd: 0,
+  activationSha256: "6687f8d95230ce4bbdf49e4f53b9b26899c576af9dbe9e5d489d18c729e2a600",
+});
+
 export function activeCodingBenchmarkContinuation(environment: Record<string, string | undefined>) {
+  if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase() === KERNEL_CODING_BENCHMARK_GRANT.activationSha256) return KERNEL_CODING_BENCHMARK_GRANT;
   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
       === HARDENED_REUSE_BENCHMARK_GRANT.activationSha256) return HARDENED_REUSE_BENCHMARK_GRANT;
   if (environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256?.trim().toLowerCase()
@@ -103,7 +111,7 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
   if (!sourceIdentified) blockers.push("SOURCE_IDENTITY_UNAVAILABLE");
   if (!input.constitutionVerified) blockers.push("CONSTITUTION_UNVERIFIED");
   if (input.emergencyStopped) blockers.push("EMERGENCY_STOP");
-  if ([CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
+  if ([KERNEL_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId) && env.SARA_REPARODYNAMIC_CODING_MODE !== "canary") blockers.push("CURRENT_PILOT_CANARY_REQUIRED");
   if (active.unresolvedExposureUsd > 0) blockers.push("UNRECONCILED_MODEL_EXPOSURE");
   const additional = active.benchmarkId !== CODING_BENCHMARK_CONTINUATION.benchmarkId;
   return {
@@ -134,6 +142,13 @@ export function inspectCodingBenchmarkReadiness(input: ReadinessInput) {
       adaptiveOutputAvailable: true, nativeIntermediateChecks: true, finalLegacyRequired: true,
       kernelJobMeasured: false, persistentReuseMeasured: true,
       absoluteMaximumEstablished: false,
+    } : {}),
+    ...(active.benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? {
+      experiment: "full_kernel_exact_repeat_pilot", arms: ["regenerate", "ordinary_memory", "optimized"],
+      jobsPerArm: 4, maximumAttemptsPerArm: 12, maximumAttemptsPerJob: 3,
+      adaptiveOutputAvailable: true, nativeIntermediateChecks: true, finalLegacyRequired: true,
+      kernelJobMeasured: true, persistentReuseMeasured: true, absoluteMaximumEstablished: false,
+      providerDeadlineMilliseconds: 45000, productionCustomerJobs: false,
     } : {}),
     evidenceRequired: additional
       ? "This grant is separate and one-use. Preserve the prior $0.15 unresolved hold and never replay the historical benchmark."

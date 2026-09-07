@@ -1,3 +1,5 @@
+import { CodingDispatchJournal } from "./coding-dispatch-journal.ts";
+import { mkdir } from "node:fs/promises";
 import { NativeCodingVerifier } from "./native-coding-verifier.ts";
 import { resolve } from "node:path";
 import { SaraKernel } from "./kernel.ts";
@@ -98,10 +100,13 @@ if (
   throw new Error("SARA_TELEGRAM_LUNA_BUDGET_USD must be a whole-cent amount within the total monthly model budget.");
 }
 
+const kernelWorkerSetting = process.env.SARA_KERNEL_VERIFICATION_WORKERS ?? "0";
+if (!["0", "1", "2"].includes(kernelWorkerSetting)) throw new Error("Invalid SARA_KERNEL_VERIFICATION_WORKERS");
 const kernel = await SaraKernel.boot({
   stateDirectory,
   ownerTokenSha256,
   bootstrapRevenueCapabilities: true,
+  selfBuildVerificationWorkers: Number(kernelWorkerSetting) as 0 | 1 | 2,
 });
 await activateApprovedAutonomousPaidMandate({
   kernel,
@@ -148,6 +153,7 @@ let startupProof: LunaStartupProof = {
   outputDigest: null,
   failureCode: client ? null : "unexpected_failure",
 };
+await mkdir(`${stateDirectory}/coding-dispatch`, { recursive: true, mode: 0o700 });
 const nativeVerifier = reparodynamicCodingMode === "canary" ? await NativeCodingVerifier.create() : undefined;
 console.log(`SARA coding loop checker: ${nativeVerifier ? "native-7.0.2-with-legacy-final" : "legacy"}`);
 const server = createSaraServer(kernel, {
@@ -163,6 +169,14 @@ const server = createSaraServer(kernel, {
     reparodynamicCoding: {
       mode: reparodynamicCodingMode,
       modelClient: client,
+      modelClientForRun: runId => {
+        const journal = new CodingDispatchJournal({ directory: `${stateDirectory}/coding-dispatch/${runId}`,
+          beforeDispatch: async () => {
+            const status = await kernel.getStatus();
+            if (status.emergencyStopped || !status.constitution.verified) throw new Error("CODING_DISPATCH_AUTHORITY_REVOKED");
+          } });
+        return new OpenAIResponsesClient({ apiKey: apiKey!, fetchImpl: journal.fetch });
+      },
       ...(nativeVerifier ? { nativeVerifier } : {}),
       stateDirectory,
     },
@@ -220,7 +234,7 @@ server.listen(port, host, () => {
 
 function shutdown(): void {
   operator?.stop();
-  server.close();
+  server.close(() => { void kernel.closeVerificationWorkers(); });
 }
 
 process.once("SIGTERM", shutdown);

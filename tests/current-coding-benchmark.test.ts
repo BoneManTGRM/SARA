@@ -17,7 +17,9 @@ const env = { SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256: grant.activationSha
   SARA_REPARODYNAMIC_CODING_MODE: 'canary', SARA_OWNER_TOKEN: ownerToken, SARA_OWNER_TOKEN_SHA256: sha256(ownerToken),
   OPENAI_API_KEY: 'OFFLINE_NEVER_USED', RAILWAY_GIT_COMMIT_SHA: 'a'.repeat(40) };
 
-test('current pilot preserves all bound deployed components', async () => { await assertCurrentImplementation(); });
+test('frozen component pilot rejects the changed kernel before paid execution', async () => {
+  await assert.rejects(assertCurrentImplementation(), /CURRENT_PILOT_COMPONENT_DRIFT/);
+});
 test('new grant is distinct, has equal limits, and leaves both historical defaults intact', () => {
   assert.equal(activeCodingBenchmarkContinuation(env).benchmarkId, grant.benchmarkId);
   assert.equal(activeCodingBenchmarkContinuation({}).unresolvedExposureUsd,.15);

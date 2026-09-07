@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { sha256 } from "./canonical.ts";
-import { HARDENED_REUSE_BENCHMARK_GRANT, ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
+import { KERNEL_CODING_BENCHMARK_GRANT, HARDENED_REUSE_BENCHMARK_GRANT, ADDITIONAL_CODING_BENCHMARK_GRANT, CODING_BENCHMARK_CONTINUATION, POST_FIX_CODING_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT } from "./coding-benchmark-readiness.ts";
 
 const MAX_FILES = 128;
 const MAX_FILE_BYTES = 1_048_576;
@@ -19,7 +19,7 @@ export type BenchmarkEvidence = {
  * Raw bounded files preserve interrupted writes without inventing valid receipts.
  */
 export async function readCodingBenchmarkEvidence(stateDirectory: string, benchmarkId: string): Promise<BenchmarkEvidence> {
-  if (!isAbsolute(stateDirectory) || ![ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
+  if (!isAbsolute(stateDirectory) || ![KERNEL_CODING_BENCHMARK_GRANT.benchmarkId, ADDITIONAL_CODING_BENCHMARK_GRANT.benchmarkId, CODING_BENCHMARK_CONTINUATION.benchmarkId, POST_FIX_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
     throw new Error("BENCHMARK_EVIDENCE_SCOPE_REJECTED");
   }
   const empty: BenchmarkEvidence = { schemaVersion: 1, status: "not_started", replayAllowed: false, files: [] };
@@ -45,6 +45,10 @@ export async function readCodingBenchmarkEvidence(stateDirectory: string, benchm
   if ([REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === benchmarkId)) {
     rules.push(["reuse-state/jobs", /^(regenerate|ordinary_memory|optimized)-[0-3]\.json$/u],
       ["reuse-state/trace", /^(reuse-registration|reuse-summary|reuse-budget-[0-9]{4}-(reservation|response|error))\.json$/u]);
+  }
+  if (benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId) {
+    rules.push(["kernel-state/jobs", /^(regenerate|ordinary_memory|optimized)-[0-3]\.json$/u],
+      ["kernel-state/trace", /^(kernel-registration|kernel-summary|reuse-budget-[0-9]{4}-(reservation|response|error))\.json$/u]);
   }
   for (const [subdirectory, allowed] of rules) {
     const directory = join(root, subdirectory);
