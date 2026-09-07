@@ -1,3 +1,4 @@
+import { WebsiteMaintenanceOperator } from "./website-maintenance.ts";
 import { observeSelfBuildHttp } from "./self-build-http-timing.ts";
 import { CodingDispatchJournal } from "./coding-dispatch-journal.ts";
 import { mkdir } from "node:fs/promises";
@@ -157,6 +158,9 @@ let startupProof: LunaStartupProof = {
 await mkdir(`${stateDirectory}/coding-dispatch`, { recursive: true, mode: 0o700 });
 const nativeVerifier = reparodynamicCodingMode === "canary" ? await NativeCodingVerifier.create() : undefined;
 console.log(`SARA coding loop checker: ${nativeVerifier ? "native-7.0.2-with-legacy-final" : "legacy"}`);
+// No credentials or implicit publishing authority are inherited from ChatGPT connectors.
+// Host-bound publishing and notification adapters must be configured before CANARY activation.
+const websiteMaintenance=new WebsiteMaintenanceOperator(kernel,stateDirectory,null);
 const server = createSaraServer(kernel, {
   ownerTokenSha256,
   stateDirectory,
@@ -202,6 +206,7 @@ observeSelfBuildHttp(server, {
   onTelemetryFailure: () => console.error("SARA self-build timing telemetry unavailable; no acceptance decision changed."),
 });
 server.listen(port, host, () => {
+  websiteMaintenance.start();
   const address = server.address();
   const resolvedPort = typeof address === "object" && address ? address.port : port;
   console.log(`SARA owner dashboard listening on http://${host}:${resolvedPort}`);
@@ -239,6 +244,7 @@ server.listen(port, host, () => {
 });
 
 function shutdown(): void {
+  websiteMaintenance.stop();
   operator?.stop();
   server.close(() => { void kernel.closeVerificationWorkers(); });
 }
