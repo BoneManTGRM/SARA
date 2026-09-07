@@ -18,9 +18,10 @@ const MAX_RECORDS = 128;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_RECORD_BYTES = 100 * 1024;
 export type RepairMemoryIdentity = { key: string; id: string; verifiedArtifactDigest: string };
-export type RepairMemoryHit = RepairMemoryIdentity & { proposal: CodingRepairProposal };
+export type RepairMemoryHit = RepairMemoryIdentity & { proposal: CodingRepairProposal; changedLines?: number; baselineVerification?: ProgramVerificationResult };
 type MemoryTransaction<T> = { value: T; changed: boolean };
-type RecipeBody = { key: string; verifiedArtifactDigest: string; changes: CodingRepairProposal["changes"]; changedLines: number };
+type RecipeBody = { key: string; verifiedArtifactDigest: string; changes: CodingRepairProposal["changes"]; changedLines: number;
+  scope?: string; baselineVerification?: ProgramVerificationResult };
 type Recipe = RecipeBody & { id: string; evidenceDigests: string[]; quarantineDigest: string | null };
 
 function changedLines(before: string, after: string): number {
@@ -30,7 +31,9 @@ function changedLines(before: string, after: string): number {
   return count;
 }
 function identity(r: RecipeBody): string {
-  return sha256(canonicalJson({ key: r.key, verifiedArtifactDigest: r.verifiedArtifactDigest, changes: r.changes, changedLines: r.changedLines }));
+  const body: RecipeBody = { key: r.key, verifiedArtifactDigest: r.verifiedArtifactDigest, changes: r.changes, changedLines: r.changedLines,
+    ...(r.scope && r.baselineVerification ? { scope: r.scope, baselineVerification: r.baselineVerification } : {}) };
+  return sha256(canonicalJson(body));
 }
 export function codingRepairMemoryKey(candidate: ProgramCandidateProposal, verification: ProgramVerificationResult, scope: string): string {
   if (!isEvidenceDigest(scope)) throw new Error("REPAIR_MEMORY_INVALID_SCOPE");
@@ -46,7 +49,10 @@ function validateRecords(value: unknown): asserts value is Recipe[] {
   if (!Array.isArray(value) || value.length > MAX_RECORDS) throw new Error("REPAIR_MEMORY_INVALID_RECORDS");
   const keys = new Set<string>();
   for (const r of value as Recipe[]) {
-    if (!r || Object.keys(r).sort().join() !== "changedLines,changes,evidenceDigests,id,key,quarantineDigest,verifiedArtifactDigest" ||
+    const shape = r && Object.keys(r).sort().join();
+    const legacyShape = "changedLines,changes,evidenceDigests,id,key,quarantineDigest,verifiedArtifactDigest";
+    const exactShape = "baselineVerification,changedLines,changes,evidenceDigests,id,key,quarantineDigest,scope,verifiedArtifactDigest";
+    if (!r || (shape !== legacyShape && shape !== exactShape) ||
         !isEvidenceDigest(r.key) || !isEvidenceDigest(r.id) || !isEvidenceDigest(r.verifiedArtifactDigest) || keys.has(r.key) ||
         (r.quarantineDigest !== null && !isEvidenceDigest(r.quarantineDigest)) ||
         !Number.isSafeInteger(r.changedLines) || r.changedLines < 1 || r.changedLines > LIMITS.deepChangedLines ||
@@ -54,6 +60,11 @@ function validateRecords(value: unknown): asserts value is Recipe[] {
         !Array.isArray(r.evidenceDigests) || !r.evidenceDigests.length || r.evidenceDigests.length > 256 ||
         !r.evidenceDigests.every(isEvidenceDigest) || Buffer.byteLength(canonicalJson(r)) > MAX_RECORD_BYTES) {
       throw new Error("REPAIR_MEMORY_INVALID_RECORD");
+    }
+    if (shape === exactShape) {
+      if (!isEvidenceDigest(r.scope)) throw new Error("REPAIR_MEMORY_INVALID_SCOPE");
+      assertCodingRepairVerification(r.baselineVerification);
+      if (r.baselineVerification.passed || !r.baselineVerification.failures.length) throw new Error("REPAIR_MEMORY_INVALID_BASELINE");
     }
     const paths = new Set<string>();
     for (const change of r.changes) {
@@ -186,7 +197,8 @@ export class DurableCodingRepairMemory {
       count += changedLines(old.content, next.content);
     }
     changes.sort((a, b) => a.path.localeCompare(b.path));
-    const body: RecipeBody = { key, changes, changedLines: count, verifiedArtifactDigest: input.verification.artifactDigest };
+    const body: RecipeBody = { key, changes, changedLines: count, verifiedArtifactDigest: input.verification.artifactDigest,
+      scope: input.scope, baselineVerification: structuredClone(input.beforeVerification) };
     const record: Recipe = { ...body, id: identity(body), evidenceDigests: [...input.verification.evidenceDigests], quarantineDigest: null };
     validateRecords([record]);
     return this.#transaction(records => {
@@ -199,6 +211,39 @@ export class DurableCodingRepairMemory {
       if (records.length >= MAX_RECORDS) throw new Error("REPAIR_MEMORY_CAPACITY");
       records.push(record);
       return { value: record.id, changed: true };
+    });
+  }
+
+  /** Exact-source fast lookup used only to avoid provisional search checks.
+   * The stored baseline failure is historical applicability metadata, never PASS
+   * authority. Callers MUST perform a fresh authoritative final verification. */
+  async lookupExactSource(candidate: ProgramCandidateProposal, scope: string, strategy: "surgical" | "deep"): Promise<RepairMemoryHit | null> {
+    candidate = structuredClone(candidate);
+    if (!isEvidenceDigest(scope)) throw new Error("REPAIR_MEMORY_INVALID_SCOPE");
+    validateProgramCandidateStructure(candidate);
+    if (strategy !== "surgical" && strategy !== "deep") return null;
+    const artifactDigest = codingRepairCandidateDigest(candidate);
+    return this.#transaction<RepairMemoryHit | null>(records => {
+      for (const r of records) {
+        if (r.quarantineDigest || r.scope !== scope || !r.baselineVerification) continue;
+        assertCodingRepairVerification(r.baselineVerification);
+        if (r.baselineVerification.passed || r.baselineVerification.artifactDigest !== artifactDigest || !r.baselineVerification.failures.length) continue;
+        if (codingRepairMemoryKey(candidate, r.baselineVerification, scope) !== r.key) continue;
+        const limit = strategy === "surgical" ? LIMITS.surgicalChangedLines : LIMITS.deepChangedLines;
+        const count = r.changes.reduce((n, change) => n + changedLines(candidate.files.find(f => f.path === change.path)?.content ?? "", change.replacementText), 0);
+        if (count !== r.changedLines || count > limit) continue;
+        const proposal: CodingRepairProposal = { schemaVersion: 1, baseArtifactDigest: artifactDigest,
+          failureFingerprint: r.baselineVerification.failures[0].fingerprint, strategy, changes: structuredClone(r.changes),
+          limitations: ["Exact-source learned repair; stored failure metadata is applicability-only; fresh final verification remains mandatory."] };
+        validateCodingRepairProposal({ proposal, candidate, artifactDigest,
+          failureFingerprints: new Set(r.baselineVerification.failures.map(f => f.fingerprint)), limits: LIMITS, expectedStrategy: strategy });
+        const replacements = new Map(proposal.changes.map(c => [c.path, c.replacementText]));
+        const after = { ...candidate, files: candidate.files.map(f => ({ ...f, content: replacements.get(f.path) ?? f.content })) };
+        if (codingRepairCandidateDigest(after) !== r.verifiedArtifactDigest) throw new Error("REPAIR_MEMORY_RESULT_MISMATCH");
+        return { value: { key: r.key, id: r.id, verifiedArtifactDigest: r.verifiedArtifactDigest,
+          proposal, baselineVerification: structuredClone(r.baselineVerification), changedLines: r.changedLines }, changed: false };
+      }
+      return { value: null, changed: false };
     });
   }
 
@@ -266,6 +311,7 @@ export async function codingRepairMemoryScope(ownerId: string, context: Paramete
   const paths = ["genome-lab.ts", "genome-lab-verifier.ts", "coding-repair-controller.ts", "coding-repair-policy.ts",
     "coding-repair-prompt.ts", "luna-coding-repair-model.ts", "adaptive-coding-repair-model.ts", "coding-repair-edits.ts", "model-router.ts", "reparodynamic-candidate-generator.ts", "coding-repair-memory.ts",
     "reusable-coding-candidate-generator.ts", "coding-repair-singleflight.ts", "repair-memory-snapshot.ts", "native-coding-verifier.ts", "../tools/native-checker/integrity.json", "../tools/native-checker/package-lock.json", "fresh-typecheck-host.ts", "experimental-compiler-cache.ts", "experimental-v5/coding-repair-verification.ts", "kernel.ts", "kernel-build-queue.ts", "kernel-verification-pool.ts", "kernel-verification-worker.mjs", "server.ts", "../package-lock.json"];
+  paths.push("types.ts");
   const implementation = await Promise.all(paths.map(async path => [path, sha256(await readFile(new URL(path, import.meta.url), "utf8"))]));
   return sha256(canonicalJson({ schemaVersion: 1, ownerId, objective: context.objective,
     acceptanceCriteria: context.acceptanceCriteria, constitutionDigest: context.constitutionDigest,

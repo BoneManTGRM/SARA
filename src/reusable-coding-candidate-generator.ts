@@ -1,6 +1,8 @@
 import { performance } from "node:perf_hooks";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { assertCodingRepairVerification, codingRepairCandidateDigest } from "./experimental-v5/coding-repair-verification.ts";
+import { INITIAL_CODING_REPAIR_LIMITS } from "./coding-repair-policy.ts";
+import { digestCodingRepairProposal } from "./coding-repair-artifacts.ts";
 import { createReparodynamicCandidateGenerator } from "./reparodynamic-candidate-generator.ts";
 import { codingRepairMemoryKey, type DurableCodingRepairMemory, type RepairMemoryHit } from "./coding-repair-memory.ts";
 import type { CodingRepairModel } from "./coding-repair-controller.ts";
@@ -10,7 +12,7 @@ import { repairLearningCoordinator, type RepairLearningCoordinator, type RepairL
 
 type Options = Parameters<typeof createReparodynamicCandidateGenerator>[0];
 export type CodingRepairReuseSummary = { schemaVersion: 1; scopeDigest: string | null; hits: number; misses: number;
-  modelRequests: number; coalescedWaits: number; coalescedWaitMilliseconds: number; quarantines: number; memoryUnavailable: boolean; learnedRecipeId: string | null;
+  modelRequests: number; fastExactHits: number; coalescedWaits: number; coalescedWaitMilliseconds: number; quarantines: number; memoryUnavailable: boolean; learnedRecipeId: string | null;
   finalFreshVerification: boolean; reuseMilliseconds: number; totalElapsedMilliseconds: number;
   reusedRecipes: Array<{ cycle: number; recipeId: string; key: string; outcome: string }> };
 
@@ -24,13 +26,74 @@ export function createReusableCodingCandidateGenerator(input: Options & {
 }): CandidateGenerator {
   const original = createReparodynamicCandidateGenerator(input);
   if (input.mode !== "canary") return original;
-  return { ...original, async generate(context) {
+  const execute = async (context: Parameters<CandidateGenerator["generate"]>[0], preview?: (candidate: Awaited<ReturnType<CandidateGenerator["generate"]>>) => void) => {
     const started = performance.now();
     context = structuredClone(context);
-    const summary: CodingRepairReuseSummary = { schemaVersion: 1, scopeDigest: null, hits: 0, misses: 0, modelRequests: 0,
+    const summary: CodingRepairReuseSummary = { schemaVersion: 1, scopeDigest: null, hits: 0, misses: 0, modelRequests: 0, fastExactHits: 0,
       coalescedWaits: 0, coalescedWaitMilliseconds: 0, quarantines: 0, memoryUnavailable: false, learnedRecipeId: null, finalFreshVerification: false, reuseMilliseconds: 0, totalElapsedMilliseconds: 0, reusedRecipes: [] };
     try { summary.scopeDigest = await input.scope(context); } catch { summary.memoryUnavailable = true; }
     const coordinator = input.learningCoordinator ?? repairLearningCoordinator;
+    const baseline = structuredClone(await input.base.generate(structuredClone(context)));
+    if (!("candidateKind" in baseline) || baseline.candidateKind !== "typescript_program") return baseline;
+    if (!summary.memoryUnavailable && summary.scopeDigest) {
+      const lookupStarted = performance.now();
+      let exact: RepairMemoryHit | null = null;
+      try { exact = await input.memory.lookupExactSource(baseline, summary.scopeDigest, "surgical") ?? await input.memory.lookupExactSource(baseline, summary.scopeDigest, "deep"); }
+      catch { summary.memoryUnavailable = true; }
+      summary.reuseMilliseconds += performance.now() - lookupStarted;
+      if (exact) {
+        // A cold learner writes the recipe before its final mandatory receipt.
+        // Join either possible first-cycle strategy before using its proposal.
+        for (const strategy of ["surgical", "deep"] as const) {
+          const key = sha256(canonicalJson({ directory: input.memory.directory, generator: input.base.id,
+            memoryKey: exact.key, strategy, remainingCostUsd: INITIAL_CODING_REPAIR_LIMITS.maximumModelSpendUsd }));
+          const active = coordinator.follow(key);
+          if (active) {
+            const waitStarted = performance.now(); summary.coalescedWaits++;
+            try { await active.wait(); }
+            finally { summary.coalescedWaitMilliseconds += performance.now() - waitStarted; }
+          }
+        }
+        await input.memory.assertReusable(exact);
+        summary.hits++; summary.fastExactHits++;
+        const replacement = new Map(exact.proposal.changes.map(change => [change.path, change]));
+        const repaired = { ...baseline, files: baseline.files.map(file => {
+          const change = replacement.get(file.path);
+          if (!change) return file;
+          if (sha256(file.content) !== change.expectedContentDigest) throw new Error("REPAIR_MEMORY_EXACT_SOURCE_DRIFT");
+          return { ...file, content: change.replacementText };
+        }) };
+        if (codingRepairCandidateDigest(repaired) !== exact.verifiedArtifactDigest) throw new Error("REPAIR_MEMORY_RESULT_MISMATCH");
+        preview?.(structuredClone(repaired));
+        try {
+          const checked = await (input.verifyFinal ?? input.verify)(structuredClone(repaired), context);
+          assertCodingRepairVerification(checked);
+          if (checked.passed && checked.artifactDigest === exact.verifiedArtifactDigest) {
+            summary.finalFreshVerification = true;
+            const receipt = { cycle: 1, beforeArtifactDigest: codingRepairCandidateDigest(baseline),
+              failureFingerprint: exact.baselineVerification!.failures[0].fingerprint, proposalDigest: digestCodingRepairProposal(exact.proposal),
+              afterArtifactDigest: checked.artifactDigest, strategy: exact.proposal.strategy === "deep" ? "luna_deep" as const : "luna_surgical" as const,
+              changedFiles: exact.proposal.changes.length, changedLines: exact.changedLines!, verifierEvidenceDigests: checked.evidenceDigests,
+              inputTokens: 0, outputTokens: 0, accountedCostUsd: 0, rye: 0, outcome: "verified_complete" as const, reasonCode: "verified_exact_reuse" };
+            summary.reusedRecipes.push({ cycle: 1, recipeId: exact.id, key: exact.key, outcome: receipt.outcome });
+            await input.onReceipt?.(structuredClone(receipt));
+            const run = { baseline: structuredClone(baseline), baselineVerification: structuredClone(exact.baselineVerification!), champion: structuredClone(repaired),
+              state: "VERIFIED_CANDIDATE" as const, verification: checked, receipts: [receipt], attemptLessons: [], attemptLessonsDigest: sha256(canonicalJson([])),
+              accountedCostUsd: 0, elapsedMilliseconds: performance.now() - started, baselineVerificationFresh: false };
+            await input.onRun?.(structuredClone(run));
+            summary.totalElapsedMilliseconds = performance.now() - started;
+            await input.onReuse(structuredClone(summary));
+            await input.memory.assertReusable(exact);
+            return repaired;
+          }
+          throw new Error("REPAIR_REUSE_FINAL_VERIFICATION_FAILED");
+        } catch (error) {
+          await input.memory.quarantine(exact.key, sha256("REPAIR_EXACT_FRESH_FINAL_ERROR"));
+          summary.quarantines++;
+          throw error;
+        }
+      }
+    }
     let leader: RepairLearningLeader | undefined;
     let learnedKey: string | undefined;
     let committed = false;
@@ -43,7 +106,10 @@ export function createReusableCodingCandidateGenerator(input: Options & {
     const used = new Map<string, RepairMemoryHit>();
     const accepted = new Map<string, RepairMemoryHit>();
     let underlying: CodingRepairModel | undefined;
-    const generator = createReparodynamicCandidateGenerator({ ...input,
+    let baseConsumed = false;
+    const generator = createReparodynamicCandidateGenerator({ ...input, base: { ...input.base, generate: async () => {
+      if (baseConsumed) throw new Error("REPAIR_BASELINE_REUSED"); baseConsumed = true; return structuredClone(baseline);
+    } },
       model: { async propose(request) {
         const lookup = async () => {
           if (!summary.memoryUnavailable && summary.scopeDigest) {
@@ -155,5 +221,7 @@ export function createReusableCodingCandidateGenerator(input: Options & {
       if (learnedKey) await input.memory.quarantine(learnedKey, sha256("REPAIR_REUSE_POST_LEARNING_FAILURE"));
       throw error;
     } finally { leader?.finish(committed); }
-  } };
+  };
+  return { ...original, generate: context => execute(context),
+    generateWithPreview: (context, preview) => execute(context, preview) };
 }

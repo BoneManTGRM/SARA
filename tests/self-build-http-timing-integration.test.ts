@@ -63,7 +63,7 @@ test("outer HTTP observations include mandatory kernel completion and receipts f
         assert.equal(modelCalls, 1, "repeat must not invoke the model");
         assert.equal(countCalls, 1, "repeat must also skip token-count requests");
         assert.equal((await fetch(url, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: data })).status >= 400, true);
-      } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+      } finally { await new Promise<void>(resolve => server.close(() => resolve())); await kernel.closeVerificationWorkers(); }
     }
     const succeeded=timing.filter(t=>t.statusCode===201);
     assert.equal(succeeded.length,2);assert(succeeded.every(t=>t.kernelAcceptanceInferredFrom201));

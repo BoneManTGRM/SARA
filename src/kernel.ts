@@ -446,6 +446,7 @@ export class SaraKernel {
   private mutationTail: Promise<void> = Promise.resolve();
   readonly #store: KernelEventStore;
   #verificationPool?: KernelVerificationPool;
+  #previewVerificationPool?: KernelVerificationPool;
   readonly #buildQueue = new KernelBuildQueue();
   readonly #constitution: SaraConstitution;
   readonly #ownerTokenSha256: string;
@@ -560,8 +561,9 @@ export class SaraKernel {
   }
 
   /** Drains owned verifier work; never retries or aborts generated-code cleanup. */
-  async closeVerificationWorkers(): Promise<void> { await Promise.all([this.#verificationPool?.close(), this.#buildQueue.close()]); }
+  async closeVerificationWorkers(): Promise<void> { await Promise.all([this.#verificationPool?.close(), this.#previewVerificationPool?.close(), this.#buildQueue.close()]); }
   verificationWorkerStatus() { return this.#verificationPool?.snapshot() ?? null; }
+  previewVerificationWorkerStatus() { return this.#previewVerificationPool?.snapshot() ?? null; }
 
   authenticateOwnerToken(token: string): Principal {
     const received = createHash("sha256").update(token, "utf8").digest();
@@ -1736,7 +1738,8 @@ export class SaraKernel {
     }
     assertMoney(generator.maximumCostUsd, "Candidate generator maximum cost");
     generator = { id: generator.id, external: generator.external, maximumCostUsd: generator.maximumCostUsd,
-      generate: generator.generate.bind(generator) };
+      generate: generator.generate.bind(generator),
+      ...(generator.generateWithPreview ? { generateWithPreview: generator.generateWithPreview.bind(generator) } : {}) };
 
     const handoff = await this.serializeMutation(async () => {
       await this.authorize(principal, {
@@ -1780,36 +1783,64 @@ export class SaraKernel {
       return { ...compiled, memoryContext, admissionStopEpoch: state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null };
     });
 
+    let previewTask: Promise<Awaited<ReturnType<typeof buildVerifiedSkillCandidate>>> | undefined;
+    let previewDigest: string | undefined;
+    let generationOpen = true;
+    let candidateId = randomUUID();
+    let authorityEpoch: string | null = null;
+    const beforeVerification = () => this.serializeMutation(async () => {
+      await this.authorize(principal, { action: "sandbox_development", targetId: `self-build:${jobId}:${generator.id}:dispatch`, external: false });
+      const state = await this.state();
+      if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("SELF_BUILD_JOB_NOT_RUNNING");
+      authorityEpoch = state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null;
+      if (authorityEpoch !== handoff.admissionStopEpoch) throw new Error("SELF_BUILD_AUTHORITY_CHANGED_DURING_GENERATION");
+    });
+    const discardPreview = async () => {
+      if (!previewTask) return;
+      // A rejected worker owns its cleanup. A successful unused artifact is ours.
+      const speculative = await previewTask.then(value => value, () => undefined);
+      if (speculative) await rm(speculative.artifactDirectory, { recursive: true, force: true });
+      previewTask = undefined;
+    };
     try {
       const generationStarted = performance.now();
-      // Copy the untrusted result before authority checks or disk I/O can yield.
-      const proposal = structuredClone(await generator.generate({
+      const generationInput = {
         objective: handoff.objective,
         acceptanceCriteria: [...handoff.acceptanceCriteria],
         missingCapabilities: [...handoff.missingCapabilities],
         constitutionDigest: handoff.constitutionDigest,
         memoryContext: structuredClone(handoff.memoryContext),
-      }));
+      };
+      // Detach both preview and final result before any authority or disk await.
+      const proposal = structuredClone(await (generator.generateWithPreview
+        ? generator.generateWithPreview(generationInput, candidate => {
+          if (!generationOpen || previewTask || candidate.candidateKind !== "typescript_program") return;
+          const snapshot = structuredClone(candidate);
+          previewDigest = sha256(canonicalJson(snapshot));
+          this.#previewVerificationPool ??= new KernelVerificationPool(this.#store.stateDirectory, { concurrency: 1, maximumQueued: 8 });
+          previewTask = this.#previewVerificationPool.verify({ handoff, candidate: snapshot, candidateId }, beforeVerification);
+          void previewTask.catch(() => {});
+        })
+        : generator.generate(generationInput)));
+      generationOpen = false;
       generationMilliseconds = performance.now() - generationStarted;
-      const pooled = Boolean(this.#verificationPool && proposal.candidateKind === "typescript_program");
-      const candidateId = randomUUID();
-      let authorityEpoch: string | null = null;
-      const beforeVerification = () => this.serializeMutation(async () => {
-        await this.authorize(principal, { action: "sandbox_development", targetId: `self-build:${jobId}:${generator.id}:dispatch`, external: false });
-        const state = await this.state();
-        if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("SELF_BUILD_JOB_NOT_RUNNING");
-        authorityEpoch = state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null;
-        if (authorityEpoch !== handoff.admissionStopEpoch) throw new Error("SELF_BUILD_AUTHORITY_CHANGED_DURING_GENERATION");
-      });
+      const matchedPreview = Boolean(previewTask && previewDigest === sha256(canonicalJson(proposal)));
+      const pooled = matchedPreview || Boolean(this.#verificationPool && proposal.candidateKind === "typescript_program");
       const verificationStarted = performance.now();
-      // Neither cooperative verification nor workers may hold the event-store
-      // mutation lock while compiling/executing a candidate. Both are bounded.
-      const prepared = pooled
-        ? await this.#verificationPool!.verify({ handoff, candidate: proposal as import("./types.ts").ProgramCandidateProposal, candidateId }, beforeVerification)
-        : await this.#buildQueue.run(async () => {
-          await beforeVerification();
-          return buildVerifiedSkillCandidate(handoff, proposal, `${this.#store.stateDirectory}/genome-lab`, candidateId);
-        });
+      if (previewTask && !matchedPreview) {
+        await discardPreview();
+        candidateId = randomUUID();
+      }
+      // Preview completion is never acceptance; successful generation and all
+      // original authority, identity, artifact and receipt gates still follow.
+      const prepared = matchedPreview
+        ? await previewTask!
+        : pooled
+          ? await this.#verificationPool!.verify({ handoff, candidate: proposal as import("./types.ts").ProgramCandidateProposal, candidateId }, beforeVerification)
+          : await this.#buildQueue.run(async () => {
+            await beforeVerification();
+            return buildVerifiedSkillCandidate(handoff, proposal, `${this.#store.stateDirectory}/genome-lab`, candidateId);
+          });
       kernelVerificationMilliseconds = performance.now() - verificationStarted;
       uncommittedArtifact = prepared.artifactDirectory;
       const acceptanceClock = performance.now();
@@ -1894,6 +1925,8 @@ export class SaraKernel {
         totalMilliseconds: performance.now() - cycleStarted, generationMilliseconds, kernelVerificationMilliseconds,
         acceptanceAndReceiptsMilliseconds, pooled } };
     } catch (error) {
+      generationOpen = false;
+      if (!uncommittedArtifact) await discardPreview();
       if (uncommittedArtifact && !acceptanceStarted) await rm(uncommittedArtifact, { recursive: true, force: true });
       await this.serializeMutation(async () => {
         const state = await this.state();

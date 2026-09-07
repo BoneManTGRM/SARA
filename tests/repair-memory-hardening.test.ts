@@ -149,5 +149,5 @@ test("successful cold return and fresh-store warm return retain independent veri
     });
     assert.deepEqual(await generator.generate(context), candidate(true));
   }
-  assert.equal(count.calls, 1); assert.equal(checks, 6);
+  assert.equal(count.calls, 1); assert.equal(checks, 4);
 }));

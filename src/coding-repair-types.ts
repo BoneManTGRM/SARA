@@ -180,6 +180,8 @@ export type CodingRepairLimits = {
 export type CodingRepairRun = {
   baseline: ProgramCandidateProposal;
   baselineVerification: ProgramVerificationResult;
+  /** False only for exact reuse: stored failure metadata is not fresh verification. */
+  baselineVerificationFresh?: boolean;
   champion: ProgramCandidateProposal;
   state: "BASELINE" | "PROVISIONAL_CHAMPION" | "VERIFIED_CANDIDATE" | "STOPPED";
   verification: ProgramVerificationResult;

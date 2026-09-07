@@ -47,6 +47,6 @@ test('frozen hardening launcher retains old pins and refuses the revised memory 
   assert.equal(Object.keys(pins).length,4);
   const drift: string[] = [];
   for(const [path,digest] of Object.entries(pins)) if(sha256(await readFile(new URL('../'+path,import.meta.url)))!==digest) drift.push(path);
-  assert.deepEqual(drift,['src/coding-repair-memory.ts']);
+  assert.deepEqual(drift,['src/coding-repair-memory.ts','src/reusable-coding-candidate-generator.ts']);
   assert(text.includes('HARDENED_REUSE_BENCHMARK_GRANT as grant'));
 });

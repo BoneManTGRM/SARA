@@ -47,7 +47,7 @@ test("TypeScript version disagreement is blocked before even an already-correct 
       verify: c => native.verify({ candidate: c, ...context }), verifyFinal: c => { finalChecks++; return verify(c); }, onReuse: () => { receipts++; } });
     await assert.rejects(() => generator.generate(context), /REPAIR_REUSE_FINAL_VERIFICATION_FAILED/u);
     assert.equal(count.calls, 0); assert.equal(finalChecks, 1); assert.equal(receipts, 0);
-    assert(!(await readdir(root)).includes("coding-repair-memory-v1"));
+    assert.deepEqual(await readdir(join(root, "coding-repair-memory-v1")), [], "exact lookup may create an empty directory, but rejected final verification must persist no recipe");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
