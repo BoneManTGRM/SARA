@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalJson, sha256 } from "../src/canonical.ts";
 import { parseCodingBenchmarkCommand } from "../src/coding-repair-benchmark-command.ts";
-import { persistentBenchmarkStateDirectory } from "../src/coding-benchmark-owner.ts";
+import { persistentBenchmarkStateDirectory, inspectExclusiveKernelContinuation } from "../src/coding-benchmark-owner.ts";
 import { KERNEL_CODING_BENCHMARK_GRANT as grant, assertCodingBenchmarkRuntimeAuthority } from "../src/coding-benchmark-readiness.ts";
 import { initializeCodingBenchmarkStore, withCodingBenchmarkExecution, type CodingBenchmarkManifest } from "../src/coding-repair-benchmark-store.ts";
 import { writeBenchmarkAudit } from "../src/coding-benchmark-audit.ts";
@@ -14,7 +14,11 @@ const config = parseCodingBenchmarkCommand({ args: process.argv.slice(2), env: p
 if (config.benchmarkId !== grant.benchmarkId || config.maximumSpendUsd !== .15 || config.maximumModelSpendUsdPerArm !== .05 ||
     config.sourceRevision !== process.env.RAILWAY_GIT_COMMIT_SHA ||
     config.stateDirectory !== await persistentBenchmarkStateDirectory(process.env.SARA_STATE_DIRECTORY)) throw new Error("KERNEL_BENCHMARK_EXACT_AUTHORITY_REQUIRED");
-const beforeDispatch = () => assertCodingBenchmarkRuntimeAuthority({ benchmarkId: config.benchmarkId, environment: process.env });
+const beforeDispatch = async () => {
+  await assertCodingBenchmarkRuntimeAuthority({ benchmarkId: config.benchmarkId, environment: process.env });
+  const competing = await inspectExclusiveKernelContinuation(config.stateDirectory, config.benchmarkId);
+  if (!competing || competing.status !== "not_started") throw new Error("SHARED_CONTINUATION_ALREADY_CLAIMED");
+};
 await beforeDispatch(); await assertKernelBenchmarkImplementation();
 const sourceBindings = Object.fromEntries(await Promise.all(["src/kernel-coding-benchmark.ts", "src/kernel-coding-benchmark-pins.ts", "scripts/benchmark-kernel-coding.ts",
   "src/coding-benchmark-readiness.ts", "src/coding-benchmark-owner.ts", "src/coding-benchmark-evidence.ts", "src/coding-benchmark-github-relay.ts"]

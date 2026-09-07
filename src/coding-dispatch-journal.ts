@@ -1,3 +1,4 @@
+import { readBoundedProviderBody } from "./bounded-provider-body.ts";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
@@ -58,24 +59,22 @@ export class CodingDispatchJournal {
       attempted = true;
       if (phase === "generation") this.#stats.generationAttempts++; else this.#stats.tokenCountAttempts++;
       const response = await this.#fetch(url, copy);
-      const reader = response.clone().body?.getReader();
-      let size = 0; const chunks: Uint8Array[] = [];
-      if (reader) {
-        while (true) {
-          const chunk = await reader.read(); if (chunk.done) break;
-          size += chunk.value.byteLength;
-          if (size > 1_048_576) { controller.abort(); void reader.cancel().catch(() => {}); throw new Error("CODING_DISPATCH_RESPONSE_BOUND"); }
-          chunks.push(chunk.value);
-        }
+      let raw: string;
+      try { raw = await readBoundedProviderBody(response, copy.signal); }
+      catch (error) {
+        if (error instanceof Error && error.message === "PROVIDER_BODY_BOUND") throw new Error("CODING_DISPATCH_RESPONSE_BOUND");
+        throw error;
       }
+      const size = Buffer.byteLength(raw, "utf8");
       const requestId = response.headers.get("x-request-id");
       await writeBenchmarkAudit(this.#directory, `${name}-response.json`, { schemaVersion: 1, id, sequence, phase,
-        state: "response_received", status: response.status, responseDigest: sha256(Buffer.concat(chunks)), responseBytes: size,
+        state: "response_received", status: response.status, responseDigest: sha256(raw), responseBytes: size,
         providerRequestId: requestId && /^[a-zA-Z0-9._:-]{1,200}$/u.test(requestId) ? requestId : null,
         elapsedMilliseconds: performance.now() - started, acceptanceOrBillingEstablished: false, replayAllowed: false });
       this.#stats.responsesReceived++;
-      return response;
+      return new Response(raw, { status: response.status, statusText: response.statusText, headers: response.headers });
     } catch (error) {
+      controller.abort();
       this.#stats.closed = true;
       if (attempted) this.#stats.uncertainAttempts++; else this.#stats.rejectedBeforeNetwork++;
       // Receipt write failure itself leaves intent/reservation uncertain. Never

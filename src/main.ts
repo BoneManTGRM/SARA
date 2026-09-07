@@ -1,3 +1,4 @@
+import { observeSelfBuildHttp } from "./self-build-http-timing.ts";
 import { CodingDispatchJournal } from "./coding-dispatch-journal.ts";
 import { mkdir } from "node:fs/promises";
 import { NativeCodingVerifier } from "./native-coding-verifier.ts";
@@ -194,6 +195,11 @@ const server = createSaraServer(kernel, {
       startupProof,
     }),
   } : {}),
+});
+observeSelfBuildHttp(server, {
+  ...(process.env.RAILWAY_GIT_COMMIT_SHA ? { sourceRevision: process.env.RAILWAY_GIT_COMMIT_SHA } : {}),
+  emit: value => console.log(`SARA self-build HTTP timing ${JSON.stringify(value)}`),
+  onTelemetryFailure: () => console.error("SARA self-build timing telemetry unavailable; no acceptance decision changed."),
 });
 server.listen(port, host, () => {
   const address = server.address();

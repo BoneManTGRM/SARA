@@ -6,7 +6,7 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { codingBenchmarkAuthorityDigest } from "./coding-repair-benchmark-command.ts";
 import { writeBenchmarkAudit } from "./coding-benchmark-audit.ts";
-import { KERNEL_CODING_BENCHMARK_GRANT, HARDENED_REUSE_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, activeCodingBenchmarkContinuation, assertCodingBenchmarkDispatch, CodingBenchmarkNotReadyError, inspectCodingBenchmarkReadiness } from "./coding-benchmark-readiness.ts";
+import { KERNEL_CODING_BENCHMARK_GRANT, OBSERVED_REUSE_BENCHMARK_GRANT, HARDENED_REUSE_BENCHMARK_GRANT, REUSE_SPEED_BENCHMARK_GRANT, CURRENT_CODING_BENCHMARK_GRANT, activeCodingBenchmarkContinuation, assertCodingBenchmarkDispatch, CodingBenchmarkNotReadyError, inspectCodingBenchmarkReadiness } from "./coding-benchmark-readiness.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 type OwnerBenchmarkInput = {
@@ -34,8 +34,13 @@ export async function persistentBenchmarkStateDirectory(stateDirectory: string |
 export async function ownerCodingBenchmarkReadiness(input: OwnerBenchmarkInput) {
   const readiness = inspectCodingBenchmarkReadiness(input);
   let executionEvidence: BenchmarkEvidence | null = null;
+  let exclusiveContinuation: { benchmarkId: string; status: string; files: string[] } | null = null;
   try {
     const directory = await persistentBenchmarkStateDirectory(input.stateDirectory);
+    exclusiveContinuation = await inspectExclusiveKernelContinuation(directory, readiness.benchmarkId);
+    if (exclusiveContinuation && exclusiveContinuation.status !== "not_started") {
+      readiness.blockers.push("SHARED_CONTINUATION_ALREADY_CLAIMED"); readiness.availableAuthorizationUsd = 0;
+    }
     try {
       executionEvidence = await readCodingBenchmarkEvidence(directory, readiness.benchmarkId);
       if (executionEvidence.status !== "not_started") {
@@ -46,10 +51,10 @@ export async function ownerCodingBenchmarkReadiness(input: OwnerBenchmarkInput) 
     } catch { readiness.blockers.push("BENCHMARK_EVIDENCE_UNAVAILABLE"); readiness.availableAuthorizationUsd = 0; }
   } catch { readiness.blockers.push("PERSISTENT_BENCHMARK_STORAGE_UNAVAILABLE"); }
   readiness.ready = readiness.blockers.length === 0;
-  return { ...readiness, executionEvidence,
+  return { ...readiness, executionEvidence, exclusiveContinuation,
     ...(input.launcher ? { launcher: structuredClone(input.launcher) } : {}),
     authenticatedLaunchPath: "/api/coding-benchmark/run",
-    execution: readiness.benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? "full_kernel_exact_repeat_pilot" : [REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId)
+    execution: readiness.benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? "full_kernel_exact_repeat_pilot" : [REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId)
       ? "maximum_observed_reuse_pilot" : readiness.benchmarkId === CURRENT_CODING_BENCHMARK_GRANT.benchmarkId
       ? "current_components_cold_pilot" : "existing_matched_cli_only",
     authorityDigest: readiness.sourceRevision ? codingBenchmarkAuthorityDigest({
@@ -76,11 +81,12 @@ export function codingBenchmarkLaunchSpec(input: {
   for (const key of ["OPENAI_API_KEY", "SARA_OWNER_TOKEN", "SARA_OWNER_TOKEN_SHA256", "SARA_STATE_DIRECTORY", "PORT", "RAILWAY_GIT_COMMIT_SHA", "SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256"]) {
     const value = input.environment[key]; if (value !== undefined) environment[key] = value;
   }
-  if ([KERNEL_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId)) environment.SARA_REPARODYNAMIC_CODING_MODE = input.environment.SARA_REPARODYNAMIC_CODING_MODE ?? "";
+  if ([KERNEL_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId)) environment.SARA_REPARODYNAMIC_CODING_MODE = input.environment.SARA_REPARODYNAMIC_CODING_MODE ?? "";
   environment.SARA_CODING_BENCHMARK_SOURCE_REVISION = input.sourceRevision;
   environment.SARA_CODING_BENCHMARK_AUTHORITY_SHA256 = authorityDigest;
   return { command: process.execPath, cwd: root, environment,
-    args: ["--import", "tsx", active.benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? "scripts/benchmark-kernel-coding.ts" : active.benchmarkId === HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId
+    args: ["--import", "tsx", active.benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? "scripts/benchmark-kernel-coding.ts" : active.benchmarkId === OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId
+      ? "scripts/benchmark-observed-reuse.ts" : active.benchmarkId === HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId
       ? "scripts/benchmark-hardened-reuse.ts" : active.benchmarkId === REUSE_SPEED_BENCHMARK_GRANT.benchmarkId
       ? "scripts/benchmark-reuse-speed.ts" : active.benchmarkId === CURRENT_CODING_BENCHMARK_GRANT.benchmarkId
       ? "scripts/benchmark-current-coding-evidence.ts" : "scripts/benchmark-matched-coding-evidence.ts", "--live", "--acknowledge-lab-only",
@@ -117,4 +123,14 @@ export async function launchOwnerCodingBenchmark(input: OwnerBenchmarkInput & { 
   });
   await new Promise<void>((done, reject) => { child.once("spawn", done); child.once("error", () => reject(new CodingBenchmarkNotReadyError("BENCHMARK_LAUNCH_FAILED_NO_REPLAY"))); });
   return { schemaVersion: 1, benchmarkId: readiness.benchmarkId, outcome: "started", maximumSpendUsd: readiness.maximumSpendUsd, replayAllowed: false };
+}
+
+/** Two prepared alternatives share one owner allowance, not two independent grants.
+ * Absence of logs is insufficient; inspect durable bounded evidence. No state is changed. */
+export async function inspectExclusiveKernelContinuation(stateDirectory: string, activeId: string) {
+  const other = activeId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId
+    : activeId === OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId ? KERNEL_CODING_BENCHMARK_GRANT.benchmarkId : null;
+  if (!other) return null;
+  const evidence = await readCodingBenchmarkEvidence(stateDirectory, other);
+  return { benchmarkId: other, status: evidence.status, files: evidence.files.map(file => file.path) };
 }

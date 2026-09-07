@@ -67,3 +67,22 @@ Require full npm run verify, exact-head CI and CodeQL, reviewed source-tree matc
 and exact existing-service deployment. Preserve build/start/config/volume/replica,
 all owner/provider credentials and global budget. Only the new grant activation
 and its precise launcher permit may change for the subsequent paid trial.
+
+## Integration with PR #125
+
+Preserve PR125 provider accounting, bounded response reader, Gemini tokenizer and
+optional HTTP telemetry. The full-kernel budget uses the versioned observed
+budget. Its separate dispatch journal now uses the same strict UTF-8, bounded,
+abort-aware body reader and reconstructs the response for callers.
+
+Component grant68990425 and full-kernel grant17430b72 are alternatives within the
+owner's SINGLE $0.15 TOTAL continuation allowance. Readiness and the new CLI
+inspect the competing grant's durable evidence; any surviving claim, even partial,
+blocks the alternative. Absence of logs is not proof of unused authorization.
+The old component runner and its pins remain unchanged and refuse the integrated
+kernel/main/memory source; tests explicitly preserve that rejection.
+
+The new full-kernel protocol retains45s matched provider deadlines and0workers.
+Only the new full-kernel child has a600s process ceiling. All controls use the
+same hardened kernel and fresh acceptance. This is a small exact-repeat trial,
+not a35x guarantee, full multi-provider qualification, or an absolute maximum.

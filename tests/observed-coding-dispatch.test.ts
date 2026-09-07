@@ -63,16 +63,9 @@ test("concurrent invocation cannot pass the existing reservation lock", () => di
   const first=budget.fetchFor("regenerate")(url,init());
   await assert.rejects(budget.fetchFor("optimized")(url,init()),/BUSY/); release();await first;assert.equal(calls,1);
 }));
-test("failed first model request remains in the actual benchmark row without a reuse callback", () => directory(async root => {
+test("superseded component runner rejects changed kernel source before any dispatch", () => directory(async root => {
   const native = await NativeCodingVerifier.create(); assert(native); let calls=0;
   await assert.rejects(runObservedReuseBenchmark({directory:join(root,"trial"),benchmarkId:"fault-fixture",apiKey:"OFFLINE_ONLY",native,
-    executionKind:"scripted_offline",beforeDispatch:async()=>{},fetchImpl:async address=>{
-      if(String(address).endsWith("/input_tokens"))return new Response('{"input_tokens":100}');
-      calls++;throw Error("uncertain fixture dispatch");
-    }}), /STOPPED_AFTER_UNCERTAIN_DISPATCH/);
-  const summary=JSON.parse(await readFile(join(root,"trial/trace/reuse-summary.json"),"utf8")).payload;
-  assert.equal(calls,1);assert.equal(summary.rows.length,1);assert.equal(summary.rows[0].modelRequests,1);
-  assert.equal(summary.rows[0].completed,false);assert.equal(summary.rows[0].hits,0);
-  assert.equal(summary.comparisonAllowed,false);assert.equal(summary.warmRatios,null);
-  assert.equal(summary.accounting.generationRequests,1);assert.equal(summary.accounting.unresolvedReservedUsd,.0156);
+    executionKind:"scripted_offline",beforeDispatch:async()=>{},fetchImpl:async()=>{calls++;throw Error("must not dispatch");}}), /CURRENT_PILOT_COMPONENT_DRIFT/);
+  assert.equal(calls,0);
 }));

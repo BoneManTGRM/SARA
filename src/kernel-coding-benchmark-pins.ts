@@ -2,11 +2,11 @@
 export const KERNEL_BENCHMARK_PINS = Object.freeze({
   "src/kernel.ts": "b85218147c638e579e844c788f37c5626c1cbbbca22f7321a5bf93a4aeca917a",
   "src/server.ts": "2b7badecc9c53e397fd7f0fe564323620c7c1ffadeca8d5a18209c289bb6b78b",
-  "src/main.ts": "883d707421f4323562ff97aadc3fd718c12eff3b82ace7f7ced82ad90526ecb2",
+  "src/main.ts": "9cac132ad03a0b1700a986140131f48351f92bc5ecc52d945aa0f9aa2a2bfcf3",
   "src/kernel-build-queue.ts": "6af81816b120a2533a8b5abf1109e60e1e1112a8e5e73f183bc87b6de0fe8ff5",
   "src/kernel-verification-pool.ts": "72d9d89bbbaa32fb8094071c591b7b9b4ed3775b108ba0f4d70207462439509b",
   "src/kernel-verification-worker.mjs": "2e04ae71607317d2e42d3dda7764de9c37147d24347e95a7be1d6ff3027f06ce",
-  "src/coding-dispatch-journal.ts": "35a7266e2ff957807400be5f903e16d7e8142b8233131a96af6827de19150972",
+  "src/coding-dispatch-journal.ts": "e141e3bdeedd26cbd1bbb654ad31cd0590158e557fb02c4b3377a4d038d47da4",
   "src/coding-repair-memory.ts": "bffe3527c3e293c55c4e41178843088adf37b8e7f0dbc3a17a6542fc11eaf93f",
   "src/repair-memory-snapshot.ts": "4b2d04606eeb3450986a2cc9d4521b519b6526db689cd2828de17158774fcc23",
   "src/coding-repair-singleflight.ts": "a24f377c3fe66eed3de126bf579a93ede851c2172d875da77882bb02c0172b56",
@@ -34,5 +34,8 @@ export const KERNEL_BENCHMARK_PINS = Object.freeze({
   "constitution/constitution.v1.json": "8a04d0b85b385f8e2564624a7b2022dea58e8bae9a089a86727fc3f64bfea91e",
   "package-lock.json": "2af53c1b9447041cb7bc2ed9526f9c3fde51f395fb5a19c8482c90c35552bf0e",
   "tools/native-checker/package-lock.json": "9b4a2c83fe958e49d19019593cbfc1026424a70edf9e4c243b2cf8de15abe44a",
-  "tools/native-checker/integrity.json": "4429dc7b890f14428b3ffc8fc629c4c7c2bfe21a15121a4b97d1e583c1d4e7a2"
+  "tools/native-checker/integrity.json": "4429dc7b890f14428b3ffc8fc629c4c7c2bfe21a15121a4b97d1e583c1d4e7a2",
+  "src/bounded-provider-body.ts": "77573a94e7292c387e82b3106749ed7ab2dd83997595aa71732b774b8d9b31b1",
+  "src/observed-reuse-benchmark.ts": "051f25101377e1a5c2a3edc203ec2803255c41332763d793bd592da6bab71872",
+  "src/self-build-http-timing.ts": "bcd8c0c27cd8256d623cd909974cba28e4268208d627ff7e790b57a4fa9c5558"
 });
