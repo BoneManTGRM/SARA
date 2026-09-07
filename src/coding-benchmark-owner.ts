@@ -1,3 +1,4 @@
+import { REPEAT_KERNEL_BENCHMARK_GRANT } from "./repeat-kernel-benchmark-grant.ts";
 import { EXACT_REUSE_BENCHMARK_GRANT } from "./exact-reuse-benchmark-grant.ts";
 import { readCodingBenchmarkEvidence, type BenchmarkEvidence } from "./coding-benchmark-evidence.ts";
 import type { CodingBenchmarkRelayIdentity } from "./coding-benchmark-github-relay.ts";
@@ -55,7 +56,7 @@ export async function ownerCodingBenchmarkReadiness(input: OwnerBenchmarkInput) 
   return { ...readiness, executionEvidence, exclusiveContinuation,
     ...(input.launcher ? { launcher: structuredClone(input.launcher) } : {}),
     authenticatedLaunchPath: "/api/coding-benchmark/run",
-    execution: [EXACT_REUSE_BENCHMARK_GRANT.benchmarkId, KERNEL_CODING_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId) ? "full_kernel_exact_repeat_pilot" : [REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId)
+    execution: [REPEAT_KERNEL_BENCHMARK_GRANT.benchmarkId, EXACT_REUSE_BENCHMARK_GRANT.benchmarkId, KERNEL_CODING_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId) ? "full_kernel_exact_repeat_pilot" : [REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId)
       ? "maximum_observed_reuse_pilot" : readiness.benchmarkId === CURRENT_CODING_BENCHMARK_GRANT.benchmarkId
       ? "current_components_cold_pilot" : "existing_matched_cli_only",
     authorityDigest: readiness.sourceRevision ? codingBenchmarkAuthorityDigest({
@@ -82,11 +83,11 @@ export function codingBenchmarkLaunchSpec(input: {
   for (const key of ["OPENAI_API_KEY", "SARA_OWNER_TOKEN", "SARA_OWNER_TOKEN_SHA256", "SARA_STATE_DIRECTORY", "PORT", "RAILWAY_GIT_COMMIT_SHA", "SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256"]) {
     const value = input.environment[key]; if (value !== undefined) environment[key] = value;
   }
-  if ([EXACT_REUSE_BENCHMARK_GRANT.benchmarkId, KERNEL_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId)) environment.SARA_REPARODYNAMIC_CODING_MODE = input.environment.SARA_REPARODYNAMIC_CODING_MODE ?? "";
+  if ([REPEAT_KERNEL_BENCHMARK_GRANT.benchmarkId, EXACT_REUSE_BENCHMARK_GRANT.benchmarkId, KERNEL_CODING_BENCHMARK_GRANT.benchmarkId, CURRENT_CODING_BENCHMARK_GRANT.benchmarkId, REUSE_SPEED_BENCHMARK_GRANT.benchmarkId, HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId, OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId].some(id => id === active.benchmarkId)) environment.SARA_REPARODYNAMIC_CODING_MODE = input.environment.SARA_REPARODYNAMIC_CODING_MODE ?? "";
   environment.SARA_CODING_BENCHMARK_SOURCE_REVISION = input.sourceRevision;
   environment.SARA_CODING_BENCHMARK_AUTHORITY_SHA256 = authorityDigest;
   return { command: process.execPath, cwd: root, environment,
-    args: ["--import", "tsx", active.benchmarkId === EXACT_REUSE_BENCHMARK_GRANT.benchmarkId ? "scripts/benchmark-exact-reuse-kernel.ts" : active.benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? "scripts/benchmark-kernel-coding.ts" : active.benchmarkId === OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId
+    args: ["--import", "tsx", active.benchmarkId === REPEAT_KERNEL_BENCHMARK_GRANT.benchmarkId ? "scripts/benchmark-repeat-kernel.ts" : active.benchmarkId === EXACT_REUSE_BENCHMARK_GRANT.benchmarkId ? "scripts/benchmark-exact-reuse-kernel.ts" : active.benchmarkId === KERNEL_CODING_BENCHMARK_GRANT.benchmarkId ? "scripts/benchmark-kernel-coding.ts" : active.benchmarkId === OBSERVED_REUSE_BENCHMARK_GRANT.benchmarkId
       ? "scripts/benchmark-observed-reuse.ts" : active.benchmarkId === HARDENED_REUSE_BENCHMARK_GRANT.benchmarkId
       ? "scripts/benchmark-hardened-reuse.ts" : active.benchmarkId === REUSE_SPEED_BENCHMARK_GRANT.benchmarkId
       ? "scripts/benchmark-reuse-speed.ts" : active.benchmarkId === CURRENT_CODING_BENCHMARK_GRANT.benchmarkId
@@ -117,7 +118,7 @@ export async function launchOwnerCodingBenchmark(input: OwnerBenchmarkInput & { 
   });
   // Preserve the benchmark's sanitized result/error stream in Railway logs so a
   // one-use launch remains observable without exposing credentials or model source.
-  const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.environment, stdio: ["ignore", "inherit", "inherit"], timeout: [EXACT_REUSE_BENCHMARK_GRANT.benchmarkId, KERNEL_CODING_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId) ? 600_000 : 300_000 });
+  const child = spawn(spec.command, spec.args, { cwd: spec.cwd, env: spec.environment, stdio: ["ignore", "inherit", "inherit"], timeout: [REPEAT_KERNEL_BENCHMARK_GRANT.benchmarkId, EXACT_REUSE_BENCHMARK_GRANT.benchmarkId, KERNEL_CODING_BENCHMARK_GRANT.benchmarkId].some(id => id === readiness.benchmarkId) ? 600_000 : 300_000 });
   child.once("exit", (code, signal) => {
     void writeBenchmarkAudit(journal, "owner-launch-exit.json", { code, signal, exitedAt: new Date().toISOString(), replayAllowed: false })
       .catch(() => { console.error("Benchmark launch exit evidence failed; reservation remains held."); });
