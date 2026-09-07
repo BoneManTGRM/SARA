@@ -1,4 +1,4 @@
-name: Authorized hardened SARA real reuse comparison
+name: Authorized SARA full-kernel coding comparison
 on:
   push:
     branches: [verify/coding-benchmark-owner-relay-20260905]
@@ -7,30 +7,29 @@ permissions:
   contents: read
   id-token: write
 concurrency:
-  group: sara-hardened-reuse-d89f2a9c
+  group: sara-full-kernel-17430b72
   cancel-in-progress: false
 jobs:
   compare-once:
     if: github.repository == 'BoneManTGRM/SARA' && github.actor == 'BoneManTGRM' && github.run_attempt == 1
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Exact new-grant preflight then one POST and GET-only recovery
+      - name: Exact unused full-kernel grant then one POST and GET-only recovery
         env:
-          EXPECTED_RUNTIME: 4adf3c149030d2984807753caac24d62521d6b80
+          EXPECTED_RUNTIME: dd5fac4a4c39617579830ab35dd49600999116d5
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          echo 'aa23ac3b05d0e61f60c6acc127010acb9ae5758672a71b60edba75df712e5b8e  scripts/launch-hardened-reuse-d89f2a9c.py' | sha256sum -c -
-          echo 'e84185e39c5ae32a23814c827e0bde334299facf188c218da9446436c2ed389f  scripts/launch-max-reuse-eb659a8f.py' | sha256sum -c -
-          python3 scripts/launch-hardened-reuse-d89f2a9c.py
+          echo '384e3e74153b9510eb3d4ec9788642eb6f0f8aab8f81b3cf453a5f56334e1ec8  scripts/launch-kernel-17430b72.py' | sha256sum -c -
+          python3 scripts/launch-kernel-17430b72.py
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: sara-hardened-reuse-live-${{ github.run_id }}
-          path: /tmp/sara-hardened-reuse-d89f2a9c
+          name: sara-full-kernel-live-${{ github.run_id }}
+          path: /tmp/sara-kernel-17430b72
           retention-days: 14
           if-no-files-found: error
