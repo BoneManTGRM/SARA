@@ -12,6 +12,11 @@ on:
         required: true
         default: false
         type: boolean
+      retain_learning_evidence:
+        description: I approve retaining unverified generated source and diagnostics in workflow artifacts
+        required: false
+        default: false
+        type: boolean
   push:
     branches: [main]
     paths:
@@ -54,4 +59,15 @@ jobs:
           SARA_WORKERS_PLAN: free
           SARA_BUILD_OBJECTIVE: ${{ github.event_name == 'push' && 'Build a zero-cost Opportunity-to-Offer Compiler that accepts a public opportunity record and returns a structured owner-review work card containing fit score, disqualifying risks, required capabilities, estimated effort, evidence gaps, potential offer, and the safest next step. Use one clearly documented deterministic scoring formula. Before returning the candidate, manually dry-run every behavioral test against runSkill. Every expected result must exactly match every returned field, array, string, number, boolean, and null value. Do not return inconsistent test vectors. Use pure TypeScript with no imports, network, filesystem, secrets, timers, outreach, applications, contracts, spending, deployment, account creation, or payment activity. Verify independently and stop at SHADOW as a public draft pull request.' || inputs.objective }}
           SARA_PUBLIC_DRAFT_APPROVED: ${{ github.event_name == 'push' || inputs.public_draft_approved }}
+          SARA_RETAIN_LEARNING_EVIDENCE: ${{ inputs.retain_learning_evidence == true }}
         run: npm run executor:cloudflare
+      - name: Preserve bounded learning evidence
+        if: ${{ always() && inputs.retain_learning_evidence == true }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sara-learning-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/sara-cloudflare-learning-evidence/
+            ${{ runner.temp }}/sara-cloudflare-self-build-state/genome-lab/
+          if-no-files-found: warn
+          retention-days: 7

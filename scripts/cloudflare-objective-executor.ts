@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { boundedCandidateFailureFeedback, createCloudflareFreeCandidateGenerator } from "../src/cloudflare-free-generator.ts";
+import { recordLearningCall, recordLearningOutcome, recordLearningProposal, type LearningProposalReceipt } from "../src/cloudflare-learning-evidence.ts";
 import { GithubDraftPullRequestPublisher } from "../src/github-draft-publisher.ts";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
 import type { CandidatePublication } from "../src/site-directive.ts";
@@ -41,6 +42,8 @@ if (!objective.trim() || objective.length > 1_000) {
 }
 
 const stateDirectory = resolve(runnerTemp, "sara-cloudflare-self-build-state");
+const evidenceDirectory = resolve(runnerTemp, "sara-cloudflare-learning-evidence");
+const retainEvidence = process.env.SARA_RETAIN_LEARNING_EVIDENCE === "true";
 await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
 
 const kernel = await SaraKernel.boot({ stateDirectory });
@@ -49,6 +52,7 @@ let repairFeedback: string | undefined;
 let candidate: Omit<CandidatePublication, "directiveId"> | undefined;
 
 for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+  let proposalReceipt: LearningProposalReceipt | undefined;
   const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
     objective,
     expectedOwnerValue: 1,
@@ -73,10 +77,13 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       ...cloudflare,
       id: `${cloudflare.id}-attempt-${attempt}`,
       async generate(input) {
+        if (retainEvidence) await recordLearningCall(evidenceDirectory, attempt, input.objective);
         const generated = await cloudflare.generate(input);
         if (generated.candidateKind === "typescript_program") {
           throw new Error("The Cloudflare pure-skill executor returned an unauthorized program candidate.");
         }
+        // A capture failure must not turn a first proposal into a repair request.
+        if (retainEvidence) proposalReceipt = await recordLearningProposal(evidenceDirectory, attempt, generated);
         previousProposal = generated;
         return previousProposal;
       },
@@ -91,13 +98,18 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
       jobId: execution.job.id,
       stage: "SHADOW",
     };
-    break;
   } catch (error) {
+    if (retainEvidence) await recordLearningOutcome(evidenceDirectory, attempt, { status: "rejected", proposal: proposalReceipt, error });
     if (attempt === MAX_ATTEMPTS || !previousProposal) throw error;
     repairFeedback = boundedCandidateFailureFeedback(error);
     console.log("Initial untrusted candidate was rejected; starting the single bounded repair attempt.");
     console.log(`Bounded verifier evidence: ${repairFeedback}`);
+    continue;
   }
+  // Persistence failure after verification stops here, outside the repair catch.
+  if (retainEvidence) await recordLearningOutcome(evidenceDirectory, attempt, { status: "verified_shadow", proposal: proposalReceipt,
+    candidateDigest: candidate.candidateDigest });
+  break;
 }
 
 if (!candidate) throw new Error("No verified SHADOW candidate was produced.");
