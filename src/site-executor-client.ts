@@ -22,6 +22,8 @@ export type SiteDirectiveFailedResult = {
   generatorId: typeof SITE_GENERATOR_ID | typeof MODEL_GENERATOR_ID;
   failureCode: string;
   failureDigest: string;
+  outputDigest?: string;
+  executionUrl?: string;
   lessons: string[];
 };
 
