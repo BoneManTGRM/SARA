@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   CLOUDFLARE_FREE_MODEL,
   createCloudflareFreeCandidateGenerator,
+  cloudflareQualificationReasoningEffort,
 } from "../src/cloudflare-free-generator.ts";
 
 const ACCOUNT_ID = "a".repeat(32);
@@ -30,6 +31,41 @@ function candidate() {
 }
 
 describe("Cloudflare free candidate generator", () => {
+  it("rejects unsupported reasoning settings before dispatch without exposing their value", () => {
+    assert.equal(cloudflareQualificationReasoningEffort("current"), undefined);
+    assert.equal(cloudflareQualificationReasoningEffort(undefined), undefined);
+    for (const invalid of ["", "high", "PRIVATE", 1, null]) {
+      assert.throws(() => createCloudflareFreeCandidateGenerator({
+        accountId: ACCOUNT_ID, apiToken: API_TOKEN, workersPlan: "free",
+        reasoningEffort: invalid as "low",
+        async fetcher() { assert.fail("Invalid configuration must not dispatch"); },
+      }), error => {
+        assert.equal((error as Error).message, "Cloudflare qualification reasoning effort must be current or low.");
+        return true;
+      });
+    }
+  });
+  it("changes only reasoning effort when explicitly selected under the same request ceiling", async () => {
+    const requests: Record<string, unknown>[] = [];
+    for (const reasoningEffort of [undefined, "low"] as const) {
+      const generator = createCloudflareFreeCandidateGenerator({
+        accountId: ACCOUNT_ID, apiToken: API_TOKEN, workersPlan: "free", ...{reasoningEffort},
+        async fetcher(_url, init) {
+          requests.push(JSON.parse(String(init?.body)));
+          return Response.json({choices:[{message:{content:JSON.stringify(candidate())}}]});
+        },
+      });
+      await generator.generate(input());
+    }
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0].reasoning_effort, undefined);
+    const {reasoning_effort, ...otherwiseIdentical} = requests[1];
+    assert.equal(reasoning_effort, "low");
+    assert.deepEqual(otherwiseIdentical, requests[0]);
+    assert.equal(requests[1].max_completion_tokens, 8192);
+    assert.equal(requests[1].model, CLOUDFLARE_FREE_MODEL);
+  });
+
   it("uses one fixed-model request and returns one JSON proposal", async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const generator = createCloudflareFreeCandidateGenerator({

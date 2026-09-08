@@ -64,7 +64,23 @@ test("interrupted call retains a start record without inventing an accepted outc
     assert.equal(record.event, "generator_call_entered");
     assert.equal(record.usage, "unknown_until_provider_evidence");
     assert.equal(record.objectiveSha256, digest("Learn a public audit."));
+    assert.equal(record.reasoningEffort, undefined);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("the opt-in reasoning setting is durable before a response and does not expand attempts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sara-learning-reasoning-"));
+  try {
+    await recordLearningCall(root, 1, "Learn a public audit.", "low");
+    const saved = JSON.parse(await readFile(join(root, "attempt-1-call.json"), "utf8"));
+    assert.equal(saved.reasoningEffort, "low");
+    assert.equal(saved.maximumCompletionTokens, 8192);
+    assert.equal(saved.usage, "unknown_until_provider_evidence");
+    await assert.rejects(() => recordLearningCall(root, 3, "Learn a public audit.", "low"), /must be 1 or 2/);
+    await assert.rejects(() => recordLearningCall(root, 2, "Learn a public audit.", "PRIVATE" as "low"),
+      /reasoning effort must be current or low/);
+    assert.deepEqual(await readdir(root), ["attempt-1-call.json"]);
+  } finally { await rm(root, {recursive:true,force:true}); }
 });
 
 test("capture is bounded to two attempts and preserves earlier bytes on accidental reuse", async () => {
