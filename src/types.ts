@@ -151,6 +151,8 @@ export type WorkCard = {
 
 export type Job = {
   id: string;
+  learningParentJobId?: string;
+  learningRootJobId?: string;
   kind: "self_development";
   status: "authorized" | "running" | "blocked" | "verified" | "failed";
   workCard: WorkCard;

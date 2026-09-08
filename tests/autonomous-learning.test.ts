@@ -110,6 +110,11 @@ test("a fixture-generated verified artifact remains SHADOW after restart without
     assert.equal(after.candidateDigest,before.candidateDigest);assert.equal(after.stage,"SHADOW");
     assert.equal(after.artifactRelativePath,before.artifactRelativePath);
     assert.equal((await rebooted.routeOperationalSkillContext("Catalog echo")).length,0);
+    const memories=await rebooted.recallMemory({query:"Validate catalog rows",scope:"global",categories:["skill"]});
+    const retained=memories.relevant.find(memory=>memory.id===`learning-skill-${after.id}`);
+    assert.ok(retained);
+    assert.ok(retained.dependencies.includes(`candidate:${after.candidateDigest}`));
+    assert.match(retained.statement,/SHADOW.*profit are not established/);
     assert.equal(calls,1);
   } finally {await rm(directory,{recursive:true,force:true});}
 });
@@ -153,5 +158,71 @@ test("real rejection survives restart and reaches a later free-generator prompt"
     assert.match(prompt,/computed property access is prohibited/);
     assert.match(prompt,/untrusted evidence/i);
     assert.equal((await kernel.getStatus()).mutations.length,0);
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
+
+
+test("actionable rejection queues one identical-contract follow-up across restart, then stops", async()=>{
+  const directory=await mkdtemp(join(tmpdir(),"sara-learning-recursive-"));
+  try {
+    let {kernel}=await setupQueue(directory);
+    const root=await enqueue(kernel,3);
+    let calls=0;
+    const generator={id:"recursive-rejection-fixture",external:false,maximumCostUsd:0,async generate(input: Parameters<import("../src/types.ts").CandidateGenerator["generate"]>[0]){
+      calls++;
+      if(calls===2) assert.ok(input.memoryContext.memories.some((memory: {source:string})=>memory.source.startsWith(`sara://learning-failure/${sha256(request.objective)}/`)));
+      return {schemaVersion:1 as const,skillName:"Rows",summary:"Read rows",source:"export function runSkill(input: unknown): unknown { return (input as string[])[0]; }",tests:[{name:"first",input:["A"],expected:"A"}],limitations:["Fixture, not learned code"]};
+    }};
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
+    let jobs=(await kernel.getStatus()).jobs;
+    const child=jobs.find(job=>job.learningParentJobId===root.id);
+    assert.ok(child);assert.equal(jobs.length,2);
+    assert.equal(child.learningRootJobId,root.id);
+    for(const key of ["objective","acceptanceCriteria","maximumBudgetUsd","expectedOwnerValue","requiredCapabilities"] as const) assert.deepEqual(child.workCard[key],root.workCard[key]);
+    kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
+    assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:child.id});
+    jobs=(await kernel.getStatus()).jobs;
+    assert.equal(jobs.length,2);assert.equal(jobs.filter(job=>job.learningParentJobId===root.id).length,1);
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");
+    assert.equal(calls,2);
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
+
+test("unknown failures and zero-value objectives cannot create a recursive backlog",async()=>{
+  for(const actionable of [true,false]) {
+    const directory=await mkdtemp(join(tmpdir(),"sara-learning-no-recursion-"));
+    try {
+      const {kernel}=await setupQueue(directory);await enqueue(kernel,actionable?0:2);
+      await kernel.runNextAutonomousLearningCycle({id:"no-recursion-fixture",external:false,maximumCostUsd:0,async generate(){
+        if(!actionable) throw new Error("Unknown provider failure");
+        return {schemaVersion:1,skillName:"Rows",summary:"Read rows",source:"export function runSkill(input: unknown): unknown { return (input as string[])[0]; }",tests:[{name:"first",input:["A"],expected:"A"}],limitations:["Fixture"]};
+      }});
+      assert.equal((await kernel.getStatus()).jobs.length,1);
+    } finally {await rm(directory,{recursive:true,force:true});}
+  }
+});
+
+test("an evidence-responsive fixture repairs a rejected hypothesis and retains verified memory",async()=>{
+  const directory=await mkdtemp(join(tmpdir(),"sara-learning-recovery-"));
+  try {
+    let {kernel}=await setupQueue(directory);await enqueue(kernel,2);let calls=0;
+    const generator: import("../src/types.ts").CandidateGenerator={id:"responsive-recovery-fixture",external:false,maximumCostUsd:0,async generate(input){
+      calls++;
+      const failure=input.memoryContext?.memories.find(memory=>memory.source.startsWith(`sara://learning-failure/${sha256(input.objective)}/`));
+      if(failure) {
+        assert.match(failure.statement,/computed property access/);
+        return {schemaVersion:1,skillName:"Preserve rows",summary:"Return the input directly without indexed access",source:"export function runSkill(input: unknown): unknown { return input; }",tests:[{name:"rows",input:["A"],expected:["A"]},{name:"empty",input:[],expected:[]}],limitations:["Scripted responsiveness; not real model learning"]};
+      }
+      return {schemaVersion:1,skillName:"Read rows",summary:"Extract a row",source:"export function runSkill(input: unknown): unknown { return (input as string[])[0]; }",tests:[{name:"first",input:["A"],expected:"A"}],limitations:["Fixture"]};
+    }};
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
+    kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"verified_shadow");
+    const status=await kernel.getStatus();assert.equal(status.jobs.filter(job=>job.status==="verified").length,1);
+    assert.equal(status.jobs.filter(job=>job.status==="failed").length,1);assert.equal(calls,2);
+    const rebooted=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
+    const memory=await rebooted.recallMemory({query:"Validate catalog rows",scope:"global",categories:["skill","failure"]});
+    assert.ok(memory.relevant.some(item=>item.category==="failure"));assert.ok(memory.relevant.some(item=>item.category==="skill"));
+    assert.equal((await rebooted.routeOperationalSkillContext("Preserve rows")).length,0);
   } finally {await rm(directory,{recursive:true,force:true});}
 });

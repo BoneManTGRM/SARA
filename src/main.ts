@@ -137,7 +137,7 @@ console.log(`SARA revenue readiness proof ${JSON.stringify({
   commercialTermsApproval: approvedTermsDigest === compiledTerms?.digest ? "exact" : termsApproved ? "v1_to_v2_migration" : "missing",
   reparodynamicCodingMode,
 })}`);
-const client = apiKey ? new OpenAIResponsesClient({ apiKey }) : null;
+const client = apiKey ? kernel.guardPaidModelClient(new OpenAIResponsesClient({ apiKey })) : null;
 if (reparodynamicCodingMode !== "off" && !client) {
   throw new Error("Reparodynamic coding requires OPENAI_API_KEY when its mode is shadow or canary.");
 }
@@ -188,7 +188,7 @@ const server = createSaraServer(kernel, {
             const status = await kernel.getStatus();
             if (status.emergencyStopped || !status.constitution.verified) throw new Error("CODING_DISPATCH_AUTHORITY_REVOKED");
           } });
-        return new OpenAIResponsesClient({ apiKey: apiKey!, fetchImpl: journal.fetch });
+        return kernel.guardPaidModelClient(new OpenAIResponsesClient({ apiKey: apiKey!, fetchImpl: journal.fetch }));
       },
       ...(nativeVerifier ? { nativeVerifier } : {}),
       stateDirectory,

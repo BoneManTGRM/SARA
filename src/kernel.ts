@@ -1971,6 +1971,17 @@ export class SaraKernel {
           status: "verified",
           mutationId: mutation.id,
         });
+        if (runningJob.workCard.requiredCapabilities.includes("autonomous-learning")) {
+        const skillMemory: MemoryRecord = {
+          id: `learning-skill-${mutation.id}`, category: "skill", scope: "global",
+          source: `sara://learning-skill/${sha256(runningJob.workCard.objective)}/${mutation.id}`,
+          statement: `${runningJob.workCard.objective.slice(0,300)}: Retained kernel-verified SHADOW artifact ${artifact.candidateDigest}. Producer tests passed; external acceptance, operational execution and profit are not established.`,
+          confidence: 1, verification: "measured", observedAt: evidence.observedAt, lastValidatedAt: evidence.observedAt,
+          dependencies: [`candidate:${artifact.candidateDigest}`, `mutation:${mutation.id}`],
+          tags: ["verified-outcome", "shadow", "learning-skill"], status: "active",
+        };
+        await this.#store.append("memory_recorded", principal, skillMemory);
+        }
         await this.#store.append("self_build_cycle_completed", principal, {
           jobId,
           mutationId: mutation.id,
@@ -2069,7 +2080,32 @@ export class SaraKernel {
         },
       });
       return {status:result.job.status === "verified" && result.mutation.stage === "SHADOW" ? "verified_shadow" : "failed",jobId:reservation.jobId};
-    } catch {return {status:"failed",jobId:reservation.jobId};}
+    } catch (error) {
+      await this.queueLearningFollowup(reservation.jobId, reservation.mandateDigest, error);
+      return {status:"failed",jobId:reservation.jobId};
+    }
+  }
+
+  private queueLearningFollowup(jobId: string, mandateDigest: string, error: unknown): Promise<void> {
+    return this.serializeMutation(async () => {
+      const state = await this.state();
+      const parent = state.jobs.find(job => job.id === jobId);
+      if (!parent || parent.status !== "failed" || parent.learningParentJobId || parent.workCard.expectedOwnerValue <= 0 ||
+        state.jobs.some(job => job.learningParentJobId === jobId)) return;
+      const feedback = boundedCandidateFailureFeedback(error);
+      if (!/^(?:Generated skill is not a pure isolated candidate:|Generated skill contains invalid TypeScript syntax\.|Generated skill failed TypeScript verification with |Behavioral verification mismatches:)/u.test(feedback)) return;
+      const failure = state.memories.find(memory => memory.id === `learning-failure-${jobId}`);
+      if (!failure?.dependencies.some(value => value.startsWith("candidate:"))) return;
+      const now = new Date().toISOString();
+      const request: RoutineActionRequest = {id:`learning-followup:${jobId}`,kind:"business_candidate_development",targetId:jobId,
+        channel:"internal",serviceId:"skill-learning",estimatedCostUsd:0,external:false,requestedAt:now,platform:"owner_site"};
+      if (state.standingMandate?.digest !== mandateDigest || evaluateRoutineAction({mandate:state.standingMandate,request,emergencyStopped:state.emergencyStopped}).outcome !== "automatic") return;
+      await this.authorize(SARA_PRINCIPAL,{action:"sandbox_development",targetId:jobId,external:false});
+      const workCard = compileWorkCard({...parent.workCard,availableCapabilities:state.capabilities});
+      const child: Job = {id:randomUUID(),kind:"self_development",status:"authorized",workCard,
+        learningParentJobId:jobId,learningRootJobId:parent.learningRootJobId ?? jobId};
+      await this.#store.append("job_created",SARA_PRINCIPAL,child);
+    });
   }
 
   recordMutationEvidence(
@@ -2212,6 +2248,82 @@ export class SaraKernel {
       }
       await this.authorize(principal, { action: mode, targetId, external: true });
     });
+  }
+
+  /** Owner-controlled allocation in the existing audit store; this grants no task authority. */
+  configureModelBudget(principal: Principal, input: {
+    monthlyLimitUsd: number; openingChargeUsd: number;
+    inputUsdPerMillionTokens: number; outputUsdPerMillionTokens: number;
+  }, approval?: OwnerApproval): Promise<void> {
+    return this.serializeMutation(async () => {
+      const {monthlyLimitUsd,openingChargeUsd,inputUsdPerMillionTokens,outputUsdPerMillionTokens}=input;
+      if (![monthlyLimitUsd,openingChargeUsd].every(value=>Number.isFinite(value)&&value>=0&&value<=50&&Math.abs(value*100-Math.round(value*100))<1e-8) ||
+        ![inputUsdPerMillionTokens,outputUsdPerMillionTokens].every(value=>Number.isFinite(value)&&value>0&&value<=1000)) {
+        throw new Error("Model allocation requires whole-cent amounts from $0 through $50 and positive reviewed token prices.");
+      }
+      await this.authorize(principal,{action:"owner_funded_ceiling_change",targetId:`model-budget:${sha256(canonicalJson(input))}`,external:false,...(approval?{approval}:{})});
+      const now=new Date().toISOString();
+      const events=(await this.state()).events;
+      const opening=events.filter(event=>event.type==="model_budget_opening_charge"&&event.occurredAt.slice(0,7)===now.slice(0,7))
+        .reduce((sum,event)=>sum+(event.data as {amountMicrousd:number}).amountMicrousd,0);
+      // An allocation edit can tighten a cap, but cannot erase an earlier opening charge.
+      const additional=Math.round(openingChargeUsd*1_000_000)-opening;
+      if(additional<0) throw new Error("A recorded opening charge cannot be reduced.");
+      if(additional>0) await this.#store.append("model_budget_opening_charge",principal,{amountMicrousd:additional});
+      await this.#store.append("model_budget_configured",principal,{monthlyLimitUsd,inputUsdPerMillionTokens,outputUsdPerMillionTokens});
+    });
+  }
+
+  async modelBudgetStatus(): Promise<{
+    configured:boolean; month:string; monthlyLimitUsd:number; reservedUsd:number; remainingUsd:number;
+  }> {
+    const state=await this.state();
+    const month=new Date().toISOString().slice(0,7);
+    const config=state.events.filter(event=>event.type==="model_budget_configured").at(-1)?.data as {monthlyLimitUsd:number}|undefined;
+    const reserved=state.events.filter(event=>["model_budget_reserved","model_budget_opening_charge"].includes(event.type)&&event.occurredAt.slice(0,7)===month)
+      .reduce((sum,event)=>sum+(event.data as {amountMicrousd:number}).amountMicrousd,0);
+    const limit=config?.monthlyLimitUsd??0;
+    return {configured:Boolean(config),month,monthlyLimitUsd:limit,reservedUsd:reserved/1_000_000,remainingUsd:Math.max(0,Math.round(limit*1_000_000)-reserved)/1_000_000};
+  }
+
+  /** Wrap each runtime paid client. Existing per-task authorization still applies. */
+  guardPaidModelClient(client: WorkerModelClient): WorkerModelClient {
+    if(client.routeKey!=="openai:gpt-5.6-luna:paid") throw new Error("No reviewed shared-budget pricing route for this client.");
+    return {
+      routeKey:client.routeKey,maximumWallTimeMs:client.maximumWallTimeMs*2,
+      countInputTokens:prompt=>client.countInputTokens(prompt),
+      execute:async input=>{
+        if(!(await this.modelBudgetStatus()).configured) throw new Error("Owner model allocation is not configured; no paid generation dispatched.");
+        const inputTokens=await client.countInputTokens(input.prompt);
+        if(!Number.isSafeInteger(inputTokens)||inputTokens<0||!Number.isSafeInteger(input.maximumOutputTokens)||input.maximumOutputTokens<1) throw new Error("Cannot reserve uncertain model token bounds.");
+        const reservationId=await this.serializeMutation(async()=>{
+          const state=await this.state();
+          if(state.emergencyStopped) throw new Error("Emergency stop blocks model dispatch.");
+          if(state.events.some(event=>event.type==="model_budget_bound_violation")) throw new Error("Model usage exceeded its reserved bounds; owner reconciliation is required.");
+          const config=state.events.filter(event=>event.type==="model_budget_configured").at(-1)?.data as {
+            monthlyLimitUsd:number;inputUsdPerMillionTokens:number;outputUsdPerMillionTokens:number;
+          }|undefined;
+          if(!config) throw new Error("Owner model allocation is not configured.");
+          const status=await this.modelBudgetStatus();
+          const amountMicrousd=Math.ceil(inputTokens*config.inputUsdPerMillionTokens+input.maximumOutputTokens*config.outputUsdPerMillionTokens);
+          if(!Number.isSafeInteger(amountMicrousd)||amountMicrousd<1||amountMicrousd>Math.round(status.remainingUsd*1_000_000)) throw new Error("Shared model allowance exhausted; no paid generation dispatched.");
+          const id=randomUUID();
+          await this.#store.append("model_budget_reserved",SARA_PRINCIPAL,{id,routeKey:client.routeKey,amountMicrousd,inputTokens,maximumOutputTokens:input.maximumOutputTokens,promptDigest:sha256(input.prompt)});
+          return id;
+        });
+        // Never release a reservation on errors, crashes, or absent usage evidence.
+        const result=await client.execute(input);
+        await this.serializeMutation(async()=>{
+          if(!Number.isSafeInteger(result.inputTokens)||result.inputTokens<0||result.inputTokens>inputTokens||
+            !Number.isSafeInteger(result.billableOutputTokens)||result.billableOutputTokens<0||result.billableOutputTokens>input.maximumOutputTokens) {
+            await this.#store.append("model_budget_bound_violation",SARA_PRINCIPAL,{reservationId});
+            throw new Error("Model returned usage outside the reserved token bounds.");
+          }
+          await this.#store.append("model_budget_usage_observed",SARA_PRINCIPAL,{reservationId,inputTokens:result.inputTokens,billableOutputTokens:result.billableOutputTokens});
+        });
+        return result;
+      },
+    };
   }
 
   activateStandingMandate(
