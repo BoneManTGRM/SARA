@@ -23,6 +23,12 @@ on:
         default: current
         type: choice
         options: [current, low]
+      thinking_mode:
+        description: Template diagnostic; current preserves behavior, disabled requests no thinking
+        required: false
+        default: current
+        type: choice
+        options: [current, disabled]
   push:
     branches: [main]
     paths:
@@ -67,6 +73,7 @@ jobs:
           SARA_PUBLIC_DRAFT_APPROVED: ${{ github.event_name == 'push' || inputs.public_draft_approved }}
           SARA_RETAIN_LEARNING_EVIDENCE: ${{ inputs.retain_learning_evidence == true }}
           SARA_QUALIFICATION_REASONING_EFFORT: ${{ inputs.reasoning_effort || 'current' }}
+          SARA_QUALIFICATION_THINKING_MODE: ${{ inputs.thinking_mode || 'current' }}
         run: npm run executor:cloudflare
       - name: Preserve bounded learning evidence
         if: ${{ always() && inputs.retain_learning_evidence == true }}

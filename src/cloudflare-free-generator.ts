@@ -31,6 +31,7 @@ type CloudflareGeneratorOptions = {
   repairProposal?: SkillCandidateProposal;
   repairFeedback?: string;
   reasoningEffort?: "low";
+  thinkingMode?: "disabled";
   fetcher?: Fetcher;
 };
 
@@ -39,6 +40,13 @@ export function cloudflareQualificationReasoningEffort(value: unknown): "low" | 
   if (value === undefined || value === "current") return undefined;
   if (value === "low") return "low";
   throw new Error("Cloudflare qualification reasoning effort must be current or low.");
+}
+
+/** Opt-in template diagnostic; this does not assert the provider honors the setting. */
+export function cloudflareQualificationThinkingMode(value: unknown): "disabled" | undefined {
+  if (value === undefined || value === "current") return undefined;
+  if (value === "disabled") return "disabled";
+  throw new Error("Cloudflare qualification thinking mode must be current or disabled.");
 }
 
 function requireCredentials(options: CloudflareGeneratorOptions): void {
@@ -226,6 +234,7 @@ export function createCloudflareFreeCandidateGenerator(
 ): CandidateGenerator {
   requireCredentials(options);
   const reasoningEffort = cloudflareQualificationReasoningEffort(options.reasoningEffort);
+  const thinkingMode = cloudflareQualificationThinkingMode(options.thinkingMode);
   const fetcher = options.fetcher ?? fetch;
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/ai/v1/chat/completions`;
   return {
@@ -255,6 +264,7 @@ export function createCloudflareFreeCandidateGenerator(
           max_completion_tokens: 8_192,
           seed: 1,
           ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+          ...(thinkingMode ? { chat_template_kwargs: { enable_thinking: false } } : {}),
         }),
       });
       const declaredLength = Number(response.headers.get("content-length") ?? "0");

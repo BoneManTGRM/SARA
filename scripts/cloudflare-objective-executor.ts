@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { boundedCandidateFailureFeedback, createCloudflareFreeCandidateGenerator, cloudflareQualificationReasoningEffort } from "../src/cloudflare-free-generator.ts";
+import { boundedCandidateFailureFeedback, createCloudflareFreeCandidateGenerator, cloudflareQualificationReasoningEffort, cloudflareQualificationThinkingMode } from "../src/cloudflare-free-generator.ts";
 import { recordLearningCall, recordLearningOutcome, recordLearningProposal, type LearningProposalReceipt } from "../src/cloudflare-learning-evidence.ts";
 import { GithubDraftPullRequestPublisher } from "../src/github-draft-publisher.ts";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
@@ -31,6 +31,7 @@ const ref = required("GITHUB_REF");
 const runId = required("GITHUB_RUN_ID");
 const objective = required("SARA_BUILD_OBJECTIVE");
 const reasoningEffort = cloudflareQualificationReasoningEffort(process.env.SARA_QUALIFICATION_REASONING_EFFORT);
+const thinkingMode = cloudflareQualificationThinkingMode(process.env.SARA_QUALIFICATION_THINKING_MODE);
 
 if (repository !== "BoneManTGRM/SARA" || ref !== "refs/heads/main") {
   throw new Error("Cloudflare self-build may run only from BoneManTGRM/SARA main.");
@@ -73,13 +74,14 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     repairProposal: previousProposal,
     repairFeedback,
     reasoningEffort,
+    thinkingMode,
   });
   try {
     const execution = await kernel.runSelfBuildCycle(SARA_PRINCIPAL, job.id, {
       ...cloudflare,
       id: `${cloudflare.id}-attempt-${attempt}`,
       async generate(input) {
-        if (retainEvidence) await recordLearningCall(evidenceDirectory, attempt, input.objective, reasoningEffort);
+        if (retainEvidence) await recordLearningCall(evidenceDirectory, attempt, input.objective, reasoningEffort, thinkingMode);
         const generated = await cloudflare.generate(input);
         if (generated.candidateKind === "typescript_program") {
           throw new Error("The Cloudflare pure-skill executor returned an unauthorized program candidate.");
