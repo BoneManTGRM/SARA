@@ -37,7 +37,7 @@ const candidateSource=join(root,'src',`.recovery-v3-candidate-${randomUUID()}.ts
 const scratch=mkdtempSync(join(tmpdir(),'sara-recovery-'));
 globalThis.fetch=async()=>{throw Error('OFFLINE_EVALUATION_NO_NETWORK');};
 const baseFixtures=JSON.parse(readFileSync(join(here,phase+'.json'),'utf8'));
-const fixtures=baseFixtures.flatMap((f:any)=>settings.policies.map((policy:string)=>({...f,baseId:f.id,id:f.id+'@'+policy,policy})));
+const fixtures=baseFixtures.flatMap((f:any)=>settings.policies.map((policy:string)=>({...f,baseId:f.id,id:f.id+'--policy--'+policy,policy})));
 const variants=baselineOnly?['A','B']:['A','B','C'];
 const rows:any[]=[];
 const childEnv={PATH:process.env.PATH,LANG:'C.UTF-8',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'};
@@ -46,7 +46,7 @@ function fresh(f:any,name:string){
   const dir=join(scratch,name);mkdirSync(join(dir,'src'),{recursive:true});
   writeFileSync(join(dir,'src/settings.json'),JSON.stringify(f.initial,null,2)+'\n');
   git(dir,['init','-q']);git(dir,['add','.']);
-  git(dir,['-c','user.name=Offline Fixture','-c','user.email=fixture@invalid','commit','-qm','synthetic base']);
+  git(dir,['-c','user.name=Offline Fixture','-c','user.email=fixture--policy--invalid','commit','-qm','synthetic base']);
   return dir;
 }
 function check(dir:string,f:any,privateGrade:boolean){
@@ -139,7 +139,7 @@ try {
   let gate:any=null;
   if(!baselineOnly){
     const losses=table.filter((t:any)=>t.variants.B.resolved&&!t.variants.C.resolved).map((t:any)=>t.caseId);
-    const savings=table.filter((t:any)=>t.caseId.endsWith('@unresponsive')&&!t.variants.B.resolved&&!t.variants.C.resolved&&t.variants.C.modelRequests<=0.8*t.variants.B.modelRequests);
+    const savings=table.filter((t:any)=>t.caseId.endsWith('--policy--unresponsive')&&!t.variants.B.resolved&&!t.variants.C.resolved&&t.variants.C.modelRequests<=0.8*t.variants.B.modelRequests);
     const equal=table.filter((t:any)=>t.variants.A.resolved===t.variants.B.resolved&&t.variants.B.resolved===t.variants.C.resolved);
     const overhead=equal.map((t:any)=>({caseId:t.caseId,tools:t.variants.C.tools-t.variants.B.tools,tests:t.variants.C.tests-t.variants.B.tests,bMs:t.variants.B.medianMs,cMs:t.variants.C.medianMs,allowedMs:t.variants.B.medianMs*1.25+25}));
     const negatives=table.filter((t:any)=>fixtures.find((f:any)=>f.id===t.caseId)?.negative);

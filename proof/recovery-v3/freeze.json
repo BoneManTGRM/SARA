@@ -7,8 +7,9 @@
     "proof/recovery-v3/program.cjs": "4fb87b91d2f2bd300c1f3441f3a55034720e484e0fc672d0f9a90d6282da86bd",
     "proof/recovery-v3/heldout.json": "86fbe3a09bde95f4c9c291beb28e8c6de630155bdea87c6727a8ddbc55c69f84",
     "proof/recovery-v3/baseline-producer.txt": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
-    "proof/recovery-v3/run.mts": "2c23be6114830d13f347d03d32c0fe75e753004d99cc437b5eb87cf7882aa916",
+    "proof/recovery-v3/run.mts": "b1d66759c44fcd17e96f178e823e05be8c82fd9db1ddbfd9231f023b508d6c64",
     "proof/recovery-v3/development.json": "a2085fe93d597572c5c3aca17c6e2c9df7e477da1be096fa7150f98d213ec6d1",
     "docs/work-cards/recovery-stopping.md": "4152d3441b58e7dccbe7a40028adac142aee8e7084c0c80fed582aa8d7f784be"
-  }
+  },
+  "preCandidateCorrection": "Use repository-valid policy identifier separator after development startup rejected @; no candidate or held-out execution existed."
 }
