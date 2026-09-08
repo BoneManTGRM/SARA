@@ -69,9 +69,19 @@ async function defaultRunner(invocation: CommandInvocation): Promise<CommandResu
   }
 }
 
+export class PublicationCommandFailure extends Error {
+  readonly failureCode: "REPOSITORY_VERIFICATION_FAILED" | "PUBLICATION_COMMAND_FAILED";
+  readonly outputDigest: string;
+  constructor(result: CommandResult, label: string) {
+    super(`${label} failed with exit code ${result.exitCode}; output length ${result.stdout.length + result.stderr.length}.`);
+    this.failureCode = label === "Repository verification" ? "REPOSITORY_VERIFICATION_FAILED" : "PUBLICATION_COMMAND_FAILED";
+    this.outputDigest = sha256(canonicalJson({ stdout: result.stdout, stderr: result.stderr }));
+  }
+}
+
 function requireSuccess(result: CommandResult, label: string): CommandResult {
   if (result.exitCode !== 0) {
-    throw new Error(`${label} failed with exit code ${result.exitCode}; output length ${result.stdout.length + result.stderr.length}.`);
+    throw new PublicationCommandFailure(result, label);
   }
   return result;
 }

@@ -34,6 +34,8 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Prepare pinned verification compiler
+        run: node scripts/build-native-checker.mjs
       - name: Claim and verify at most one directive
         env:
           GH_TOKEN: ${{ github.token }}
