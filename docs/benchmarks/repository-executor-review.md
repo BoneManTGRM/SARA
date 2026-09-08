@@ -99,3 +99,32 @@ qualifies Node 18.20.4 on Bookworm. The public manifest declares no Node engine
 constraint. Axios-4731's direct Mocha command now explicitly exits after tests,
 as the newer Axios public command already does. Follow-up workflows select only
 changed/failed cases; they do not replace or shrink the frozen ten-task pilot.
+
+The first Bookworm Preact build reached npm but rejected npm 8's peer dependency
+resolution against the old lockfile. Its follow-up uses npm 6.14.18 (the npm
+major bundled with the original Node 14 runtime) with clean install, retaining
+the source lockfile instead of regenerating dependencies with current versions.
+
+Main advanced to 5a1144c while qualification ran. The integration preserves its
+maintenance workflow and combines both historical-grant rejection assertions.
+Only offline qualification pins are updated for the resulting kernel/server/main
+bytes; historical live pins and grants remain unchanged.
+
+Further retained diagnostics show the official container's hosts file was empty
+and localhost lookup failed. The adapter now uses Docker's `none` network driver
+without the redundant `network_disabled` switch; `none` keeps only loopback
+(https://docs.docker.com/engine/network/drivers/none/). No external network is
+granted. Preact-3454's normalization passed both official controls in run
+34174537166; Axios-4731's offline public suite passed in run 34174537169.
+Docusaurus's official image instead modifies package.json, which remains
+rejected pending inspection of its exact retained diff.
+
+Babel and Docusaurus still exceeded 2 GiB during accumulated Jest execution.
+The new public plan enumerates every test file, runs all of them in batches of
+four fresh Jest processes, preserves every failed batch, and keeps the same
+container time/memory limits. It does not remove test files or change grading.
+
+Axios-5085's official PASS_TO_PASS test demonstrably requires Postman Echo.
+The proposed exception is documented in `docs/work-cards/swe-judge-fixture-access.md`
+and is not enabled. The frozen benchmark cannot qualify as fully offline by
+silently dropping that test. No paid benchmark has started.

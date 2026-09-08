@@ -65,6 +65,11 @@ class CheckedContainer:
         git = ["git", "-c", "safe.directory=/testbed"]
         head = self.container.exec_run(git + ["rev-parse", "HEAD"], workdir="/testbed")
         clean = self.container.exec_run(git + ["status", "--porcelain", "--untracked-files=no"], workdir="/testbed")
+        if clean.exit_code == 0 and clean.output.strip():
+            initial_diff = self.container.exec_run(git + ["diff", "--no-ext-diff", "--no-textconv", "HEAD"], workdir="/testbed")
+            if initial_diff.exit_code or len(initial_diff.output) > 1024 * 1024:
+                raise ValueError("JUDGE_INITIAL_DIFF_UNAVAILABLE")
+            Path("image-tracked-diff.diff").write_bytes(initial_diff.output)
         # This pinned Preact image has an install-generated lockfile change.
         # Restore only that observed metadata file before any submitted patch;
         # retain the original diff and still demand a completely clean base.
@@ -100,7 +105,7 @@ class RestrictedContainers:
             raise ValueError("JUDGE_UNSAFE_CONTAINER_REQUEST")
         # The official grader requests SYS_ADMIN. Remove it; qualify compatible
         # tasks with the same official parser/tests and retain incompatibilities.
-        kwargs.update(network_disabled=True, network_mode="none", cap_add=[], cap_drop=["ALL"],
+        kwargs.update(network_disabled=False, network_mode="none", cap_add=[], cap_drop=["ALL"],
                       security_opt=["no-new-privileges"], mem_limit="2g", memswap_limit="2g",
                       nano_cpus=2_000_000_000, pids_limit=256,
                       labels={"sara.repositoryJudgeRun": self.run_id},

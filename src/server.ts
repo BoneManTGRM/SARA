@@ -1,3 +1,4 @@
+import { maintenanceRequestDigest, type MaintenanceRequest } from "./website-maintenance.ts";
 import { handleTelegramNicoProductionRequest } from "./telegram-nico-production.ts";
 import type { NativeCodingVerifier } from "./native-coding-verifier.ts";
 import { authenticateCodingBenchmarkRelay, type CodingBenchmarkRelayIdentity } from "./coding-benchmark-github-relay.ts";
@@ -1014,6 +1015,25 @@ async function handleAuthenticatedRequest(
   owner: OwnerSession,
   options: ServerOptions,
 ): Promise<void> {
+  if(url.pathname==="/api/website-maintenance/readiness" && request.method==="GET"){
+    json(response,200,{mode:"CANARY_CANDIDATE",maximumNewRecurringCostUsd:0,commercialIntake:false,publishingConnected:false,notificationConnected:false,liveDemonstrationVerified:false,blockers:["PERSISTENT_PROJECT_PUBLISHER_REQUIRED","DELIVERY_ACCOUNT_REQUIRED","COMMERCIAL_SERVICE_AND_PAYMENT_BINDING_REQUIRED"]});return;
+  }
+  const maintenanceResume=/^\/api\/website-maintenance\/jobs\/(maint_[a-f0-9]{32})\/resume$/.exec(url.pathname);
+  if(maintenanceResume){
+    if(request.method!=="POST"){json(response,405,{error:"Method not allowed."});return;}
+    const body=await readJson(request);
+    json(response,200,{job:await kernel.resumeWebsiteMaintenance(owner,maintenanceResume[1]!,String(body.approvedRequestDigest??""))});return;
+  }
+  if(url.pathname==="/api/website-maintenance/jobs"){
+    if(request.method==="GET"){json(response,200,{jobs:await kernel.listWebsiteMaintenance()});return;}
+    if(request.method==="POST"){
+      const body=await readJson(request);const input=body.request as MaintenanceRequest;
+      const digest=maintenanceRequestDigest(input);
+      if(body.approvedRequestDigest!==digest){json(response,400,{error:"Review and approve the exact maintenance request digest.",requestDigest:digest});return;}
+      json(response,201,{job:await kernel.submitWebsiteMaintenance(owner,input,digest)});return;
+    }
+    json(response,405,{error:"Method not allowed."});return;
+  }
   if (await handleOwnerCatalogRead(request, response, url, kernel, options)) return;
   if (await handleOwnerNicoOperation(request, response, url, kernel, owner, options)) return;
   if (await handleOwnerReportRead(request, response, url, kernel, options)) return;

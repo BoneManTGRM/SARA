@@ -28,6 +28,7 @@ class Containers:
 c=Containers();restricted=m.RestrictedContainers(c,tasks[0]['base_commit'],'run-1')
 restricted.create(image='image',cap_add=['SYS_ADMIN'])
 assert c.arguments['network_mode']=='none' and c.arguments['cap_add']==[] and c.arguments['cap_drop']==['ALL']
+assert c.arguments['network_disabled']==False
 assert c.arguments['mem_limit']=='2g' and c.arguments['pids_limit']==256
 assert c.arguments['labels']=={'sara.repositoryJudgeRun':'run-1'}
 assert c.arguments['extra_hosts']=={'localhost':'127.0.0.1'}

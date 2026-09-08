@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtemp, readFile, rm, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runKernelCodingBenchmark, assertKernelBenchmarkImplementation as assertExactImplementation } from "../src/repeat-kernel-benchmark.ts";
+import { assertKernelBenchmarkImplementation as assertExactImplementation } from "../src/repeat-kernel-benchmark.ts";
+import { runKernelCodingBenchmark } from "./helpers/maintenance-kernel-regression.ts";
 import { assertKernelBenchmarkImplementation as assertConsumedExactImplementation } from "../src/exact-reuse-kernel-benchmark.ts";
 import { assertKernelBenchmarkImplementation } from "../src/kernel-coding-benchmark.ts";
 import { assertRepositoryQualificationImplementation } from "../src/repository-qualification-pins.ts";
@@ -136,4 +137,11 @@ test("authority rejection before trial admission makes no provider request", asy
   await assert.rejects(runKernelCodingBenchmark({ directory: join(root,"trial"), benchmarkId: randomUUID(), apiKey: "SCRIPTED_NEVER_LIVE",
     executionKind: "scripted_offline", beforeDispatch: async () => { throw new Error("STOP"); }, fetchImpl: stub.fetchImpl }), /STOP/);
   assert.equal(stub.calls(), 0); assert.equal(stub.counts(), 0);
+}));
+
+test("offline current-kernel regression cannot dispatch with a real key or live execution", async () => inDirectory(async root => {
+ const stub=model();
+ await assert.rejects(runKernelCodingBenchmark({directory:join(root,"trial"),benchmarkId:randomUUID(),apiKey:"real-key-rejected",
+ executionKind:"scripted_offline",beforeDispatch:async()=>{},fetchImpl:stub.fetchImpl}),/OFFLINE_REGRESSION_ONLY/);
+ assert.equal(stub.calls(),0);assert.equal(stub.counts(),0);
 }));
