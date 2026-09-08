@@ -1,5 +1,6 @@
 import type { CandidateGenerator, SkillCandidateProposal } from "./types.ts";
 import { sha256 } from "./canonical.ts";
+import { GenomeLabTypecheckError } from "./genome-lab.ts";
 
 export const CLOUDFLARE_FREE_MODEL = "@cf/zai-org/glm-4.7-flash" as const;
 export const CLOUDFLARE_FREE_GENERATOR_ID = "cloudflare-free-pure-skill-v1" as const;
@@ -11,6 +12,18 @@ const MAX_OBJECTIVE_LENGTH = 1_000;
 
 /** Keep known verifier facts; never forward arbitrary provider or environment errors. */
 export function boundedCandidateFailureFeedback(error: unknown): string {
+  if (error instanceof GenomeLabTypecheckError && error.candidateKind === "skill") {
+    // Compiler text may quote candidate literals or verifier answers. Only expose
+    // bounded numeric locations in the producer's own source and fixed wording.
+    const locations = error.diagnostics.filter(diagnostic => diagnostic.file === "skill.ts" &&
+      [diagnostic.code, diagnostic.line, diagnostic.column].every(value => Number.isSafeInteger(value) && value > 0)
+    ).slice(0, 8).map(diagnostic =>
+      `TS${diagnostic.code} at skill.ts:${diagnostic.line}:${diagnostic.column}` +
+      (diagnostic.code === 18046 ? ": A value of type unknown must be narrowed before use." : "")
+    );
+    return [`Generated skill failed TypeScript verification with ${error.diagnostics.length} error(s).`,
+      ...locations].join("\n").slice(0, 8_192);
+  }
   const message = error instanceof Error ? error.message : String(error);
   if (/^Cloudflare candidate proposal was not valid JSON or was ambiguous\. complete_objects=\d{1,5}\. finish_reason=(?:stop|length|content_filter|tool_calls|function_call|unknown); prompt_tokens=(?:\d{1,7}|unknown); completion_tokens=(?:\d{1,7}|unknown)\.$/u.test(message)) return message;
   const source = /^Generated skill is not a pure isolated candidate: (imports and module loading are prohibited|computed property access is prohibited|the any type is prohibited|identifier (?:Bun|Date|Deno|EventSource|Function|Object|Proxy|Reflect|WebAssembly|WebSocket|XMLHttpRequest|eval|fetch|global|globalThis|module|navigator|performance|process|require|setImmediate|setInterval|setTimeout) is prohibited|property (?:__proto__|constructor|prototype) is prohibited)\.$/u;

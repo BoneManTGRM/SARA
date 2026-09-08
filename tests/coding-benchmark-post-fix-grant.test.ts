@@ -56,7 +56,7 @@ it("passes the new identity through the unchanged CLI and preserves equal ceilin
   assert.equal(spec.environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256, POST_FIX_CODING_BENCHMARK_GRANT.activationSha256);
 });
 
-it("retains the authorized PR111 task, hidden tests, model, controllers, verifier and CLI bytes", async () => {
+it("retains PR111 pins and permits only the recorded compiler-diagnostic delta in its verifier", async () => {
   const pinned = {
   "src/genome-lab.ts": "ab1427a29742c1f657df3544e36197fa6dfa7a0103c472faa4618e18fe0692da",
   "src/genome-lab-verifier.ts": "6c3618bd6ffac193265dd7f687388543a41d059b625ad1cdc800dc5f115721c9",
@@ -70,7 +70,21 @@ it("retains the authorized PR111 task, hidden tests, model, controllers, verifie
   "package-lock.json": "2af53c1b9447041cb7bc2ed9526f9c3fde51f395fb5a19c8482c90c35552bf0e"
 };
   for (const [path, expected] of Object.entries(pinned)) {
-    assert.equal(sha256(await readFile(new URL(`../${path}`, import.meta.url), "utf8")), expected, path);
+    let source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
+    if (path === "src/genome-lab.ts") {
+      // Keep the historical digest. Reversing only the reviewed error-metadata
+      // changes must recover its exact bytes; compiler/policy/test edits still fail.
+      // This does not authorize the changed verifier for a historical live run.
+      assert.notEqual(sha256(source), expected);
+      source = source.replace(
+        'constructor(diagnostics: readonly ts.Diagnostic[], projectDirectory: string,\n    readonly candidateKind: "program" | "skill" = "program") {\n    super(`Generated ${candidateKind} failed TypeScript verification with ${diagnostics.length} error(s).`);',
+        'constructor(diagnostics: readonly ts.Diagnostic[], projectDirectory: string) {\n    super(`Generated program failed TypeScript verification with ${diagnostics.length} error(s).`);',
+      ).replace(
+        'throw new GenomeLabTypecheckError(diagnostics, artifactDirectory, "skill");',
+        'throw new Error(`Generated skill failed TypeScript verification with ${diagnostics.length} error(s).`);',
+      );
+    }
+    assert.equal(sha256(source), expected, path);
   }
 });
 

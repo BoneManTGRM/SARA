@@ -57,8 +57,9 @@ export type GenomeLabCompilerDiagnostic = Readonly<{
 
 export class GenomeLabTypecheckError extends Error {
   readonly diagnostics: readonly GenomeLabCompilerDiagnostic[];
-  constructor(diagnostics: readonly ts.Diagnostic[], projectDirectory: string) {
-    super(`Generated program failed TypeScript verification with ${diagnostics.length} error(s).`);
+  constructor(diagnostics: readonly ts.Diagnostic[], projectDirectory: string,
+    readonly candidateKind: "program" | "skill" = "program") {
+    super(`Generated ${candidateKind} failed TypeScript verification with ${diagnostics.length} error(s).`);
     this.name = "GenomeLabTypecheckError";
     const root = `${projectDirectory.replaceAll("\\", "/")}/`;
     this.diagnostics = Object.freeze(diagnostics.map(diagnostic => {
@@ -568,7 +569,7 @@ export async function buildVerifiedSkillCandidate(
     ]);
     const diagnostics = semanticDiagnostics([skillPath, verificationPath]);
     if (diagnostics.length > 0) {
-      throw new Error(`Generated skill failed TypeScript verification with ${diagnostics.length} error(s).`);
+      throw new GenomeLabTypecheckError(diagnostics, artifactDirectory, "skill");
     }
     const runtimeDirectory = join(artifactDirectory, "runtime");
     await mkdir(runtimeDirectory, { mode: 0o700 });
