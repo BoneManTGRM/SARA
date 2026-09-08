@@ -1,0 +1,179 @@
+{
+  "description": "Post-evaluation descriptive audit; frozen gate unchanged",
+  "aggregate": {
+    "A": {
+      "resolved": 8,
+      "recoveryCases": [
+        "affine-prerequisites",
+        "clamp-bounds",
+        "discount-fee",
+        "regression-alternative",
+        "repeated-regression",
+        "misleading-output",
+        "deep-whole-file"
+      ],
+      "recoveries": 7,
+      "modelSubstituteRequests": 135,
+      "producerModelReservations": 136,
+      "tools": 197,
+      "publicTests": 41,
+      "gradingTestProcesses": 32,
+      "promptBytes": 889108,
+      "retainedRegressions": 0,
+      "unknownRegressionGrades": 2,
+      "explicitRegressionRollbacks": 0,
+      "sameContextDuplicateEditsExecuted": 0,
+      "suppressedDuplicateProposals": 0,
+      "suppressedScopeProposals": 0,
+      "exhausted": 1,
+      "gradeOutcomes": {
+        "completed": 10,
+        "failed": 1,
+        "blocked": 2
+      }
+    },
+    "B": {
+      "resolved": 3,
+      "recoveryCases": [
+        "regression-alternative",
+        "deep-whole-file"
+      ],
+      "recoveries": 2,
+      "modelSubstituteRequests": 151,
+      "producerModelReservations": 152,
+      "tools": 195,
+      "publicTests": 40,
+      "gradingTestProcesses": 32,
+      "promptBytes": 1161168,
+      "retainedRegressions": 0,
+      "unknownRegressionGrades": 2,
+      "explicitRegressionRollbacks": 2,
+      "sameContextDuplicateEditsExecuted": 0,
+      "suppressedDuplicateProposals": 10,
+      "suppressedScopeProposals": 4,
+      "exhausted": 1,
+      "gradeOutcomes": {
+        "completed": 10,
+        "failed": 1,
+        "blocked": 2
+      }
+    },
+    "C": {
+      "resolved": 7,
+      "recoveryCases": [
+        "affine-prerequisites",
+        "clamp-bounds",
+        "discount-fee",
+        "regression-alternative",
+        "misleading-output",
+        "deep-whole-file"
+      ],
+      "recoveries": 6,
+      "modelSubstituteRequests": 139,
+      "producerModelReservations": 140,
+      "tools": 195,
+      "publicTests": 40,
+      "gradingTestProcesses": 32,
+      "promptBytes": 1094175,
+      "retainedRegressions": 0,
+      "unknownRegressionGrades": 2,
+      "explicitRegressionRollbacks": 2,
+      "sameContextDuplicateEditsExecuted": 0,
+      "suppressedDuplicateProposals": 2,
+      "suppressedScopeProposals": 4,
+      "exhausted": 1,
+      "gradeOutcomes": {
+        "completed": 10,
+        "failed": 1,
+        "blocked": 2
+      }
+    }
+  },
+  "frozenGate": {
+    "gains": [
+      "affine-prerequisites",
+      "clamp-bounds",
+      "discount-fee",
+      "misleading-output"
+    ],
+    "families": [
+      "affine",
+      "clamp",
+      "discount"
+    ],
+    "losses": [],
+    "overhead": [
+      {
+        "caseId": "straight-repair",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 72,
+        "cMs": 87,
+        "allowedMs": 115
+      },
+      {
+        "caseId": "regression-alternative",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 112,
+        "cMs": 126,
+        "allowedMs": 165
+      },
+      {
+        "caseId": "public-green-hidden-bug",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 75,
+        "cMs": 72,
+        "allowedMs": 118.75
+      },
+      {
+        "caseId": "deep-whole-file",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 154,
+        "cMs": 150,
+        "allowedMs": 217.5
+      },
+      {
+        "caseId": "unsolvable-test-limit",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 233,
+        "cMs": 254,
+        "allowedMs": 316.25
+      },
+      {
+        "caseId": "verifier-unavailable",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 66,
+        "cMs": 75,
+        "allowedMs": 107.5
+      },
+      {
+        "caseId": "authority-interruption",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 32,
+        "cMs": 30,
+        "allowedMs": 65
+      },
+      {
+        "caseId": "uncertain-dispatch",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 33,
+        "cMs": 34,
+        "allowedMs": 66.25
+      }
+    ],
+    "noAddedRegressions": true,
+    "negativesRejected": true,
+    "accepted": true
+  },
+  "evidenceSha256": {
+    "producer-freeze.json": "96117797aabde50b241ee953edd7f53764cb8b9fa41b394cbd77f3e438591485",
+    "results.json": "214c222ba619b7d2741af7f713018697a6eac890561e097c3e891c20ed229b1c"
+  }
+}
