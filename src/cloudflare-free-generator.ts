@@ -8,6 +8,16 @@ const MAX_RESPONSE_BYTES = 128 * 1024;
 const MAX_PROPOSAL_BYTES = 64 * 1024;
 const MAX_OBJECTIVE_LENGTH = 1_000;
 
+/** Keep known verifier facts; never forward arbitrary provider or environment errors. */
+export function boundedCandidateFailureFeedback(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const source = /^Generated skill is not a pure isolated candidate: (imports and module loading are prohibited|computed property access is prohibited|the any type is prohibited|identifier (?:Bun|Date|Deno|EventSource|Function|Object|Proxy|Reflect|WebAssembly|WebSocket|XMLHttpRequest|eval|fetch|global|globalThis|module|navigator|performance|process|require|setImmediate|setInterval|setTimeout) is prohibited|property (?:__proto__|constructor|prototype) is prohibited)\.$/u;
+  if (source.test(message) || message === "Generated skill contains invalid TypeScript syntax.") return message;
+  if (/^Generated skill failed TypeScript verification with [0-9]+ error\(s\)\.$/u.test(message)) return message;
+  const behavioral = message.match(/Behavioral verification mismatches: [^\n\r]*/u);
+  return (behavioral?.[0] ?? "Candidate verification failed; no earlier gate is asserted to have passed.").slice(0, 8_192);
+}
+
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 type CloudflareGeneratorOptions = {
@@ -55,6 +65,7 @@ function proposalPrompt(
     "",
     "The source must be deterministic pure TypeScript and export only runSkill(input: unknown): unknown.",
     "Use no imports, network, filesystem, secrets, timers, dynamic code, outreach, applications, contracts, spending, deployment, account creation, payment activity, Date, randomness, or ambient authority.",
+    "The existing source gate also prohibits Object, the any type, computed property access (including array[index]), and prototype/constructor access. Use explicit named fields and array methods or for-of iteration instead.",
     "Include 2–8 behavioral tests. Keep all output below 64 KiB. Do not use Markdown fences or commentary.",
     "Before responding, dry-run runSkill for every test. Each expected value must exactly equal the complete observed return value after recursive object-key normalization.",
     `Constitution digest: ${input.constitutionDigest}`,
@@ -63,9 +74,9 @@ function proposalPrompt(
   if (repairProposal) {
     prompt.push(
       "",
-      "The previous proposal passed source and TypeScript restrictions but failed isolated behavioral verification.",
+      "The previous proposal was rejected. Do not assume source, TypeScript, or behavioral checks passed; use the recorded verifier evidence below.",
       "Repair the source and/or exact expected values, return the complete replacement proposal, and do not omit any required field.",
-      `Bounded independent verifier feedback: ${repairFeedback || "Behavioral outputs did not exactly match the proposed expected values."}`,
+      `Bounded independent verifier feedback: ${repairFeedback || "Candidate was rejected; detailed verifier evidence is unavailable."}`,
       `Previous rejected proposal: ${JSON.stringify(repairProposal)}`,
     );
   }
@@ -164,11 +175,19 @@ function parseProposal(content: string): SkillCandidateProposal {
 
 function extractContent(value: unknown): string {
   const response = value as {
-    choices?: Array<{ message?: { content?: unknown } }>;
+    choices?: Array<{ finish_reason?: unknown; message?: { content?: unknown } }>;
+    usage?: { prompt_tokens?: unknown; completion_tokens?: unknown };
   };
   const content = response?.choices?.[0]?.message?.content;
   if (typeof content !== "string") {
-    throw new Error("Cloudflare returned no candidate content.");
+    // Safe metadata distinguishes truncation from an absent response without
+    // logging provider text, reasoning, request contents, or credentials.
+    const rawReason = response?.choices?.[0]?.finish_reason;
+    const reason = typeof rawReason === "string" && ["stop", "length", "content_filter", "tool_calls", "function_call"].includes(rawReason)
+      ? rawReason : "unknown";
+    const safeTokens = (count: unknown): string => typeof count === "number" && Number.isSafeInteger(count) && count >= 0 && count <= 1_000_000
+      ? String(count) : "unknown";
+    throw new Error(`Cloudflare returned no candidate content. finish_reason=${reason}; prompt_tokens=${safeTokens(response?.usage?.prompt_tokens)}; completion_tokens=${safeTokens(response?.usage?.completion_tokens)}.`);
   }
   return content;
 }
