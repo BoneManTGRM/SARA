@@ -3,6 +3,11 @@
 This is engineering and grading-control evidence, not a SARA benchmark score.
 No paid Luna requests have been made and no fresh allowance is activated.
 
+**All ten public environments and all ten official base/reference grading
+controls now have successful execution evidence.** The latest source-qualified
+commit is `918644ee2f3096abcbcf99d8959eef9411989db7`. The remaining gates are the
+durable runner, exact source/image registration and authenticated fresh allowance.
+
 The candidate now contains the real-repository producer, independent kernel
 verification, matched twenty-outcome orchestration, Luna token-count/response
 adapter, shared conservative budget, and authenticated one-use kernel permits.
@@ -46,7 +51,7 @@ introduced. Every producer result is frozen before the first official grade.
   reached the unchanged 900-second command timeout. Its artifact is
   `10038644763`, SHA-256
   `8899581987d7d05d8f84700e19696dd2fac65341d892e676e9df5bd34fea3562`.
-  Case 9 remains unqualified. That failure also exposed missing timeout logs;
+  Case 9 was still unqualified at that checkpoint. That failure also exposed missing timeout logs;
   the follow-up preserves bounded command output and streams active batch
   logs so a stalled browser can be diagnosed without widening limits.
 - Diagnostic-only run `34180848807` used a 120-second deadline and retained
@@ -61,6 +66,14 @@ introduced. Every producer result is frozen before the first official grade.
   Docker's standard `--init` and a real orphan-reaping proof. PID exhaustion
   is a plausible explanation for the later browser pause, not yet a measured
   cause of that run; no timeout or resource cap is increased.
+- Full public run `34181744126` passed case 9 on
+  `918644ee2f3096abcbcf99d8959eef9411989db7`: all 98 discovered test files ran
+  exactly once across 25 batches. The log reports 1,177 completed tests and
+  11 upstream skips, with no rejected batches, compiler errors or OOM kills.
+  Its artifact is `10039193102`, SHA-256
+  `071131a874abbfab268d4e7ea24aba2543be04164688d1fb690468dcb8d8d398`.
+  The resolved public image is
+  `sha256:ca0cfdc52b2c95cde4a5ac86a57a3bc2c8f9c08f734eb5d31f9126a17ad7f7f8`.
 - Real Docker proof `34177382219` passed both scripted repository producers,
   fresh kernel verification, poison rejection and artifact-tamper rejection.
   It made zero provider calls and zero benchmark attempts.
@@ -72,9 +85,15 @@ introduced. Every producer result is frozen before the first official grade.
 - The diagnostics follow-up on `6837024c11331c16665c48423f7ba216cc8d2bf9`
   passed local `npm run verify` with 1,076 tests and all proofs. Docker proof
   `34180848927` and CodeQL `34180851950` also passed.
+- The init-process follow-up passed local `npm run verify` with 1,076 tests
+  and all proofs. CI `34181746561`, CodeQL `34181746545`, and real Docker proof
+  `34181743978` passed on the latest qualified source. The Docker artifact
+  proves all 16 orphan descendants were reaped, zero zombies remained, and
+  `pids.current` returned from 9 to 9 with no PID-limit events. Both scripted
+  producer arms, fresh verification and tamper controls also passed.
 
-All original failed artifacts remain evidence. Each new environment fix still
-needs its real Docker run; passing offline tests alone does not qualify it.
+All original failed artifacts remain evidence. These are infrastructure and
+reference-repair controls, not paid SARA attempts or benchmark scores.
 
 The following run IDs identify the retained qualification evidence. Official
 columns refer only to base/reference controls, never SARA attempts.
@@ -90,7 +109,7 @@ columns refer only to base/reference controls, never SARA attempts.
 | Three.js 26589 | 34174004849 | 34173241960 |
 | Axios 5085 | 34177382225 | 34177382246 |
 | Immutable.js 2005 | 34174004849 | 34173241960 |
-| Preact 4436 | Failed timeout: 34179307403 | 34173241960 |
+| Preact 4436 | 34181744126 | 34173241960 |
 
 ## Runner and allowance
 
