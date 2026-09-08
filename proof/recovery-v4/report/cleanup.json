@@ -1,0 +1,30 @@
+{
+  "completedExecutions": true,
+  "removedOwnedImports": [
+    {
+      "name": ".recovery-v4-current-0473475f-1c3f-40e4-83b8-01a722011ad0.ts",
+      "sha256": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b"
+    },
+    {
+      "name": ".recovery-v4-baseline-a3461c5b-6f00-4485-a3a6-eed7de07ef4e.ts",
+      "sha256": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21"
+    },
+    {
+      "name": ".recovery-v4-current-e00c7502-29f5-44d7-b005-66bef835139f.ts",
+      "sha256": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b"
+    },
+    {
+      "name": ".recovery-v4-baseline-58c3f68e-0ee0-4f34-83d1-362690d4dc28.ts",
+      "sha256": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21"
+    },
+    {
+      "name": ".recovery-v4-candidate-36787b2c-14a9-481a-a0bc-12478e4d9c22.ts",
+      "sha256": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b"
+    },
+    {
+      "name": ".recovery-v4-candidate-0f8c3585-e0a3-4a03-8440-1017d16e68b9.ts",
+      "sha256": "5a89bedef21ffd72eb91f60b49e7a0a1218576f4070cb2e74575006f961a846b"
+    }
+  ],
+  "foreignWorkPreserved": true
+}

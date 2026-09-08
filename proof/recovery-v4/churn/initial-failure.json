@@ -1,0 +1,7 @@
+{
+  "action": "decide full-gate reservation",
+  "exit": 1,
+  "error": "policy_digest does not match the active policy",
+  "cause": "raw file bytes were hashed instead of canonical policy JSON",
+  "verificationStarted": false
+}

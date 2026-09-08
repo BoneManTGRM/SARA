@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "event_id": "sara-v4-full-gate",
+  "task_id": "sara-v4-batch-attribution",
+  "attempt_id": "frozen-candidate-full-gate",
+  "action_kind": "targeted_test",
+  "action_scope_digest": "sha256:370f881fced73b36463c11d07881ab7ff1fec4341a71c511863fb43c3d1ae105",
+  "requirements_digest": "sha256:487dd281073fe5daaf1af7a6446871e6274ab738b71b51459c71c760caae4b16",
+  "candidate_digest": "sha256:5a89bedef21ffd72eb91f60b49e7a0a1218576f4070cb2e74575006f961a846b",
+  "dependency_digest": "sha256:6e299e95c1b8aa4e42e909c9fb0b62d48c7448fb003aa8b88082ce635a30363c",
+  "policy_digest": "sha256:fe1fd764135a92b738e8d2049f8726ed7eeda032fadacf2f1b79c8814c3933f7",
+  "evaluator_digest": "sha256:172a8dd4e0e1f8c166dbdf4fb229677d9913e78d679ed238c35e332501dee22d",
+  "material_progress": {
+    "status": "unknown",
+    "evidence_digest": null
+  },
+  "rate_telemetry": {
+    "state": "missing",
+    "effect": "advisory"
+  },
+  "metrics": [],
+  "environment_digest": "sha256:c716142606bc303c07440941f6da40754ef882bea1311b3aa50f482cff305758"
+}

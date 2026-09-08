@@ -1,0 +1,50 @@
+{
+  "fullGateExit": 0,
+  "repositoryTests": 1098,
+  "httpTests": 14,
+  "focusedExit": 0,
+  "focusedTests": 20,
+  "baselineRedExit": 1,
+  "baselineRedFailedAssertions": 3,
+  "evaluationExit": 0,
+  "developmentBaselineExit": 0,
+  "developmentCandidateExit": 0,
+  "commands": {
+    "baseline": "node --import tsx proof/recovery-v4/run.mts --phase development --baseline-only --output recovery-v4-dev-baseline",
+    "red": "SARA_V4_BASELINE=1 node --import tsx --test tests/recovery-candidate-v4.test.ts",
+    "focused": "node --import tsx --test tests/recovery-candidate-v4.test.ts tests/repository-producer.test.ts",
+    "development": "node --import tsx proof/recovery-v4/run.mts --phase development --output recovery-v4-dev-candidate",
+    "heldout": "node --import tsx proof/recovery-v4/run.mts --phase heldout --output recovery-v4-heldout",
+    "full": "python proof/recovery-v4/verify.py"
+  },
+  "logs": {
+    "recovery-v4-red.log": {
+      "sha256": "b5c2e541cf38faf9a2619f2a45fe3eca6d94b92bea29edfd2ba7e33f692caa08",
+      "bytes": 2527
+    },
+    "recovery-v4-heldout.log": {
+      "sha256": "31d7b18852cf8d1a94a804372bacc794022fd6e36afd513e23f83551cc5dbbd7",
+      "bytes": 71974
+    },
+    "recovery-v4-dev-candidate.log": {
+      "sha256": "dd8f8da604d329be5c400f0e04ac67219be858c3332fa0bd7f08a0f89a0aaf30",
+      "bytes": 5867
+    },
+    "recovery-v4-focused.log": {
+      "sha256": "1f604a0d97d027eacd210bee7bf9e527a8731a148f01ccd849b649efe866484a",
+      "bytes": 2061
+    },
+    "recovery-v4-dev-baseline.log": {
+      "sha256": "cceaae84ca6a977a6f8bd783b06450c833c4b22defc83e283e6bd7d7130400f2",
+      "bytes": 2969
+    },
+    "recovery-v4-verify.log": {
+      "sha256": "af85f753c0ee7dc748759fbb50fc64e83c451dc703910d775431e2fd3734fc13",
+      "bytes": 161165
+    },
+    "recovery-v4-summary.log": {
+      "sha256": "3abb19d1ea07f7bb74555477058df34726dd6095a37fa952eada85c4a7811305",
+      "bytes": 15546
+    }
+  }
+}

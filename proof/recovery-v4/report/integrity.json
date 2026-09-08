@@ -1,0 +1,19 @@
+{
+  "proof/recovery-v4/baseline-producer.txt": true,
+  "proof/recovery-v4/current-producer.txt": true,
+  "proof/recovery-v4/model.ts": true,
+  "proof/recovery-v4/program.cjs": true,
+  "proof/recovery-v4/settings.json": true,
+  "proof/recovery-v4/development.json": true,
+  "proof/recovery-v4/heldout.json": true,
+  "proof/recovery-v4/run.mts": true,
+  "proof/recovery-v4/candidate-producer.txt": true,
+  "proof/recovery-v4/development-result.json": true,
+  "proof/recovery-v4/prompt-order/original.json": true,
+  "proof/recovery-v4/prompt-order/objective-evidence-first.json": true,
+  "proof/recovery-v4/prompt-order/README.md": true,
+  "activeProducerUnchanged": true,
+  "modelIdenticalToV3": true,
+  "programIdenticalToV3": true,
+  "promptReorderingContentIdentical": true
+}

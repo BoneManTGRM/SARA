@@ -1,0 +1,33 @@
+{
+  "checkpointRemote": "379b9a0e5ebbfb26ff65befca0c5b88c4960822b",
+  "checkpointLocal": "be446f7bcf96b51caaa823bbfcd82ddd313981e1",
+  "checkpointTree": "74131e1705fa825505141724852fcc35709df287",
+  "commonFreezeLocal": "fb560462c87301e7bbca830fb755cda8a32d3559",
+  "commonFreezeTree": "34196df9d25e970f34508ec415dd83223c001d55",
+  "candidateFreezeLocal": "ce07d36772264b6891dbb2b8609be3672f224c7d",
+  "candidateFreezeTree": "8d23127a8d7f7da151e40c74b28b749cda25cfa0",
+  "candidateSha256": "5a89bedef21ffd72eb91f60b49e7a0a1218576f4070cb2e74575006f961a846b",
+  "sources": {
+    "baseline-producer.txt": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+    "current-producer.txt": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b",
+    "candidate-producer.txt": "5a89bedef21ffd72eb91f60b49e7a0a1218576f4070cb2e74575006f961a846b"
+  },
+  "environment": {
+    "node": "v24.19.0",
+    "python": "3.12.13",
+    "platform": "Linux-6.18.35-x86_64-with-glibc2.39",
+    "testCpus": [
+      0,
+      1
+    ]
+  },
+  "priorHeadCheck": {
+    "name": "test",
+    "head": "379b9a0e5ebbfb26ff65befca0c5b88c4960822b",
+    "conclusion": "success",
+    "url": "https://github.com/BoneManTGRM/SARA/actions/runs/34227334081/job/102064569691"
+  },
+  "latestPublishedChecks": "Not asserted at reporting head; inspect PR checks separately",
+  "commonFreezeRemote": "21fba56468c03bb1d414b265d46feba80751bcc1",
+  "candidateFreezeRemote": "e4a139ffe78466f91bad6a2bdc68a427321a3430"
+}
