@@ -1,7 +1,7 @@
 name: SWE public repository environments (no model calls)
 on:
   push:
-    branches: [feat/swe-repository-executor]
+    branches: [feat/swe-repository-executor, fix/swe-existing-resource-qualification]
     paths:
       - .github/workflows/swe-repository-environments.yml
       - docs/benchmarks/swe-repository-recipes.json
@@ -18,9 +18,10 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        # Targeted follow-up; the complete ten-task matrix remains in run
-        # 34174004849. These indices do not change benchmark selection.
-        index: [2, 4, 5, 7, 9]
+        # Diagnose the retained Preact-4436 failure without duplicating the
+        # Preact-3454/Babel repairs in progress on the parent branch.
+        # The ten-task benchmark selection remains unchanged.
+        index: [9]
     steps:
       - uses: actions/checkout@v4
         with:
