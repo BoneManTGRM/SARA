@@ -111,7 +111,7 @@ const options={stdin:{contents:'import server from "preact/compat/server"; conso
             config = {'files': [{'pattern': 'test/polyfills.js', 'watched': False}, {'pattern': '{debug,devtools,hooks,compat,test-utils,jsx-runtime,}/test/{browser,shared}/**/*.test.js', 'watched': False, 'type': 'js'}],
                       'preprocessors': {'{debug,devtools,hooks,compat,test-utils,jsx-runtime,}/test/**/*': ['esbuild']},
                       'esbuild': {'singleBundle': False, 'target': 'es2015', 'plugins': [{'name': 'custom'}]},
-                      'browsers': ['ChromeNoSandboxHeadless']}
+                      'browsers': ['ChromeNoSandboxHeadless'], 'plugins': ['karma-*'], 'reporters': ['mocha']}
             (root / 'karma.conf.js').write_text('module.exports=' + json.dumps(config))
             glob = root / 'node_modules/glob'
             glob.mkdir(parents=True)
@@ -130,11 +130,16 @@ exports.Server=class {
   if(process.env.BABEL_NO_MODULES!=='true'||process.env.COVERAGE!=='true')throw Error('UPSTREAM_ENV');
   if(process.env.NODE_OPTIONS!=='--max-old-space-size=512'||process.env.GOGC!=='25'||process.env.GOMEMLIMIT!=='384MiB')throw Error('MEMORY_ENVELOPE');
   fs.writeFileSync('captured-config.json',JSON.stringify(this.config));
-  console.log(process.env.TEST_KARMA_MESSAGE);if(process.env.TEST_KARMA_MESSAGE==='child-killed')process.kill(process.pid,'SIGKILL');this.done(Number(process.env.TEST_KARMA_EXIT));
+  console.log(process.env.TEST_KARMA_MESSAGE);if(process.env.TEST_KARMA_MESSAGE==='child-killed')process.kill(process.pid,'SIGKILL');
+  if(process.env.TEST_KARMA_MESSAGE!=='missing-completion') {
+   const Reporter=this.config.plugins.at(-1)['reporter:sara-completion'][1];
+   new Reporter().onRunComplete([{lastResult:{total:465,success:465,failed:0,skipped:0,error:false,disconnected:false}}],{success:465,failed:0,skipped:0,error:false,disconnected:false,exitCode:0});
+  }
+  this.done(Number(process.env.TEST_KARMA_EXIT));
  }
 };
 """)
-            for message, exitcode, expected in [('465 tests completed', 0, 0), ('ERROR [esbuild]: The service was stopped', 0, 1), ('tests failed', 1, 1), ('child-killed', 0, 1)]:
+            for message, exitcode, expected in [('465 tests completed', 0, 0), ('ERROR [esbuild]: The service was stopped', 0, 1), ('tests failed', 1, 1), ('child-killed', 0, 1), ('missing-completion', 0, 1)]:
                 env = dict(os.environ, TEST_KARMA_MESSAGE=message, TEST_KARMA_EXIT=str(exitcode))
                 result = subprocess.run(RECIPES[9]['publicTestCommand'], cwd=root, env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, expected, result.stderr)
@@ -151,6 +156,8 @@ exports.Server=class {
                 self.assertIn('memoryEventsAfter', diagnostic)
                 aliases = captured['esbuild'].pop('alias')
                 self.assertEqual(aliases, {'preact/compat/server': str(root / 'compat/server.browser.js')})
+                self.assertEqual(captured['plugins'].pop().keys(), {'reporter:sara-completion'})
+                self.assertEqual(captured['reporters'].pop(), 'sara-completion')
                 self.assertEqual(captured, config)
             package['exports']['./compat/server']['browser'] = './compat/server.js'
             (root / 'package.json').write_text(json.dumps(package))

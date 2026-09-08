@@ -17,7 +17,7 @@ export function validateRepositoryCloudPermit(p: RepositoryCloudPermit): void {
   cloudFields(p, ["schemaVersion", "benchmarkId", "registrationDigest", "runtimeRevision", "workflowRevision", "workflowRef", "notBefore", "expiresAt"]);
   if (p.schemaVersion !== 1 || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(p.benchmarkId)
     || !/^[a-f0-9]{64}$/.test(p.registrationDigest) || !/^[a-f0-9]{40}$/.test(p.runtimeRevision)
-    || p.workflowRevision !== p.runtimeRevision || !/^refs\/heads\/[A-Za-z0-9][A-Za-z0-9._/-]{0,150}$/.test(p.workflowRef)
+    || p.workflowRevision !== p.runtimeRevision || !/^refs\/heads\/run\/swe-cloud-[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/.test(p.workflowRef)
     || p.workflowRef.includes("..") || !integer(p.notBefore) || !integer(p.expiresAt)
     || p.expiresAt <= p.notBefore || p.expiresAt - p.notBefore > 72 * 3600) throw new Error("CLOUD_PERMIT");
 }
@@ -36,7 +36,7 @@ function match(c: Record<string, unknown>, p: RepositoryCloudPermit, now: number
     && c.repository_owner === "BoneManTGRM" && c.repository_owner_id === "235159333" && c.actor_id === "235159333"
     && c.ref === p.workflowRef && c.ref_type === "branch" && c.workflow_ref === workflow
     && c.workflow_sha === p.workflowRevision && c.sha === p.workflowRevision
-    && c.event_name === "workflow_dispatch" && c.run_attempt === "1" && c.runner_environment === "github-hosted"
+    && c.event_name === "push" && c.run_attempt === "1" && c.runner_environment === "github-hosted"
     && typeof c.run_id === "string" && /^[1-9][0-9]{0,19}$/.test(c.run_id)
     && (c.head_ref === "" || c.head_ref === undefined) && (c.base_ref === "" || c.base_ref === undefined)
     && c.job_workflow_ref === undefined && c.job_workflow_sha === undefined

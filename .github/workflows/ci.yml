@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/swe-existing-resource-qualification]
   pull_request:
 
 jobs:

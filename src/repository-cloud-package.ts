@@ -25,9 +25,11 @@ export function repositoryCloudCodeBindings() {
     digest: sha256(readFileSync(new URL(`../${path}`, import.meta.url))) }))));
   return {
     controllerDigest: digest(["src/repository-benchmark-runner.ts", "src/repository-producer.ts", "src/repository-luna-model.ts",
-      "src/benchmark-dispatch-budget.ts", "src/repository-cloud-broker.ts", "src/repository-cloud-auth.ts", "src/repository-cloud-runtime.ts"]),
+      "src/benchmark-dispatch-budget.ts", "src/repository-cloud-broker.ts", "src/repository-cloud-auth.ts", "src/repository-cloud-runtime.ts",
+      "src/server.ts", "src/main.ts", "src/repository-cloud-package.ts"]),
     verifierDigest: digest(["src/kernel.ts", "src/repository-executor.ts", "src/repository-official-judge.ts",
-      "src/repository-cloud-protocol.ts", "src/repository-cloud-worker.ts", "scripts/swe-bench-judge.py"]),
+      "src/repository-cloud-protocol.ts", "src/repository-cloud-worker.ts", "src/repository-cloud-files.ts",
+      "scripts/repository-cloud-worker.ts", "scripts/prepare-cloud-judge.py", "scripts/swe-bench-judge.py"]),
   };
 }
 /** Pure admission checks run before a durable execution claim or model call. */

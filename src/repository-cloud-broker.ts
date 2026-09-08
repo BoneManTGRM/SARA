@@ -27,9 +27,9 @@ export class RepositoryCloudBroker {
   #serial: Promise<unknown> = Promise.resolve();
   readonly #assertAuthority: () => Promise<void>;
   readonly #timeout: number;
-  readonly #onBegin?: () => void;
+  readonly #onBegin?: (directory: string) => void | Promise<void>;
   readonly #expected?: Array<{ attemptId: string; task: CloudAssignment["task"]; environmentDigest: string }>;
-  constructor(options: { assertAuthority(): Promise<void>; commandTimeoutMilliseconds?: number; onBegin?(): void;
+  constructor(options: { assertAuthority(): Promise<void>; commandTimeoutMilliseconds?: number; onBegin?(directory: string): void | Promise<void>;
     expectedAttempts?: ReadonlyArray<{ attemptId: string; task: CloudAssignment["task"]; environmentDigest: string }> }) {
     this.#assertAuthority = options.assertAuthority;
     this.#timeout = options.commandTimeoutMilliseconds ?? 35 * 60_000;
@@ -42,7 +42,7 @@ export class RepositoryCloudBroker {
     await this.#assertAuthority();
     await writeBenchmarkAudit(evidenceDirectory, "cloud-start.json", { execution: "existing_github_workers", replayAllowed: false });
     this.#directory = evidenceDirectory;
-    this.#onBegin?.();
+    await this.#onBegin?.(evidenceDirectory);
   }
   async assertActive() {
     if (!this.#directory || this.#ended || this.#fault) throw this.#fault ?? Error("CLOUD_RUN_INACTIVE");

@@ -19,7 +19,9 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        # The initial all-ten sweep is retained in run 34181675503. Requalify
+        # only the changed Preact recipes, including structured completion.
+        index: [2, 9]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

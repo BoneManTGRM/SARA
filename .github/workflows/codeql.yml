@@ -13,7 +13,7 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "fix/swe-existing-resource-qualification" ]
   pull_request:
     branches: [ "main" ]
   schedule:

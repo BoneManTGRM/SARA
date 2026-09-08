@@ -1,6 +1,9 @@
 name: Owner-approved repository comparison on existing cloud
 on:
-  workflow_dispatch:
+  # Creating this exact-source branch after authenticated owner launch avoids
+  # installing an unapproved workflow on main just to dispatch the candidate.
+  push:
+    branches: [run/swe-cloud-*]
 permissions:
   contents: read
 concurrency:

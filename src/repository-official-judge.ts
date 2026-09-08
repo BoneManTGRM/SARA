@@ -59,8 +59,12 @@ export async function runOfficialRepositoryJudge(stateDirectory: string, receipt
   try { await file.writeFile(canonicalJson(request)); await file.sync(); } finally { await file.close(); }
   const output = join(root, "official-judge");
   await dispatch(requestPath, config, output);
-  const { dispatchError } = JSON.parse(await readFile(join(root, "judge-dispatch.json"), "utf8")) as { dispatchError: string | null };
+  const dispatchRecord = JSON.parse(await readFile(join(root, "judge-dispatch.json"), "utf8"));
+  if (!dispatchRecord || Object.keys(dispatchRecord).sort().join(",") !== "dispatchError,runId" || dispatchRecord.runId !== request.runId
+    || (dispatchRecord.dispatchError !== null && (typeof dispatchRecord.dispatchError !== "string" || dispatchRecord.dispatchError.length > 2000))) throw Error("REPOSITORY_JUDGE_DISPATCH_BINDING");
+  const dispatchError = dispatchRecord.dispatchError as string | null;
   const result = JSON.parse(await readFile(join(output, "judge-receipt.json"), "utf8")) as OfficialRepositoryResult;
+  if (result.schemaVersion !== 1 || typeof result.gradeCompleted !== "boolean" || typeof result.resolved !== "boolean") throw Error("REPOSITORY_JUDGE_RESULT_TYPES");
   for (const key of ["instanceId", "arm", "runId", "patchDigest", "environmentDigest", "taskDigest", "image", "fixtureProxyImage", "repository", "baseCommit"] as const) {
     if (result[key] !== request[key]) throw new Error("REPOSITORY_JUDGE_RECEIPT_BINDING");
   }

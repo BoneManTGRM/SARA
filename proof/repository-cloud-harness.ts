@@ -5,12 +5,15 @@ import { mkdir } from "node:fs/promises";
 import { RepositoryCloudBroker } from "../src/repository-cloud-broker.ts";
 import { createRepositoryCloudWorkerEngine, runRepositoryCloudWorker } from "../src/repository-cloud-worker.ts";
 import type { RepositoryEnvironment, RepositoryTask } from "../src/repository-executor.ts";
+import type { RepositoryJudgeConfiguration } from "../src/repository-official-judge.ts";
 
 /** Explicit zero-cost fixture authority. This loopback proof cannot activate the
  * deployed service, claim a model grant, or attest real GitHub OIDC connectivity. */
-export async function repositoryCloudProofHarness(directory: string) {
-  const broker = new RepositoryCloudBroker({ assertAuthority: async () => {} });
-  await broker.begin(join(directory, "cloud-transport"));
+export async function repositoryCloudProofHarness(directory: string,
+  expectedAttempts?: Array<{ attemptId: string; task: RepositoryTask; environmentDigest: string }>) {
+  const broker = new RepositoryCloudBroker({ assertAuthority: async () => {}, ...(expectedAttempts ? { expectedAttempts } : {}) });
+  const evidenceDirectory = join(directory, "cloud-transport");
+  await broker.begin(evidenceDirectory);
   const fixtureToken = randomUUID();
   const server = createServer(async (request, response) => {
     try {
@@ -28,10 +31,13 @@ export async function repositoryCloudProofHarness(directory: string) {
   let worker: Promise<void> | undefined, controller: AbortController | undefined;
   return {
     broker,
-    async start(environment: RepositoryEnvironment, task: RepositoryTask) {
-      await broker.openAssignment({ phase: "producer", attemptId: `${task.instanceId}-${task.arm}`, environment, task });
+    evidenceDirectory,
+    async start(environment: RepositoryEnvironment, task: RepositoryTask, judge?: RepositoryJudgeConfiguration) {
+      const phase = judge ? "judge" as const : "producer" as const;
+      await broker.openAssignment({ phase, attemptId: expectedAttempts?.find(a => a.task.runId === task.runId)?.attemptId ?? `${task.instanceId}-${task.arm}`, environment, task,
+        ...(judge ? { judge: { image: judge.image, ...(judge.fixtureProxyImage ? { fixtureProxyImage: judge.fixtureProxyImage } : {}) } } : {}) });
       controller = new AbortController();
-      worker = runRepositoryCloudWorker({ phase: "producer", signal: controller.signal,
+      worker = runRepositoryCloudWorker({ phase, signal: controller.signal,
         pause: () => new Promise(resolve => setTimeout(resolve, 10)),
         async call(body) {
           const r = await fetch(`http://127.0.0.1:${address.port}`, { method: "POST", headers: { authorization: `Bearer ${fixtureToken}` },
@@ -40,7 +46,8 @@ export async function repositoryCloudProofHarness(directory: string) {
         },
         async prepare(assignment) {
           const root = join(directory, `worker-${assignment.id}`); await mkdir(root);
-          return createRepositoryCloudWorkerEngine({ assignment, directory: root });
+          return createRepositoryCloudWorkerEngine({ assignment, directory: root,
+            ...(judge ? { judge: { datasetPath: judge.datasetPath, harnessPath: judge.harnessPath } } : {}) });
         },
       });
       void worker.catch(() => {});

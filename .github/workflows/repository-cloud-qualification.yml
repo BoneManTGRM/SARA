@@ -8,6 +8,7 @@ on:
       - src/repository-official-judge.ts
       - src/kernel.ts
       - proof/repository-cloud-harness.ts
+      - proof/repository-cloud-official-controls.ts
       - proof/repository-executor.ts
       - .github/workflows/repository-cloud-qualification.yml
 permissions:
@@ -35,5 +36,36 @@ jobs:
         with:
           name: cloud-transport-${{ github.run_id }}
           path: ${{ runner.temp }}/cloud-qualification
+          if-no-files-found: error
+          retention-days: 14
+  official-transport:
+    if: github.repository == 'BoneManTGRM/SARA' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - name: Install pinned official harness
+        run: |
+          git clone https://github.com/SWE-bench/SWE-bench.git "$RUNNER_TEMP/harness"
+          git -C "$RUNNER_TEMP/harness" checkout 02e7a74ffd0b707aab73d203fe87bdc7c76afc8e
+          python -m pip install "$RUNNER_TEMP/harness"
+      - name: Prepare judge-only controls
+        run: python3 scripts/prepare-official-control.py --index 0 --harness "$RUNNER_TEMP/harness" --output "$RUNNER_TEMP/control-setup"
+      - name: Check real official grading through the cloud protocol
+        run: node --import tsx proof/repository-cloud-official-controls.ts "$RUNNER_TEMP/control-setup/control-input.json" "$RUNNER_TEMP/cloud-official"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: cloud-official-${{ github.run_id }}
+          path: ${{ runner.temp }}/cloud-official
           if-no-files-found: error
           retention-days: 14

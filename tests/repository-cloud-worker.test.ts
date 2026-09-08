@@ -85,10 +85,28 @@ test("missing execution, stopped authority, and grading before twenty frozen out
 test("worker rejects host operations, replayed session ids and judge commands during production", async () => {
   const a = { ...assignment, id: randomUUID() };
   const engine = createRepositoryCloudWorkerEngine({ assignment: a, directory: "/unused",
-    startSession: async () => { throw Error("should not start"); } });
+    startSession: async () => ({ async run() { return { exitCode: 0, output: "" }; }, async mustRun() { return { exitCode: 0, output: "" }; }, async freezePatch() { return ""; }, async close() {} }) });
   const make = (operation: unknown) => { const body = { id: randomUUID(), assignmentId: a.id, operation }; return { ...body, digest: sha256(canonicalJson(body)) } as CloudCommand; };
   await assert.rejects(engine.execute(make({ kind: "docker", args: ["run", "--privileged"] })), /CLOUD_/);
   await assert.rejects(engine.execute(make({ kind: "judge", request: {} })), /PHASE/);
   await assert.rejects(engine.execute(make({ kind: "run", session: randomUUID(), command: ["true"], mount: "/" })), /FIELDS/);
+  const session = randomUUID(); await engine.execute(make({ kind: "start", session }));
+  await engine.execute(make({ kind: "close", session }));
+  await assert.rejects(engine.execute(make({ kind: "start", session })), /REPLAY_OR_OVERLAP/);
   await engine.close();
+});
+test("a stop blocks queued delivery and a late reply cannot complete execution after closure", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "cloud-stop-delivery-")); let stopped = false;
+  const broker = new RepositoryCloudBroker({ assertAuthority: async () => { if (stopped) throw Error("STOPPED"); }, commandTimeoutMilliseconds: 5000 });
+  try {
+    await broker.begin(directory); await broker.openAssignment(assignment);
+    const workerId = randomUUID(); await broker.worker(identity, { action: "connect", workerId, phase: "producer" });
+    const starting = broker.startSession(assignment.environment); void starting.catch(() => {});
+    const command = await next(broker, workerId); stopped = true;
+    await assert.rejects(next(broker, workerId), /STOPPED/);
+    await assert.rejects(broker.worker(identity, { action: "reply", workerId, phase: "producer",
+      reply: { id: command.id, commandDigest: command.digest, value: { started: true }, error: null } }), /STOPPED/);
+    broker.end(); await assert.rejects(starting, /EXECUTION_CLOSED/);
+    stopped = false; await assert.rejects(broker.assertActive(), /EXECUTION_CLOSED/);
+  } finally { broker.end(); await rm(directory, { recursive: true, force: true }); }
 });

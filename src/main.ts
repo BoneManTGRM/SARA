@@ -215,6 +215,9 @@ server.listen(port, host, () => {
   const address = server.address();
   const resolvedPort = typeof address === "object" && address ? address.port : port;
   console.log(`SARA owner dashboard listening on http://${host}:${resolvedPort}`);
+  if (repositoryCloud) void repositoryCloud.launchConfigured().then(result => {
+    console.log(`SARA repository benchmark owner bootstrap: ${result.status}`);
+  }).catch(() => { console.error("SARA repository benchmark bootstrap rejected; inspect owner readiness. No automatic retry."); });
   if (!client) {
     console.log("SARA Luna worker is disabled because OPENAI_API_KEY is not configured.");
     return;
@@ -249,6 +252,7 @@ server.listen(port, host, () => {
 });
 
 function shutdown(): void {
+  repositoryCloud?.stop();
   websiteMaintenance.stop();
   operator?.stop();
   server.close(() => { void kernel.closeVerificationWorkers(); });

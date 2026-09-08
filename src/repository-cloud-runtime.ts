@@ -1,5 +1,5 @@
-import { readFile, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { persistentBenchmarkStateDirectory } from "./coding-benchmark-owner.ts";
 import { runRepositoryBenchmark } from "./repository-benchmark-runner.ts";
@@ -9,19 +9,18 @@ import { validateRepositoryCloudPackage, type RepositoryCloudPackage } from "./r
 import { cloudFields } from "./repository-cloud-protocol.ts";
 import type { SaraKernel } from "./kernel.ts";
 import type { Principal } from "./types.ts";
+import { writeBenchmarkAudit } from "./coding-benchmark-audit.ts";
 
-export const CLOUD_PACKAGE_PATH_KEY = "SARA_REPOSITORY_BENCHMARK_PACKAGE_PATH";
+export const CLOUD_PACKAGE_KEY = "SARA_REPOSITORY_BENCHMARK_PACKAGE_JSON";
 export const CLOUD_APPROVAL_KEY = "SARA_REPOSITORY_BENCHMARK_APPROVED_SHA256";
+export const CLOUD_LAUNCH_KEY = "SARA_REPOSITORY_BENCHMARK_LAUNCH_SHA256";
 
 /** Optional integration in the existing service, disabled unless the operator
  * installs a reviewed package. Installation never launches or grants spending. */
 export async function prepareRepositoryCloudRuntime(input: {
   stateDirectory: string; environment: Record<string, string | undefined>;
 }) {
-  const path = input.environment[CLOUD_PACKAGE_PATH_KEY]; if (!path) return undefined;
-  const actual = await realpath(path), rel = relative(input.stateDirectory, actual);
-  if (!isAbsolute(path) || actual !== resolve(path) || rel.startsWith("..") || isAbsolute(rel) || !rel) throw Error("CLOUD_PACKAGE_PATH");
-  const raw = await readFile(path, "utf8");
+  const raw = input.environment[CLOUD_PACKAGE_KEY]; if (!raw) return undefined;
   if (Buffer.byteLength(raw) > 4 * 1024 * 1024) throw Error("CLOUD_PACKAGE_SIZE");
   const p = JSON.parse(raw) as RepositoryCloudPackage; validateRepositoryCloudPackage(p);
   const digest = sha256(canonicalJson(p));
@@ -29,12 +28,13 @@ export async function prepareRepositoryCloudRuntime(input: {
   let status = "not_started", failureCode: string | null = null;
   let admit: (() => void) | undefined;
   let running: Promise<unknown> | undefined;
+  let admittedApiKey: string | undefined;
   async function assertAuthority() {
     const env = input.environment;
-    if (env[CLOUD_PACKAGE_PATH_KEY] !== path || env[CLOUD_APPROVAL_KEY] !== digest
+    if (env[CLOUD_PACKAGE_KEY] !== raw || env[CLOUD_APPROVAL_KEY] !== digest
       || env.RAILWAY_GIT_COMMIT_SHA !== p.permit.runtimeRevision || !env.OPENAI_API_KEY?.trim()
       || !kernel || !env.SARA_OWNER_TOKEN || !env.SARA_OWNER_TOKEN_SHA256) throw Error("CLOUD_FRESH_EXACT_APPROVAL_REQUIRED");
-    if (sha256(canonicalJson(JSON.parse(await readFile(path!, "utf8")))) !== digest) throw Error("CLOUD_PACKAGE_CHANGED");
+    if (admittedApiKey !== undefined && env.OPENAI_API_KEY !== admittedApiKey) throw Error("CLOUD_MODEL_CREDENTIAL_CHANGED");
     const seconds = Math.floor(Date.now() / 1000);
     if (seconds < p.permit.notBefore || seconds >= p.permit.expiresAt) throw Error("CLOUD_APPROVAL_EXPIRED_OR_NOT_YET_ACTIVE");
     await persistentBenchmarkStateDirectory(input.stateDirectory);
@@ -44,7 +44,8 @@ export async function prepareRepositoryCloudRuntime(input: {
     if (!state.constitution.verified || state.emergencyStopped) throw Error("CLOUD_AUTHORITY_STOPPED");
     if (epoch !== undefined && (await kernel.inspectAudit()).filter(e => e.type === "emergency_stop_changed").at(-1)?.hash !== (epoch ?? undefined)) throw Error("CLOUD_AUTHORITY_EPOCH_CHANGED");
   }
-  const broker = new RepositoryCloudBroker({ assertAuthority, onBegin: () => admit?.(), expectedAttempts: p.registration.attempts });
+  const broker = new RepositoryCloudBroker({ assertAuthority, expectedAttempts: p.registration.attempts,
+    async onBegin(directory) { await writeBenchmarkAudit(directory, "cloud-launch-package.json", p); admit?.(); } });
   const authenticate = createRepositoryCloudAuthenticator({ currentPermit: () => status === "running" ? p.permit : undefined });
   const kernelOptions = {
     repositoryEnvironments: p.tasks.map(t => structuredClone(t.environment)), repositoryJudges: structuredClone(p.judges),
@@ -83,6 +84,7 @@ export async function prepareRepositoryCloudRuntime(input: {
       // Serialize admission before returning to the event loop. No launch route
       // can create a second in-memory coordinator while the first claim awaits I/O.
       if (status !== "not_started") throw Error("CLOUD_LAUNCH_UNAVAILABLE"); status = "running";
+      admittedApiKey = input.environment.OPENAI_API_KEY;
       epoch = (await kernel.inspectAudit()).filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null;
       let rejectAdmission: (reason: unknown) => void;
       const admitted = new Promise<void>((resolve, reject) => { admit = resolve; rejectAdmission = reject; });
@@ -97,6 +99,18 @@ export async function prepareRepositoryCloudRuntime(input: {
       await admitted;
       return { status: "started", benchmarkId: p.manifest.benchmarkId, maximumSpendUsd: p.manifest.maximumSpendUsd, replayAllowed: false };
     },
+    /** Explicit owner-installed, target-bound boot mandate, using the existing
+     * owner credential in place. Package installation/approval alone never runs. */
+    async launchConfigured(): Promise<{ status: string }> {
+      const launchDigest = input.environment[CLOUD_LAUNCH_KEY];
+      if (!launchDigest) return { status: "not_requested" };
+      if (launchDigest !== digest || !kernel || !input.environment.SARA_OWNER_TOKEN) throw Error("CLOUD_BOOT_LAUNCH_MISMATCH");
+      if (await claimed()) return { status: "claimed_no_replay" };
+      await this.launch(kernel.authenticateOwnerToken(input.environment.SARA_OWNER_TOKEN), {
+        packageDigest: digest, registrationDigest: p.permit.registrationDigest, authorityDigest: p.manifest.bindings.authorityDigest });
+      return { status: "started" };
+    },
+    stop() { status = "stopped"; broker.end(); },
     async result() {
       const raw = await readFile(join(root, "repository-trace", "comparison-result.json"), "utf8");
       const envelope = JSON.parse(raw);

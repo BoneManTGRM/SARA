@@ -8,7 +8,7 @@ import { createRepositoryCloudWorkerEngine, runRepositoryCloudWorker } from "../
 
 const phase = process.argv[2];
 if (!["producer", "judge"].includes(phase ?? "") || process.env.GITHUB_REPOSITORY !== "BoneManTGRM/SARA"
-  || process.env.GITHUB_EVENT_NAME !== "workflow_dispatch" || process.env.GITHUB_RUN_ATTEMPT !== "1"
+  || process.env.GITHUB_EVENT_NAME !== "push" || process.env.GITHUB_RUN_ATTEMPT !== "1"
   || process.env.RUNNER_ENVIRONMENT !== "github-hosted" || process.env.OPENAI_API_KEY || process.env.SARA_OWNER_TOKEN) throw Error("CLOUD_WORKER_HOST_CONTRACT");
 const directory = await mkdtemp(join(tmpdir(), "sara-cloud-worker-"));
 let token: { value: string; until: number } | undefined;
