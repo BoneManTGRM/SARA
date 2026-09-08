@@ -1,0 +1,1 @@
+Captured producer prompt from development B, responsive policy, after failed repair. Alternative changes top-level JSON member order only; parsed objects are equal. The substitute parses JSON by key and does not model order effects. No real-model ordering comparison was run. These exact variants are retained for a separately authorized paired real-model experiment.

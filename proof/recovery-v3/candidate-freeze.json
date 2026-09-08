@@ -1,0 +1,6 @@
+{
+  "producerSha256": "7e22c6297d62159599e248d8fff1af4c2624e32c1bb03bbf44c8467f3b8b523d",
+  "frozenBeforeHeldout": true,
+  "developmentDecision": "Unaccepted: request savings but a B-resolved imperfect-policy case is lost. Evaluate frozen breadth without threshold tuning.",
+  "developmentExperiments": 1
+}
