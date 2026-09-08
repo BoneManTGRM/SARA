@@ -14,7 +14,7 @@ export type MaintenanceJob = {
   request: MaintenanceRequest; revision: number; state: MaintenanceState;
   candidateDigest: string|null; deploymentReceipt: string|null;
   notificationReceipt: string|null; rollbackReceipt: string|null; reason: string|null;
-  attempts: number; retryAt: string|null;
+  attempts: number; retryAt: string|null; blockedFrom: MaintenanceState|null;
   createdAt: string; updatedAt: string;
 };
 export type MaintenanceProvider = {

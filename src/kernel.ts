@@ -814,7 +814,7 @@ export class SaraKernel {
       const existing=maintenanceJobs(await this.#store.readAll()).find(job=>job.request.id===request.id);
       if(existing){if(maintenanceRequestDigest(existing.request)!==digest)throw new Error("MAINTENANCE_ID_CONFLICT");return existing;}
       const now=new Date().toISOString();
-      const job:MaintenanceJob={request:normalized,revision:0,state:"QUEUED",candidateDigest:null,deploymentReceipt:null,notificationReceipt:null,rollbackReceipt:null,attempts:0,retryAt:null,reason:null,createdAt:now,updatedAt:now};
+      const job:MaintenanceJob={request:normalized,revision:0,state:"QUEUED",candidateDigest:null,deploymentReceipt:null,notificationReceipt:null,rollbackReceipt:null,attempts:0,retryAt:null,blockedFrom:null,reason:null,createdAt:now,updatedAt:now};
       await this.#store.append("website_maintenance_snapshot",principal,job);return structuredClone(job);
     });
   }
@@ -832,7 +832,19 @@ export class SaraKernel {
       if(patch.state==="PUBLISHED"||patch.state==="ROLLBACK_INTENT"){if(typeof patch.deploymentReceipt!=="string"||!patch.deploymentReceipt||patch.deploymentReceipt.length>300)throw new Error("DEPLOYMENT_RECEIPT_REQUIRED");job.deploymentReceipt=patch.deploymentReceipt;}
       if(patch.state==="DELIVERED"){if(typeof patch.notificationReceipt!=="string"||!patch.notificationReceipt||patch.notificationReceipt.length>300)throw new Error("NOTIFICATION_RECEIPT_REQUIRED");job.notificationReceipt=patch.notificationReceipt;}
       if(patch.state==="ROLLED_BACK"){if(typeof patch.rollbackReceipt!=="string"||!patch.rollbackReceipt||patch.rollbackReceipt.length>300)throw new Error("ROLLBACK_RECEIPT_REQUIRED");job.rollbackReceipt=patch.rollbackReceipt;job.reason="PUBLICATION_FAILED_RESTORED_SOURCE";}
-      if(patch.state==="BLOCKED")job.reason=typeof patch.reason==="string"?patch.reason.slice(0,100):"PROVIDER_UNAVAILABLE";
+      if(patch.state==="BLOCKED"){job.blockedFrom=current.state;job.reason=typeof patch.reason==="string"?patch.reason.slice(0,100):"PROVIDER_UNAVAILABLE";}
+      await this.#store.append("website_maintenance_snapshot",principal,job);return structuredClone(job);
+    });
+  }
+
+  resumeWebsiteMaintenance(principal:Principal,id:string,approvedDigest:string):Promise<MaintenanceJob>{
+    return this.serializeMutation(async()=>{
+      const current=maintenanceJobs(await this.#store.readAll()).find(job=>job.request.id===id);
+      if(!current||!this.isVerifiedOwner(principal)||approvedDigest!==maintenanceRequestDigest(current.request))throw new Error("EXACT_OWNER_MAINTENANCE_APPROVAL_REQUIRED");
+      await this.authorize(principal,{action:"production_promotion",targetId:`website-maintenance:${approvedDigest}`,external:true,
+        approval:{approvalId:`maintenance-resume-${id}-${current.revision}`,approvedAt:new Date().toISOString(),action:"production_promotion",targetId:`website-maintenance:${approvedDigest}`,ownerId:principal.id}});
+      if(current.state!=="BLOCKED"||!current.blockedFrom||["BLOCKED","DELIVERED","ROLLED_BACK"].includes(current.blockedFrom))throw new Error("MAINTENANCE_NOT_RECOVERABLE");
+      const job:MaintenanceJob={...current,state:current.blockedFrom,blockedFrom:null,attempts:0,retryAt:null,reason:null,revision:current.revision+1,updatedAt:new Date().toISOString()};
       await this.#store.append("website_maintenance_snapshot",principal,job);return structuredClone(job);
     });
   }
@@ -846,7 +858,7 @@ export class SaraKernel {
       if(["DELIVERED","ROLLED_BACK","BLOCKED"].includes(current.state))throw new Error("TERMINAL_MAINTENANCE_STATE");
       const attempts=current.attempts+1;
       const job:MaintenanceJob={...current,revision:revision+1,attempts,
-        state:attempts>=5?"BLOCKED":current.state,
+        state:attempts>=5?"BLOCKED":current.state,blockedFrom:attempts>=5?current.state:null,
         reason:attempts>=5?"RETRY_LIMIT_RECONCILE_REQUIRED":"PROVIDER_OR_VERIFICATION_FAILURE",
         retryAt:new Date(Date.now()+Math.min(300000,5000*2**(attempts-1))).toISOString(),updatedAt:new Date().toISOString()};
       await this.#store.append("website_maintenance_snapshot",principal,job);

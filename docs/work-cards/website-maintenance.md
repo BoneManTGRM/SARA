@@ -52,3 +52,24 @@ Live acceptance evidence must include the real job ID, source and candidate dige
   "src/website-maintenance.ts": "e49988962752716d9dcfefa11284019b9c02456bc6913f54e8f8af26e50fb30f",
   "tests/website-maintenance.test.ts": "1a963b7919d557fd907c25e9f44d3178735eaad000dec19570e896abb72d44cf"
 }
+
+## Continuation authorized September 8
+
+The owner authorized merge once ready and continued implementation. The source-pin failure is resolved without modifying historical runner code, grants, pins, or recorded results. All three historical paid runner guards now explicitly refuse the changed source. The original twelve-job success, uncertain-dispatch, fresh-verification, and stop regressions are preserved in a separate current-kernel test-only harness. This harness requires injected fixture responses and the fixed SCRIPTED_NEVER_LIVE key, rejects live execution, and records current source hashes as regression evidence rather than inherited live authority.
+
+Blocked jobs now retain their prior phase. An authenticated owner can POST /api/website-maintenance/jobs/{id}/resume with approvedRequestDigest to authorize recovery of the same exact request. Recovery retains the job identity, candidate and receipts; uncertain external operations must still reconcile before any new action.
+
+The provider contract's find methods may return null only when no matching external operation exists and a first dispatch is safe. Eventual-consistency or timeout uncertainty must throw and remain blocked for reconciliation. DELIVERED requires verified publication and provider notification acceptance; it is not proof a person read an email.
+
+Fresh Railway variable-name inspection again found no SARA_GMAIL_CLIENT_ID, SARA_GMAIL_CLIENT_SECRET or SARA_GMAIL_REFRESH_TOKEN, and no persistent maintenance publishing configuration. ChatGPT connector sessions are not runtime credentials. Those account connections, real provider implementation, commercial integration, and live proof remain open.
+
+Continuation qualification: npm run verify exited 0 with 1,016/1,016 tests plus all integrated proofs passing. The test-harness classification was then made explicitly offline; focused revalidation covers that metadata change. Historical pin/grant files are unchanged. Current source digests:
+
+{
+  "src/kernel.ts": "58bdef7b8ae60f14098075f0759dc01ba4285ca468d7eb88768c6bd0f7820c51",
+  "src/server.ts": "1a9c6d422ef52e0dad99781c9bca34471fa7236fe36702f980ab40f6f075e6f9",
+  "src/website-maintenance.ts": "776db25085462b4608b736cffd6aaf8418f4ad572bd126ae28644a049d5dc4de",
+  "tests/helpers/maintenance-kernel-regression.ts": "dff3a9d337489b9dd251f45093514bf24bf9acf445d7e4a12eed4e84ab54e2dd",
+  "tests/kernel-coding-benchmark.test.ts": "c8ba01b2ff84454c2638344d8629ef27c81a750e91833b7edaca16ade31c5ded",
+  "tests/website-maintenance.test.ts": "5d6287d441ece1176cbb4df91630df1608ec5dbf735493612d5429e723007e6a"
+}

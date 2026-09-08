@@ -95,7 +95,12 @@ test('durable backoff lets other jobs proceed and bounded failures retain a revi
   assert.equal(await op.tick(),'BLOCKED');
   for(let i=0;i<4;i++){t.mock.timers.tick(300001);await assert.rejects(op.tick(),/unavailable/);}
   const job=(await f.kernel.listWebsiteMaintenance()).find(x=>x.request.id===r.id)!;
-  assert.equal(job.state,'BLOCKED');assert.equal(job.attempts,5);assert.equal(job.reason,'RETRY_LIMIT_RECONCILE_REQUIRED');
+  assert.equal(job.state,'BLOCKED');assert.equal(job.attempts,5);assert.equal(job.reason,'RETRY_LIMIT_RECONCILE_REQUIRED');assert.equal(job.blockedFrom,'QUEUED');
+  await assert.rejects(f.kernel.resumeWebsiteMaintenance(SARA_PRINCIPAL,r.id,maintenanceRequestDigest(r)));
+  await assert.rejects(f.kernel.resumeWebsiteMaintenance(f.owner,r.id,'wrong-digest'));
+  const resumed=await f.kernel.resumeWebsiteMaintenance(f.owner,r.id,maintenanceRequestDigest(r));
+  assert.equal(resumed.state,'QUEUED');assert.equal(resumed.attempts,0);assert.equal(resumed.request.id,r.id);
+  await assert.rejects(f.kernel.resumeWebsiteMaintenance(f.owner,r.id,maintenanceRequestDigest(r)),/NOT_RECOVERABLE/);
  }finally{await rm(f.dir,{recursive:true,force:true});}
 });
 
