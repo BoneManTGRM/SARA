@@ -1,0 +1,36 @@
+name: SARA browser check
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/browser-observer.yml
+      - scripts/browser-observer.ts
+      - src/browser-observer.ts
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sara-browser-observer
+  cancel-in-progress: false
+
+jobs:
+  public-page-check:
+    if: github.repository == 'BoneManTGRM/SARA' && github.ref == 'refs/heads/main' && github.event.repository.visibility == 'public' && github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Observe public pages for one minute
+        env:
+          SARA_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+        run: node --import tsx scripts/browser-observer.ts
