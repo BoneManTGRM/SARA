@@ -50,11 +50,36 @@ class CheckedContainer:
 
     def start(self):
         self.container.start()
+        diagnostics = {}
+        for name, command in {
+            "identity": ["id"], "hosts": ["cat", "/etc/hosts"],
+            "lookup": ["getent", "ahostsv4", "localhost"],
+            "nsswitch": ["cat", "/etc/nsswitch.conf"],
+        }.items():
+            result = self.container.exec_run(command, workdir="/testbed")
+            diagnostics[name] = {"exitCode": result.exit_code,
+                                 "output": result.output.decode(errors="replace")[:4000]}
+        Path("startup-diagnostics.json").write_text(json.dumps(diagnostics, indent=2))
         # The pinned image may belong to its build user. Trust only this exact
         # container path, as the stock eval script does later, never all paths.
         git = ["git", "-c", "safe.directory=/testbed"]
         head = self.container.exec_run(git + ["rev-parse", "HEAD"], workdir="/testbed")
         clean = self.container.exec_run(git + ["status", "--porcelain", "--untracked-files=no"], workdir="/testbed")
+        # This pinned Preact image has an install-generated lockfile change.
+        # Restore only that observed metadata file before any submitted patch;
+        # retain the original diff and still demand a completely clean base.
+        if (self.base_commit == "00c8d1ff1498084c15408cf0014d4c7facdb5dd7"
+                and head.exit_code == 0 and head.output.decode().strip() == self.base_commit
+                and clean.exit_code == 0 and clean.output == b" M package-lock.json\n"):
+            original = self.container.exec_run(git + ["diff", "HEAD", "--", "package-lock.json"], workdir="/testbed")
+            if original.exit_code:
+                raise ValueError("JUDGE_LOCKFILE_DIAGNOSTIC_FAILED")
+            Path("image-lockfile-normalization.diff").write_bytes(original.output)
+            restored = self.container.exec_run(git + ["restore", "--source=" + self.base_commit,
+                                                      "--worktree", "--", "package-lock.json"], workdir="/testbed")
+            if restored.exit_code:
+                raise ValueError("JUDGE_LOCKFILE_NORMALIZATION_FAILED")
+            clean = self.container.exec_run(git + ["status", "--porcelain", "--untracked-files=no"], workdir="/testbed")
         if head.exit_code or head.output.decode().strip() != self.base_commit or clean.exit_code or clean.output.strip():
             raise ValueError("JUDGE_IMAGE_BASE_MISMATCH:" + json.dumps({
                 "headExitCode": head.exit_code, "head": head.output.decode(errors="replace")[:1000],

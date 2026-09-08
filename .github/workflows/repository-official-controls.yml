@@ -18,7 +18,8 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        # Follow up only failed controls; complete matrix: run 34174004857.
+        index: [0, 2, 3, 5, 7]
     steps:
       - uses: actions/checkout@v4
         with:

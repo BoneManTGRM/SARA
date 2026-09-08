@@ -85,3 +85,17 @@ The next candidate addresses observed setup failures:
 These corrections still require real-run qualification. The paid Luna producer,
 fresh benchmark allowance and 20 actual attempts remain outstanding. No existing
 paid grant or Telegram allowance authorizes this benchmark.
+
+Follow-up after run 34174004857: Preact-3454's image HEAD is correct;
+its sole tracked change is an install-generated package-lock.json. The judge
+now retains that original diff and restores only this known metadata file to
+the exact base, before submitted patches. Dependencies, grading tests and
+parser remain unchanged; clean-tree rejection still applies to everything
+else. This normalization must pass new base/reference controls.
+
+Run 34174004849 confirms Immutable-2006's corrected public build/test command
+passes. Bullseye's Release remains expired over HTTPS, so Preact-3454 now
+qualifies Node 18.20.4 on Bookworm. The public manifest declares no Node engine
+constraint. Axios-4731's direct Mocha command now explicitly exits after tests,
+as the newer Axios public command already does. Follow-up workflows select only
+changed/failed cases; they do not replace or shrink the frozen ten-task pilot.

@@ -13,7 +13,7 @@ test("judge config requires absolute private paths and immutable official image"
 
 test("official judge binds task/patch/image and removes harness container privileges", () => {
   const code = `
-import importlib.util,json,hashlib
+import importlib.util,json,hashlib,tempfile,os
 spec=importlib.util.spec_from_file_location('judge','scripts/swe-bench-judge.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 tasks=json.load(open('docs/benchmarks/swe-bench-multilingual-pilot.json'))['tasks']
@@ -39,14 +39,34 @@ class Result:
 class Container:
  def start(self):pass
  def exec_run(self,command,**kwargs):
+  if command[0]!='git':return Result(0,b'localhost diagnostics')
   assert command[:3]==['git','-c','safe.directory=/testbed']
   return Result(0,tasks[0]['base_commit'].encode() if command[3]=='rev-parse' else self.dirty)
-c=Container();c.dirty=b''
-m.CheckedContainer(c,tasks[0]['base_commit']).start()
-c.dirty=b' M package.json'
-try:m.CheckedContainer(c,tasks[0]['base_commit']).start()
-except ValueError as e:assert 'package.json' in str(e)
-else:raise AssertionError('dirty judge image accepted')
+with tempfile.TemporaryDirectory() as directory:
+ previous=os.getcwd();os.chdir(directory)
+ try:
+  c=Container();c.dirty=b''
+  m.CheckedContainer(c,tasks[0]['base_commit']).start()
+  assert json.load(open('startup-diagnostics.json'))['lookup']['exitCode']==0
+  c.dirty=b' M package.json'
+  try:m.CheckedContainer(c,tasks[0]['base_commit']).start()
+  except ValueError as e:assert 'package.json' in str(e)
+  else:raise AssertionError('dirty judge image accepted')
+  class PreactContainer(Container):
+   def exec_run(self,command,**kwargs):
+    if command[0]!='git':return Result(0,b'diagnostics')
+    if command[3]=='rev-parse':return Result(0,tasks[2]['base_commit'].encode())
+    if command[3]=='diff':return Result(0,b'original install-generated lockfile diff')
+    if command[3]=='restore':self.dirty=b'';return Result(0,b'')
+    return Result(0,self.dirty)
+  c=PreactContainer();c.dirty=b' M package-lock.json\\n'
+  m.CheckedContainer(c,tasks[2]['base_commit']).start()
+  assert open('image-lockfile-normalization.diff','rb').read()==b'original install-generated lockfile diff'
+  c.dirty=b' M package-lock.json\\n M src/index.js\\n'
+  try:m.CheckedContainer(c,tasks[2]['base_commit']).start()
+  except ValueError as e:assert 'src/index.js' in str(e)
+  else:raise AssertionError('source drift normalized away')
+ finally:os.chdir(previous)
 print('PASS')
 `;
   assert.match(execFileSync("python3", ["-c", code], { encoding: "utf8" }), /PASS/);
