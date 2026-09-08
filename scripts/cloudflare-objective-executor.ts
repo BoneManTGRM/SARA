@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-import { createCloudflareFreeCandidateGenerator } from "../src/cloudflare-free-generator.ts";
+import { boundedCandidateFailureFeedback, createCloudflareFreeCandidateGenerator } from "../src/cloudflare-free-generator.ts";
 import { GithubDraftPullRequestPublisher } from "../src/github-draft-publisher.ts";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
 import type { CandidatePublication } from "../src/site-directive.ts";
@@ -47,12 +47,6 @@ const kernel = await SaraKernel.boot({ stateDirectory });
 let previousProposal: SkillCandidateProposal | undefined;
 let repairFeedback: string | undefined;
 let candidate: Omit<CandidatePublication, "directiveId"> | undefined;
-
-function boundedVerifierFeedback(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  const match = message.match(/Behavioral verification mismatches: [^\n\r]*/u);
-  return (match?.[0] ?? "Independent isolated verification rejected at least one behavioral vector.").slice(0, 8_192);
-}
 
 for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
   const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
@@ -100,8 +94,9 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     break;
   } catch (error) {
     if (attempt === MAX_ATTEMPTS || !previousProposal) throw error;
-    repairFeedback = boundedVerifierFeedback(error);
+    repairFeedback = boundedCandidateFailureFeedback(error);
     console.log("Initial untrusted candidate was rejected; starting the single bounded repair attempt.");
+    console.log(`Bounded verifier evidence: ${repairFeedback}`);
   }
 }
 
