@@ -49,6 +49,12 @@ introduced. Every producer result is frozen before the first official grade.
   Case 9 remains unqualified. That failure also exposed missing timeout logs;
   the follow-up preserves bounded command output and streams active batch
   logs so a stalled browser can be diagnosed without widening limits.
+- Diagnostic-only run `34180848807` used a 120-second deadline and retained
+  all output on timeout. Batches 0 through 13 passed with no compiler errors
+  or OOM kills; batch 14 had started when the deadline arrived. It does not
+  qualify the environment. The streaming launcher now closes leftover batch
+  processes before advancing. Normal qualification still requires the full
+  vector under the original 900-second bound.
 - Real Docker proof `34177382219` passed both scripted repository producers,
   fresh kernel verification, poison rejection and artifact-tamper rejection.
   It made zero provider calls and zero benchmark attempts.
@@ -57,6 +63,9 @@ introduced. Every producer result is frozen before the first official grade.
   `npm run verify`: all 1,075 tests and proofs, plus seven offline recipe
   checks covering full inventory, fresh processes, support files, retained
   failures and the unchanged executor argument bound.
+- The diagnostics follow-up on `6837024c11331c16665c48423f7ba216cc8d2bf9`
+  passed local `npm run verify` with 1,076 tests and all proofs. Docker proof
+  `34180848927` and CodeQL `34180851950` also passed.
 
 All original failed artifacts remain evidence. Each new environment fix still
 needs its real Docker run; passing offline tests alone does not qualify it.
