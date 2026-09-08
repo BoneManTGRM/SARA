@@ -46,10 +46,25 @@ confirmed the mechanism: memory started at 455,024,640 bytes, peaked at
 from 0 to 1. Process-limit events stayed at zero. Its failed artifact digest is
 `cbb9b28eb81a584b671e5aa2e56287f9404b35007971b5392a016faa416a4206`.
 
-The next candidate bounds Node's old-space heap to 768 MiB and lowers Go's GC
-target to 25 for esbuild. The outer 2 GiB cap, all test files, compiler-error
-rejection, browser alias, and official grading remain unchanged. This is a
-memory-use correction requiring a new real Docker result, not a qualified pass.
+The first memory candidate bounded Node's old-space heap to 768 MiB and lowered
+Go's GC target to 25 for esbuild. Workflow `34178360150` exited successfully,
+but its counters still showed an OOM kill. **That apparent pass is withdrawn.**
+Its artifact digest is
+`01e149e8b3708f3614b9113f96cba89201cc4dc31a6ea8dc18fc1ede57ac6d93`.
+
+The qualification proof now rejects OOM/PID-limit events even with test exit 0,
+and rejects missing or reset resource counters. Regression tests cover the real
+false-pass mechanism. The integrated follow-up keeps the upstream separate
+bundle setting, bounds Node old-space to 512 MiB, and sets Go's memory target to
+384 MiB with GC target 25. All outer resource caps and tests remain unchanged.
+This needs its own real Docker result; no pass is claimed in advance.
+
+Parent PR #133 advanced concurrently to
+`dde48bdf0660d8177f384a79cbdc3622c5bf4136`. Its public run `34178214666`
+passed indices 2 and 4, while index 9 failed two assertions with single-bundle
+preprocessing. This continuation incorporates the parent's native-build,
+Babel and accounting repairs while retaining the original bundle isolation
+for index 9. Its file inventory and process diagnostics remain recorded.
 
 Local verification of the diagnostic candidate: after providing the unchanged
 qualified native checker and an isolated TMPDIR, `npm run verify` exited 0 with

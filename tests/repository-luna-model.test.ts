@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createBenchmarkDispatchBudget } from "../src/benchmark-dispatch-budget.ts";
+import { RepositoryProducerModelLimit } from "../src/repository-producer.ts";
 import { createRepositoryLunaModel } from "../src/repository-luna-model.ts";
 
 test("repository Luna adapter counts exact input, preserves authority checks and accounts provider usage", async () => {
@@ -42,5 +43,9 @@ test("repository Luna adapter counts exact input, preserves authority checks and
     assert.equal(empty.inputTokens, 12);
     assert.equal(calls.length, 4);
     assert.equal(budget.snapshot().closed, false);
+    await assert.rejects(model.request({ prompt: "Attempt request cap", signal: new AbortController().signal, deadline: Date.now() + 10000 }), RepositoryProducerModelLimit);
+    assert.equal(calls.length, 5); // Count only; no third generation dispatched.
+    assert.equal(budget.snapshot().closed, false);
+    assert.equal(budget.snapshot().unresolvedReservedUsd, 0);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

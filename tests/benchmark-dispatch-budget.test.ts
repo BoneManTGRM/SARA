@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createBenchmarkDispatchBudget, type BenchmarkDispatchBudgetConfig } from "../src/benchmark-dispatch-budget.ts";
+import { BenchmarkDispatchLimitError, createBenchmarkDispatchBudget, type BenchmarkDispatchBudgetConfig } from "../src/benchmark-dispatch-budget.ts";
 import { createObservedReuseBudget } from "../src/observed-reuse-benchmark.ts";
 import { OpenAIResponsesClient } from "../src/openai-worker.ts";
 import { CODING_REPAIR_EDITS_OUTPUT_CONTRACT } from "../src/coding-repair-edits.ts";
@@ -161,5 +161,60 @@ test("missing, wrong, or switched model identity retains reservation and closes 
     assert.equal(budget.snapshot().estimatedTotalUsd, .00014);
     await assert.rejects(first(url, body()), /CLOSED/);
     assert.equal(generations, 2);
+  });
+});
+test("known oversized token count rejects generation without closing later attempts", () => fixture(async directory => {
+  let generations = 0;
+  const budget = createBenchmarkDispatchBudget({ ...defaults(directory), fetchImpl: async (resource, init) => {
+    if (String(resource).endsWith("input_tokens")) {
+      const input = JSON.parse(init!.body as string).input;
+      return new Response(JSON.stringify({ input_tokens: input === "too big" ? 101 : 100 }));
+    }
+    generations++; return reply();
+  } });
+  const first = budget.fetchFor("0/conventional"), next = budget.fetchFor("0/reparodynamic");
+  await first(url + "/input_tokens", countBody("too big"));
+  await assert.rejects(first(url, body("too big")), error => {
+    assert.ok(error instanceof BenchmarkDispatchLimitError);
+    assert.equal(error.limit, "input_tokens"); assert.equal(error.dispatchOccurred, false); assert.equal(error.exposureUncertain, false);
+    return true;
+  });
+  assert.equal(generations, 0); assert.equal(budget.snapshot().closed, false);
+  assert.equal(budget.snapshot().unresolvedReservedUsd, 0);
+  await next(url + "/input_tokens", countBody()); await next(url, body());
+  assert.equal(generations, 1); assert.equal(budget.snapshot().estimatedTotalUsd, .00014);
+}));
+test("invalid or unsafe token count still closes every future attempt", async () => {
+  for (const input_tokens of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, null, "101"]) await fixture(async directory => {
+    let generations = 0;
+    const budget = createBenchmarkDispatchBudget({ ...defaults(directory), fetchImpl: async resource => {
+      if (String(resource).endsWith("input_tokens")) return new Response(JSON.stringify({ input_tokens }));
+      generations++; return reply();
+    } });
+    await assert.rejects(budget.fetchFor("0/conventional")(url + "/input_tokens", countBody()), error => {
+      assert.ok(!(error instanceof BenchmarkDispatchLimitError)); return true;
+    });
+    assert.equal(budget.snapshot().closed, true);
+    await assert.rejects(budget.fetchFor("0/reparodynamic")(url + "/input_tokens", countBody()), /CLOSED/);
+    assert.equal(generations, 0);
+  });
+});
+test("known per-attempt caps have no additional exposure and do not close the other arm", async () => {
+  for (const cap of ["attempt_budget", "attempt_requests"] as const) await fixture(async directory => {
+    let generations = 0;
+    const budget = createBenchmarkDispatchBudget({ ...defaults(directory),
+      ...(cap === "attempt_budget" ? { attemptCapMicros: 140 } : { maximumGenerationRequestsPerAttempt: 1 }),
+      fetchImpl: async resource => {
+        if (String(resource).endsWith("input_tokens")) return new Response('{"input_tokens":100}');
+        generations++; return reply();
+      } });
+    const first = budget.fetchFor("0/conventional"), next = budget.fetchFor("0/reparodynamic");
+    await first(url + "/input_tokens", countBody()); await first(url, body());
+    await assert.rejects(first(url, body()), error => {
+      assert.ok(error instanceof BenchmarkDispatchLimitError); assert.equal(error.limit, cap); return true;
+    });
+    assert.equal(generations, 1); assert.equal(budget.snapshot().closed, false);
+    assert.equal(budget.snapshot().unresolvedReservedUsd, 0);
+    await next(url + "/input_tokens", countBody()); await next(url, body()); assert.equal(generations, 2);
   });
 });

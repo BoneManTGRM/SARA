@@ -14,8 +14,9 @@ introduced. Every producer result is frozen before the first official grade.
 
 - Official run `34175065514` passed base/reference controls for task indices
   0, 2 and 3. Combined with previously recorded controls for 1, 4, 6, 8 and 9,
-  eight cases have demonstrated the required official outcomes. Remaining
-  cases 5 and 7 need the candidate changes qualified in Docker.
+  eight cases demonstrated the required official outcomes. Run `34177382246`
+  then passed cases 5 and 7 on commit `7774bf1eb73c8be898281796eb4ac1eb8361c77b`: all ten
+  cases now have the required base-fails/reference-passes control evidence.
 - Case 5's image adds one Corepack package-manager field. Normalization is
   restricted to its exact base and observed diff SHA-256
   `c01754d90bb5c2b79bb20813bbe95895999eaa68aa56b0ae62e6c70f75197e18`.
@@ -31,7 +32,17 @@ introduced. Every producer result is frozen before the first official grade.
   despite esbuild failure, executing only part of the suite. The rerun
   `34174004849` failed with the same underlying issue. The candidate explicitly
   rejects compiler-error logs and resolves the browser import to the existing
-  package browser export. No test or assertion is removed.
+  package browser export. Its next run stopped during compilation; termination
+  diagnostics and supported single-bundle preprocessing are being qualified.
+  No test or assertion is removed.
+
+- Public run `34177382225` passed cases 5 and 7. Cases 2, 4 and 9 remained
+  failures; their follow-up retains the same resource bounds and test files.
+- Real Docker proof `34177382219` passed both scripted repository producers,
+  fresh kernel verification, poison rejection and artifact-tamper rejection.
+  It made zero provider calls and zero benchmark attempts.
+- On the same published source, CI `34177384269` and CodeQL `34177384273`
+  passed. The local `npm run verify` also passed all 1,070 tests and proofs.
 
 All original failed artifacts remain evidence. Each new environment fix still
 needs its real Docker run; passing offline tests alone does not qualify it.

@@ -21,6 +21,12 @@ export interface RepositoryProducerModel {
     outputText: string; inputTokens: number; outputTokens: number; accountedCostUsd: number;
   }>;
 }
+/** Trusted adapter attestation: a bounded request was rejected before any
+ * generation dispatch. Never use this for an uncertain or charged response. */
+export class RepositoryProducerModelLimit extends Error {
+  readonly code = "PRODUCER_MODEL_LIMIT";
+  constructor() { super("PRODUCER_MODEL_LIMIT"); this.name = "RepositoryProducerModelLimit"; }
+}
 export interface RepositoryProducerEvent { kind: string; digest: string; detail: unknown }
 export interface RepositoryProducerResult {
   patch: string; status: "finished" | "exhausted" | "failed";
@@ -182,9 +188,17 @@ export async function runRepositoryProducer(input: {
         issue: task.problemStatement, repository: env.repository, baseCommit: env.baseCommit,
         strategy, limits, observations: result.events });
       result.modelRequests++;
+      let modelInvoked = false;
       const response = await dispatch("model", signal => {
+        modelInvoked = true;
         result.unreconciledModelRequests++; result.accountingComplete = false;
         return input.model.request({ prompt, signal, deadline });
+      }).catch(error => {
+        if (modelInvoked && error instanceof RepositoryProducerModelLimit) {
+          result.unreconciledModelRequests--;
+          result.accountingComplete = result.unreconciledModelRequests === 0;
+        }
+        throw error;
       });
       if (![response.inputTokens, response.outputTokens].every(n => Number.isSafeInteger(n) && n >= 0) || !Number.isFinite(response.accountedCostUsd) || response.accountedCostUsd < 0) throw new Error("PRODUCER_USAGE_INVALID");
       result.unreconciledModelRequests--; result.accountingComplete = result.unreconciledModelRequests === 0;
@@ -228,7 +242,7 @@ export async function runRepositoryProducer(input: {
     }
   } catch (error) {
     result.reason = error instanceof Error ? error.message : String(error);
-    result.status = /^PRODUCER_(WALL|TOOL|TEST|OUTPUT)_LIMIT$/.test(result.reason) ? "exhausted" : "failed";
+    result.status = error instanceof RepositoryProducerModelLimit || /^PRODUCER_(WALL|TOOL|TEST|OUTPUT)_LIMIT$/.test(result.reason) ? "exhausted" : "failed";
     event("stopped", { reason: result.reason });
   }
   // Never return while a timed-out repository action can create a new session.

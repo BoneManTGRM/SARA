@@ -18,10 +18,9 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        # Diagnose the retained Preact-4436 failure without duplicating the
-        # Preact-3454/Babel repairs in progress on the parent branch.
-        # The ten-task benchmark selection remains unchanged.
-        index: [9]
+        # Targeted follow-up; the complete ten-task matrix remains in run
+        # 34174004849. These indices do not change benchmark selection.
+        index: ${{ fromJSON(github.ref == 'refs/heads/fix/swe-existing-resource-qualification' && '[9]' || '[2,4,9]') }}
     steps:
       - uses: actions/checkout@v4
         with:
