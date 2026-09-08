@@ -1,5 +1,6 @@
 import { maintenanceJobs, maintenanceRequestDigest, validateMaintenanceRequest, type MaintenanceRequest, type MaintenanceJob } from "./website-maintenance.ts";
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
+import { boundedCandidateFailureFeedback } from "./cloudflare-free-generator.ts";
 import { performance } from "node:perf_hooks";
 import { KernelVerificationPool } from "./kernel-verification-pool.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -1798,6 +1799,7 @@ export class SaraKernel {
     const cycleStarted = performance.now();
     let generationMilliseconds = 0, kernelVerificationMilliseconds = 0, acceptanceAndReceiptsMilliseconds = 0;
     let uncommittedArtifact: string | undefined;
+    let proposedDigest: string | undefined;
     let acceptanceStarted = false;
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$/.test(generator.id)) {
       throw new Error("Candidate generator id must be 2–128 safe identifier characters.");
@@ -1889,6 +1891,7 @@ export class SaraKernel {
         })
         : generator.generate(generationInput)));
       generationOpen = false;
+      proposedDigest = sha256(canonicalJson(proposal));
       generationMilliseconds = performance.now() - generationStarted;
       const matchedPreview = Boolean(previewTask && previewDigest === sha256(canonicalJson(proposal)));
       const pooled = matchedPreview || Boolean(this.#verificationPool && proposal.candidateKind === "typescript_program");
@@ -2005,10 +2008,68 @@ export class SaraKernel {
             generatorId: generator.id,
             reason: error instanceof Error ? error.message.slice(0, 500) : "Unknown candidate failure",
           });
+          await this.authorize(principal, { action: "record_memory", targetId: "global", external: false });
+          const memory: MemoryRecord = {
+            id: `learning-failure-${jobId}`, category: "failure", scope: "global",
+            source: `sara://learning-failure/${sha256(runningJob.workCard.objective)}/${jobId}`,
+            statement: `${runningJob.workCard.objective.slice(0, 300)}: ${boundedCandidateFailureFeedback(error).slice(0, 1_000)}`,
+            confidence: 1, verification: "measured", observedAt: new Date().toISOString(),
+            lastValidatedAt: new Date().toISOString(),
+            tags: ["learning-failure"], status: "active",
+            dependencies: proposedDigest ? [`candidate:${proposedDigest}`] : [],
+          };
+          await this.#store.append("memory_recorded", principal, memory);
         }
       });
       throw error;
     }
+  }
+
+  /** Consume one delegated backlog entry; reservations survive failure/restart. */
+  async runNextAutonomousLearningCycle(generator: CandidateGenerator): Promise<{
+    status: "idle" | "blocked" | "failed" | "verified_shadow"; jobId?: string;
+  }> {
+    if (generator.maximumCostUsd !== 0) throw new Error("Autonomous learning requires a zero-cost generator.");
+    const reservation = await this.serializeMutation(async () => {
+      const state = await this.state();
+      if (state.emergencyStopped) return null;
+      const now = new Date().toISOString();
+      const reservations = state.events.filter(event => event.type === "autonomous_learning_reserved");
+      const reservedIds = new Set(reservations.map(event => (event.data as {jobId:string}).jobId));
+      // A lost process leaves its reservation consumed and stops dispatch until reconciled.
+      if (state.jobs.some(job => job.kind === "self_development" &&
+        (job.status === "running" || (reservedIds.has(job.id) && job.status === "authorized")))) return null;
+      if (reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length >= 2) return null;
+      const job = state.jobs.filter(job => job.kind === "self_development" && job.status === "authorized" &&
+        job.workCard.maximumBudgetUsd === 0 && job.workCard.requiredCapabilities.includes("autonomous-learning") && !reservedIds.has(job.id))
+        .sort((a,b) => b.workCard.expectedOwnerValue - a.workCard.expectedOwnerValue || a.id.localeCompare(b.id))[0];
+      if (!job) return undefined;
+      const request: RoutineActionRequest = {id:`learning:${job.id}`,kind:"business_candidate_development",targetId:job.id,
+        channel:"internal",serviceId:"skill-learning",estimatedCostUsd:0,external:generator.external,requestedAt:now,platform:"owner_site"};
+      if (evaluateRoutineAction({mandate:state.standingMandate,request,emergencyStopped:state.emergencyStopped}).outcome !== "automatic") return null;
+      const decision = await this.authorizeAutonomousRoutine(SARA_PRINCIPAL,state,request,false);
+      if (decision.outcome !== "automatic") return null;
+      await this.#store.append("autonomous_learning_reserved",SARA_PRINCIPAL,{jobId:job.id,mandateDigest:state.standingMandate!.digest});
+      return {jobId:job.id,mandateDigest:state.standingMandate!.digest,request};
+    });
+    if (!reservation) return {status:reservation === undefined ? "idle" : "blocked"};
+    try {
+      const result = await this.runSelfBuildCycle(SARA_PRINCIPAL,reservation.jobId,{
+        id:generator.id,external:generator.external,maximumCostUsd:0,
+        generate:async input => {
+          const checkMandate = () => this.serializeMutation(async () => {
+            const state = await this.state();
+            const decision = evaluateRoutineAction({mandate:state.standingMandate,request:{...reservation.request,requestedAt:new Date().toISOString()},emergencyStopped:state.emergencyStopped});
+            if (decision.outcome !== "automatic" || state.standingMandate?.digest !== reservation.mandateDigest) throw new Error("Learning mandate changed before dispatch.");
+          });
+          await checkMandate();
+          const proposal = await generator.generate(input);
+          await checkMandate();
+          return proposal;
+        },
+      });
+      return {status:result.job.status === "verified" && result.mutation.stage === "SHADOW" ? "verified_shadow" : "failed",jobId:reservation.jobId};
+    } catch {return {status:"failed",jobId:reservation.jobId};}
   }
 
   recordMutationEvidence(
