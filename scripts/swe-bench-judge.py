@@ -50,10 +50,15 @@ class CheckedContainer:
 
     def start(self):
         self.container.start()
-        head = self.container.exec_run(["git", "rev-parse", "HEAD"], workdir="/testbed")
-        clean = self.container.exec_run(["git", "status", "--porcelain", "--untracked-files=no"], workdir="/testbed")
+        # The pinned image may belong to its build user. Trust only this exact
+        # container path, as the stock eval script does later, never all paths.
+        git = ["git", "-c", "safe.directory=/testbed"]
+        head = self.container.exec_run(git + ["rev-parse", "HEAD"], workdir="/testbed")
+        clean = self.container.exec_run(git + ["status", "--porcelain", "--untracked-files=no"], workdir="/testbed")
         if head.exit_code or head.output.decode().strip() != self.base_commit or clean.exit_code or clean.output.strip():
-            raise ValueError("JUDGE_IMAGE_BASE_MISMATCH")
+            raise ValueError("JUDGE_IMAGE_BASE_MISMATCH:" + json.dumps({
+                "headExitCode": head.exit_code, "head": head.output.decode(errors="replace")[:1000],
+                "statusExitCode": clean.exit_code, "status": clean.output.decode(errors="replace")[:4000]}))
 
 
 class RestrictedContainers:
@@ -73,7 +78,8 @@ class RestrictedContainers:
         kwargs.update(network_disabled=True, network_mode="none", cap_add=[], cap_drop=["ALL"],
                       security_opt=["no-new-privileges"], mem_limit="2g", memswap_limit="2g",
                       nano_cpus=2_000_000_000, pids_limit=256,
-                      labels={"sara.repositoryJudgeRun": self.run_id})
+                      labels={"sara.repositoryJudgeRun": self.run_id},
+                      extra_hosts={"localhost": "127.0.0.1"})
         return CheckedContainer(self.containers.create(**kwargs), self.base_commit)
 
 

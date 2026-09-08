@@ -34,7 +34,8 @@ def dockerfile(recipe):
         raise ValueError("Browser flag required")
     setup = []
     if recipe.get("browser"):
-        setup.append("RUN apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/*")
+        # Avoid stale HTTP mirror caches; retain signature and expiry checks.
+        setup.append("RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null; apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/*")
     if manager and manager.startswith("yarn@3."):
         setup += ["ENV COREPACK_HOME=/opt/corepack", "RUN npm install --global --force corepack@0.31.0 && corepack enable && corepack prepare " + manager + " --activate && chmod -R a+rX /opt/corepack"]
     elif manager:

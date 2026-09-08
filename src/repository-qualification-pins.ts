@@ -9,7 +9,7 @@ export const REPOSITORY_QUALIFICATION_PINS = Object.freeze({ ...KERNEL_BENCHMARK
   "src/repository-executor.ts": "069dfd230a954aff37c5cf8f207105e9ec627858ec36054b811031c9d4a105bf",
   "src/repeat-kernel-benchmark.ts": "6b4385adb6e1b431e1610d96d7654def0b156431688725d3aaad1aa5c26a92a6",
   "src/repository-official-judge.ts": "2a46f37dad012746fcfaeacca97c58f70d339f9e9a764e7d3baf5b036f8c7018",
-  "scripts/swe-bench-judge.py": "6591d0675b889ebac6be1fabbe67a295dff008103f2125983537a7ce9b6bbae6",
+  "scripts/swe-bench-judge.py": "7c84fdefd06fad4665362419145ba737c4801064189ab7dceee33789b509ab0d",
 });
 export async function assertRepositoryQualificationImplementation(): Promise<void> {
   for (const [path, digest] of Object.entries(REPOSITORY_QUALIFICATION_PINS)) {

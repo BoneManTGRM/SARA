@@ -56,3 +56,32 @@ Automatic approval review rejected the attempted GitHub push because explicit
 authorization for publication of this new branch was required. No workaround was
 attempted. Publication and remote Docker qualification remain blocked pending
 that authorization. No benchmark attempts or paid model calls were made.
+
+## Compatibility qualification, 2026-09-08
+
+Candidate `bedabfa30f5dfd5ef30cc1412e3b31a24400ef52` launched public
+workflow 34173241974 and kernel official controls 34173241960. Public Vue,
+Three.js and Preact-4436 completed successfully. The other public environments
+failed; their original artifacts remain attached to that run. These are setup
+controls, not SARA attempts or benchmark scores.
+
+The next candidate addresses observed setup failures:
+
+- Immutable: compile the distribution with the version-specific build stages,
+  excluding only the network-dependent bundle-size reporting step before unit
+  tests. Rebuild still occurs after every candidate patch.
+- Docusaurus: serialize package compilation within the existing 2 GiB limit.
+- Babel: expose garbage collection to Jest between suites; preserve all suites.
+- Axios: explicitly qualify the offline Node unit subset. The HTTPS test calls
+  Google; Axios-5085's issue-4999 test calls Postman Echo. These are excluded
+  only from public feedback, with exact test-name filters. Full-suite failures
+  remain recorded. Official grading is unchanged.
+- Browser image setup: use HTTPS Debian mirrors while retaining signature and
+  expiry checks, following an expired HTTP-mirror Release response.
+- Judge startup: configure Git trust for `/testbed` only, as the stock harness
+  does later; keep exact HEAD and tracked-clean checks with diagnostic output.
+  Provide an explicit localhost mapping without granting external networking.
+
+These corrections still require real-run qualification. The paid Luna producer,
+fresh benchmark allowance and 20 actual attempts remain outstanding. No existing
+paid grant or Telegram allowance authorizes this benchmark.

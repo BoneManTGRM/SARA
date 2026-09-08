@@ -30,9 +30,23 @@ restricted.create(image='image',cap_add=['SYS_ADMIN'])
 assert c.arguments['network_mode']=='none' and c.arguments['cap_add']==[] and c.arguments['cap_drop']==['ALL']
 assert c.arguments['mem_limit']=='2g' and c.arguments['pids_limit']==256
 assert c.arguments['labels']=={'sara.repositoryJudgeRun':'run-1'}
+assert c.arguments['extra_hosts']=={'localhost':'127.0.0.1'}
 try:restricted.create(image='image',volumes={'/host':{}})
 except ValueError:pass
 else:raise AssertionError('host mount accepted')
+class Result:
+ def __init__(self,code,output):self.exit_code=code;self.output=output
+class Container:
+ def start(self):pass
+ def exec_run(self,command,**kwargs):
+  assert command[:3]==['git','-c','safe.directory=/testbed']
+  return Result(0,tasks[0]['base_commit'].encode() if command[3]=='rev-parse' else self.dirty)
+c=Container();c.dirty=b''
+m.CheckedContainer(c,tasks[0]['base_commit']).start()
+c.dirty=b' M package.json'
+try:m.CheckedContainer(c,tasks[0]['base_commit']).start()
+except ValueError as e:assert 'package.json' in str(e)
+else:raise AssertionError('dirty judge image accepted')
 print('PASS')
 `;
   assert.match(execFileSync("python3", ["-c", code], { encoding: "utf8" }), /PASS/);
