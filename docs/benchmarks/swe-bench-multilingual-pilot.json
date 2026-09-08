@@ -1,0 +1,81 @@
+{
+  "dataset": "SWE-bench/SWE-bench_Multilingual",
+  "datasetRevision": "846e647b9f33c0b51b739d005d13d85493c9af09",
+  "datasetSha256": "92abca7cb527b41a9f66d03a26ce441ff7319e3a49f985998fd56be4bb9b08b2",
+  "harnessRevision": "02e7a74ffd0b707aab73d203fe87bdc7c76afc8e",
+  "schemaVersion": 1,
+  "seed": "SARA-SWE-MULTILINGUAL-20260907-v1",
+  "selection": "SHA256(seed + newline + value), repo round-robin, ten tasks",
+  "tasks": [
+    {
+      "base_commit": "c30252f685e8f4326722de84923fcbc8cf557f06",
+      "image": "swebench/sweb.eval.x86_64.axios_1776_axios-4731:latest",
+      "instance_id": "axios__axios-4731",
+      "log_parser": "parse_log_tap",
+      "repo": "axios/axios"
+    },
+    {
+      "base_commit": "493afba6ec17d9c999dc5a15ac80c71c6bdba1c3",
+      "image": "swebench/sweb.eval.x86_64.immutable-js_1776_immutable-js-2006:latest",
+      "instance_id": "immutable-js__immutable-js-2006",
+      "log_parser": "parse_log_immutable_js",
+      "repo": "immutable-js/immutable-js"
+    },
+    {
+      "base_commit": "00c8d1ff1498084c15408cf0014d4c7facdb5dd7",
+      "image": "swebench/sweb.eval.x86_64.preactjs_1776_preact-3454:latest",
+      "instance_id": "preactjs__preact-3454",
+      "log_parser": "parse_log_karma",
+      "repo": "preactjs/preact"
+    },
+    {
+      "base_commit": "cb843e0be31f9e563ccfc30eca0c06f2a224b505",
+      "image": "swebench/sweb.eval.x86_64.vuejs_1776_core-11739:latest",
+      "instance_id": "vuejs__core-11739",
+      "log_parser": "parse_log_vitest",
+      "repo": "vuejs/core"
+    },
+    {
+      "base_commit": "fbd065256ca00d68089293ad48ea9aeba5481914",
+      "image": "swebench/sweb.eval.x86_64.babel_1776_babel-14532:latest",
+      "instance_id": "babel__babel-14532",
+      "log_parser": "parse_log_jest",
+      "repo": "babel/babel"
+    },
+    {
+      "base_commit": "0589b1475d56b0b541348aa56f201ec7c56c56d5",
+      "image": "swebench/sweb.eval.x86_64.facebook_1776_docusaurus-9897:latest",
+      "instance_id": "facebook__docusaurus-9897",
+      "log_parser": "parse_log_jest",
+      "repo": "facebook/docusaurus"
+    },
+    {
+      "base_commit": "8d9f8d50b923d5f8a673590ae138bc5d86a3a256",
+      "image": "swebench/sweb.eval.x86_64.mrdoob_1776_three.js-26589:latest",
+      "instance_id": "mrdoob__three.js-26589",
+      "log_parser": "parse_log_tap",
+      "repo": "mrdoob/three.js"
+    },
+    {
+      "base_commit": "85740c3e7a1fa48346dfcbd4497f463ccb1c1b05",
+      "image": "swebench/sweb.eval.x86_64.axios_1776_axios-5085:latest",
+      "instance_id": "axios__axios-5085",
+      "log_parser": "parse_log_tap",
+      "repo": "axios/axios"
+    },
+    {
+      "base_commit": "77434b3cbbc8ee21206f4cc6965e1c9b09cc92b6",
+      "image": "swebench/sweb.eval.x86_64.immutable-js_1776_immutable-js-2005:latest",
+      "instance_id": "immutable-js__immutable-js-2005",
+      "log_parser": "parse_log_immutable_js",
+      "repo": "immutable-js/immutable-js"
+    },
+    {
+      "base_commit": "db0f4f2e7a2338ea40050f623f05505a798fc1a4",
+      "image": "swebench/sweb.eval.x86_64.preactjs_1776_preact-4436:latest",
+      "instance_id": "preactjs__preact-4436",
+      "log_parser": "parse_log_karma",
+      "repo": "preactjs/preact"
+    }
+  ]
+}

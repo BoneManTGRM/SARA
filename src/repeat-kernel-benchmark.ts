@@ -18,6 +18,7 @@ import { codingRepairCandidateDigest } from "./experimental-v5/coding-repair-ver
 import { verifyGenomeLabArtifact } from "./genome-lab.ts";
 import { REPEAT_KERNEL_BENCHMARK_GRANT } from "./repeat-kernel-benchmark-grant.ts";
 import { KERNEL_BENCHMARK_PINS } from "./repeat-kernel-pins.ts";
+import { assertRepositoryQualificationImplementation, REPOSITORY_QUALIFICATION_PINS } from "./repository-qualification-pins.ts";
 import type { CodingRepairReuseSummary } from "./reusable-coding-candidate-generator.ts";
 import type { ProgramCandidateProposal } from "./types.ts";
 
@@ -74,7 +75,8 @@ export async function runKernelCodingBenchmark(input: {
   if (!/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/iu.test(input.benchmarkId)) throw new Error("KERNEL_BENCHMARK_ID");
   if ((input.executionKind === "scripted_offline" && !input.fetchImpl) ||
       (input.executionKind === "live" && (input.fetchImpl || input.benchmarkId !== REPEAT_KERNEL_BENCHMARK_GRANT.benchmarkId))) throw new Error("KERNEL_BENCHMARK_EXECUTION_KIND");
-  await assertKernelBenchmarkImplementation();
+  if (input.executionKind === "scripted_offline") await assertRepositoryQualificationImplementation();
+  else await assertKernelBenchmarkImplementation();
   await input.beforeDispatch();
   await mkdir(input.directory, { recursive: false, mode: 0o700 });
   const suiteStarted = performance.now();
@@ -94,7 +96,7 @@ export async function runKernelCodingBenchmark(input: {
   if (!native) throw new Error("KERNEL_BENCHMARK_NATIVE_REQUIRED");
   try {
     await writeBenchmarkAudit(trace, "kernel-registration.json", { benchmarkId: input.benchmarkId,
-      protocol: KERNEL_BENCHMARK_PROTOCOL, task, taskDigest: sha256(canonicalJson(task)), sourcePins: KERNEL_BENCHMARK_PINS,
+      protocol: KERNEL_BENCHMARK_PROTOCOL, task, taskDigest: sha256(canonicalJson(task)), sourcePins: input.executionKind === "scripted_offline" ? REPOSITORY_QUALIFICATION_PINS : KERNEL_BENCHMARK_PINS,
       executionKind: input.executionKind, runtime: { node: process.version, platform: process.platform, arch: process.arch } });
     for (const arm of REUSE_SPEED_ARMS) {
       const root = join(input.directory, "private-state", arm), token = randomUUID() + randomUUID();
@@ -230,7 +232,7 @@ export async function runKernelCodingBenchmark(input: {
     }));
     const allComplete = rows.length === 12 && rows.every(r => r.result === "passed");
     const summary = { protocol: KERNEL_BENCHMARK_PROTOCOL, benchmarkId: input.benchmarkId, executionKind: input.executionKind,
-      rows, aggregates, allComplete, comparisonAllowed: allComplete, sourcePins: KERNEL_BENCHMARK_PINS,
+      rows, aggregates, allComplete, comparisonAllowed: allComplete, sourcePins: input.executionKind === "scripted_offline" ? REPOSITORY_QUALIFICATION_PINS : KERNEL_BENCHMARK_PINS,
       setupMilliseconds, totalSuiteMilliseconds: performance.now() - suiteStarted,
       fatalDigest: fatal ? sha256(fatal instanceof Error ? fatal.name + ":" + fatal.message : "UNKNOWN") : null,
       accounting: budget.snapshot(), observedModelIdentity: observedModel, absoluteMaximumEstablished: false,

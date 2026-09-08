@@ -1,4 +1,6 @@
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
+import { repositoryBinding, validateRepositoryEnvironment, verifyRepositoryArtifact, verifyRepositoryPatch,
+  type RepositoryEnvironment, type RepositoryGenerator, type RepositoryTask } from "./repository-executor.ts";
 import { performance } from "node:perf_hooks";
 import { KernelVerificationPool } from "./kernel-verification-pool.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -448,6 +450,7 @@ export class SaraKernel {
   #verificationPool?: KernelVerificationPool;
   #previewVerificationPool?: KernelVerificationPool;
   readonly #buildQueue = new KernelBuildQueue();
+  readonly #repositoryEnvironments = new Map<string, RepositoryEnvironment>();
   readonly #constitution: SaraConstitution;
   readonly #ownerTokenSha256: string;
   readonly constitutionDigest: string;
@@ -485,6 +488,8 @@ export class SaraKernel {
     bootstrapRevenueCapabilities?: boolean;
     /** Trusted boot configuration only; never derived from a coding request. */
     selfBuildVerificationWorkers?: 0 | 1 | 2;
+    /** Trusted, public-base-only qualification images. No request can install one. */
+    repositoryEnvironments?: readonly RepositoryEnvironment[];
     now?: () => Date;
   }): Promise<SaraKernel> {
     if (![0, 1, 2].includes(options.selfBuildVerificationWorkers ?? 0)) throw new Error("KERNEL_VERIFICATION_WORKERS_INVALID");
@@ -517,6 +522,10 @@ export class SaraKernel {
         loaded.digest,
         ownerTokenSha256,
       );
+      for (const environment of structuredClone(options.repositoryEnvironments ?? [])) {
+        validateRepositoryEnvironment(environment);
+        kernel.#repositoryEnvironments.set(sha256(canonicalJson(environment)), environment);
+      }
       await store.append("system_booted", SARA_PRINCIPAL, {
         constitutionDigest: loaded.digest,
         constitutionVersion: loaded.constitution.version,
@@ -1714,6 +1723,60 @@ export class SaraKernel {
         artifactRelativePath: artifact.artifactRelativePath,
       };
     });
+  }
+
+  /** Qualification only: paid repository generation stays closed until a fresh
+   * source-bound run grant is integrated. No global memory or promotion record. */
+  async runRepositoryBuildCycle(principal: Principal, jobId: string, environmentDigest: string,
+    task: RepositoryTask, generator: RepositoryGenerator) {
+    const configured = this.#repositoryEnvironments.get(environmentDigest);
+    if (!configured) throw new Error("REPOSITORY_ENVIRONMENT_NOT_QUALIFIED");
+    const environment = structuredClone(configured);
+    task = structuredClone(task);
+    const binding = repositoryBinding(environment, task);
+    if (generator.external || generator.maximumCostUsd !== 0) throw new Error("REPOSITORY_FRESH_PAID_GRANT_REQUIRED");
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$/.test(generator.id)) throw new Error("REPOSITORY_GENERATOR_INVALID");
+    const generate = generator.generate.bind(generator), generatorId = generator.id;
+    const admissionEpoch = await this.serializeMutation(async () => {
+      await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}`, external: false });
+      const state = await this.state();
+      const job = state.jobs.find(j => j.id === jobId);
+      if (job?.status !== "authorized") throw new Error("REPOSITORY_JOB_NOT_AUTHORIZED");
+      await this.#store.append("job_status_changed", principal, { jobId, from: job.status, status: "running",
+        generatorId, ...binding, productionAuthority: false });
+      return state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null;
+    });
+    const reauthorize = async () => {
+      await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}:verify`, external: false });
+      const state = await this.state();
+      if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("REPOSITORY_JOB_NOT_RUNNING");
+      if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== admissionEpoch) throw new Error("REPOSITORY_AUTHORITY_CHANGED");
+    };
+    try {
+      const proposal = structuredClone(await generate({ task: structuredClone(task), environment: structuredClone(environment), ...binding }));
+      const receipt = await this.#buildQueue.run(async () => {
+        await this.serializeMutation(reauthorize);
+        return verifyRepositoryPatch(this.#store.stateDirectory, environment, task, proposal);
+      });
+      return await this.serializeMutation(async () => {
+        await reauthorize();
+        await verifyRepositoryArtifact(this.#store.stateDirectory, receipt);
+        // Retain all artifacts after this point, including uncertain receipt writes.
+        await this.#store.append("repository_build_cycle_completed", principal, { jobId, generatorId,
+          ...receipt, attestation: "kernel_executed", acceptanceScope: "public_repository_tests_only" });
+        await this.#store.append("job_status_changed", principal, { jobId, from: "running",
+          status: receipt.exitCode === 0 ? "verified" : "failed", candidateDigest: receipt.candidateDigest });
+        return receipt;
+      });
+    } catch (error) {
+      await this.serializeMutation(async () => {
+        const state = await this.state();
+        if (state.jobs.find(j => j.id === jobId)?.status === "running") await this.#store.append("job_status_changed", principal,
+          { jobId, from: "running", status: "failed", generatorId,
+            reason: error instanceof Error ? error.message.slice(0, 500) : "Repository cycle failed" });
+      });
+      throw error;
+    }
   }
 
   async runSelfBuildCycle(

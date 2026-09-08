@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { runKernelCodingBenchmark, assertKernelBenchmarkImplementation as assertExactImplementation } from "../src/repeat-kernel-benchmark.ts";
 import { assertKernelBenchmarkImplementation as assertConsumedExactImplementation } from "../src/exact-reuse-kernel-benchmark.ts";
 import { assertKernelBenchmarkImplementation } from "../src/kernel-coding-benchmark.ts";
+import { assertRepositoryQualificationImplementation } from "../src/repository-qualification-pins.ts";
 import { KERNEL_CODING_BENCHMARK_GRANT as grant, HARDENED_REUSE_BENCHMARK_GRANT as previous,
   activeCodingBenchmarkContinuation, inspectCodingBenchmarkReadiness } from "../src/coding-benchmark-readiness.ts";
 import { codingBenchmarkLaunchSpec } from "../src/coding-benchmark-owner.ts";
@@ -83,10 +84,11 @@ test("mocked and live execution classifications cannot be interchanged", async (
   await assert.rejects(runKernelCodingBenchmark({ ...options, executionKind: "scripted_offline" }), /EXECUTION_KIND/);
   await assert.rejects(runKernelCodingBenchmark({ ...options, executionKind: "live", fetchImpl: model().fetchImpl }), /EXECUTION_KIND/);
 }));
-test("historical full-kernel pins reject the new candidate and new pins match", async () => {
+test("historical live pins reject the new candidate; separate offline qualification pins match", async () => {
   await assert.rejects(assertKernelBenchmarkImplementation(), /SOURCE_DRIFT/);
   await assert.rejects(assertConsumedExactImplementation(), /SOURCE_DRIFT/);
-  await assertExactImplementation();
+  await assert.rejects(assertExactImplementation(), /SOURCE_DRIFT/);
+  await assertRepositoryQualificationImplementation();
 });
 test("all twelve actual HTTP/kernel jobs complete with six scripted generations and fresh acceptance", async () => inDirectory(async root => {
   const stub = model(); const directory = join(root, "trial");

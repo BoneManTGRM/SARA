@@ -1,0 +1,70 @@
+name: SWE-bench official grading controls (no model calls)
+
+on:
+  push:
+    branches: [feat/swe-bench-multilingual-pilot]
+    paths:
+      - .github/workflows/swe-bench-controls.yml
+      - scripts/swe-bench-pilot.py
+      - docs/benchmarks/swe-bench-multilingual-pilot.json
+
+permissions:
+  contents: read
+
+jobs:
+  controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install the pinned official grading harness
+        shell: bash
+        run: |
+          git clone https://github.com/SWE-bench/SWE-bench.git "$RUNNER_TEMP/harness"
+          git -C "$RUNNER_TEMP/harness" checkout 02e7a74ffd0b707aab73d203fe87bdc7c76afc8e
+          python -m pip install "$RUNNER_TEMP/harness"
+          docker info
+      - name: Run untouched-base and reference-patch controls
+        shell: bash
+        run: |
+          python scripts/swe-bench-pilot.py controls \
+            --dataset "$RUNNER_TEMP/judge/test.parquet" \
+            --manifest docs/benchmarks/swe-bench-multilingual-pilot.json \
+            --harness "$RUNNER_TEMP/harness" \
+            --index '${{ matrix.index }}' \
+            --output "$RUNNER_TEMP/control-evidence"
+      - name: Preserve every control result (judge-only; never agent input)
+        if: always()
+        shell: bash
+        env:
+          CONTROL_INDEX: ${{ matrix.index }}
+          CONTROL_JOB_STATUS: ${{ job.status }}
+        run: |
+          python - <<'PY'
+          import json, os, pathlib
+          folder = pathlib.Path(os.environ['RUNNER_TEMP']) / 'control-attempt'
+          folder.mkdir(exist_ok=True)
+          data = {key: os.environ[key] for key in ['GITHUB_SHA', 'GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'CONTROL_INDEX', 'CONTROL_JOB_STATUS']}
+          data.update(kind='official_harness_controls_only', modelRequests=0, saraScore=None)
+          (folder / 'attempt.json').write_text(json.dumps(data, indent=2) + '\n')
+          PY
+      - name: Upload control evidence including setup failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: swe-controls-${{ matrix.index }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/control-evidence
+            ${{ runner.temp }}/control-attempt
+          if-no-files-found: error
+          retention-days: 30
