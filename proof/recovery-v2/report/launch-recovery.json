@@ -1,0 +1,18 @@
+{
+  "unrunProducerSlots": 135,
+  "failure": "temporary import collision before producer startup",
+  "controllerOrSimulatorChanged": false,
+  "cleanup": [
+    {
+      "path": "/workspace/scratch/c25dda301e8f/SARA/src/.recovery-v2-baseline-7.ts",
+      "sha256": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+      "reason": "owned completed development import; all development sessions exited"
+    },
+    {
+      "path": "/workspace/scratch/c25dda301e8f/SARA/src/.recovery-v2-current-7.ts",
+      "sha256": "3a168cddfb464cae1870ddf31eead17b0b7ea38df77b8fd490a11e041d15411f",
+      "reason": "owned completed development import; all development sessions exited"
+    }
+  ],
+  "retry": "same frozen command and candidate in unused results directory"
+}

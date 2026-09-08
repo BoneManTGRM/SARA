@@ -1,0 +1,38 @@
+{
+  "recovery-v2-red-reproduction.log": {
+    "sha256": "532bc4e1f5cbd0ea871fc9d38cff2a6924f894a3309bcafcfc19fe0b6afd1032",
+    "bytes": 1755
+  },
+  "recovery-v2-dev-candidate.log": {
+    "sha256": "7f398e991138669ffbffc7e6e99015994d36ba3265b4fa70af235a210c81f988",
+    "bytes": 4705
+  },
+  "recovery-v2-dev-baseline.log": {
+    "sha256": "6e58995c4b36826d8515526db4c3956c463c464672cf944e09f29096298d3a43",
+    "bytes": 2912
+  },
+  "recovery-v2-heldout-launch-failure.log": {
+    "sha256": "e271f78339f0203ba44cbf4c231aa6af58c865f87ba702ad0f9d43980d686eab",
+    "bytes": 689
+  },
+  "recovery-v2-verify.log": {
+    "sha256": "afccfd7be97dfac8e5f6900c6877e2e8d0cd5748fb1c63e86db2df7c32c45a45",
+    "bytes": 160653
+  },
+  "recovery-v2-heldout.log": {
+    "sha256": "16b7664ac76efbef4074e637583d335aa9f0accf239c8e14da9d2a6cd623126a",
+    "bytes": 22148
+  },
+  "recovery-v2-focused.log": {
+    "sha256": "bbb03786ed5624718b71d1af9d97d23146d3b0c1e872f5a136dc3e32903579db",
+    "bytes": 1776
+  },
+  "recovery-v2-typecheck.log": {
+    "sha256": "7248f3642ce6e14eb1ffd990507efe7d8b6be8134a31197d089a18b1076a173c",
+    "bytes": 139
+  },
+  "recovery-v2-red.log": {
+    "sha256": "d97984a8e539f5d2c6e64df051a5de546861f5b08a0ed3bb02584d91e34beea0",
+    "bytes": 1637
+  }
+}

@@ -1,0 +1,201 @@
+{
+  "description": "Post-evaluation descriptive audit; frozen gate unchanged",
+  "aggregate": {
+    "A": {
+      "resolved": 9,
+      "recoveryCases": [
+        "affine-zero-invariant",
+        "clamp-lower-invariant",
+        "discount-zero-invariant",
+        "regression-without-repeat",
+        "already-failing-prerequisites",
+        "misleading-repeat",
+        "ignores-rejection",
+        "scope-escalation-control"
+      ],
+      "recoveries": 8,
+      "modelSubstituteRequests": 162,
+      "producerModelReservations": 163,
+      "tools": 236,
+      "publicTests": 48,
+      "gradingTestProcesses": 38,
+      "promptBytes": 1054131,
+      "retainedRegressions": 1,
+      "unknownRegressionGrades": 2,
+      "explicitRegressionRollbacks": 0,
+      "sameContextDuplicateEditsExecuted": 0,
+      "suppressedDuplicateProposals": 0,
+      "suppressedScopeProposals": 0,
+      "finishReconsiderations": 0,
+      "exhausted": 1,
+      "gradeOutcomes": {
+        "completed": 12,
+        "failed": 1,
+        "blocked": 2
+      }
+    },
+    "B": {
+      "resolved": 4,
+      "recoveryCases": [
+        "regression-without-repeat",
+        "already-failing-prerequisites",
+        "scope-escalation-control"
+      ],
+      "recoveries": 3,
+      "modelSubstituteRequests": 157,
+      "producerModelReservations": 158,
+      "tools": 211,
+      "publicTests": 43,
+      "gradingTestProcesses": 38,
+      "promptBytes": 1149333,
+      "retainedRegressions": 0,
+      "unknownRegressionGrades": 2,
+      "explicitRegressionRollbacks": 7,
+      "sameContextDuplicateEditsExecuted": 0,
+      "suppressedDuplicateProposals": 12,
+      "suppressedScopeProposals": 4,
+      "finishReconsiderations": 0,
+      "exhausted": 1,
+      "gradeOutcomes": {
+        "completed": 12,
+        "failed": 1,
+        "blocked": 2
+      }
+    },
+    "C": {
+      "resolved": 8,
+      "recoveryCases": [
+        "affine-zero-invariant",
+        "clamp-lower-invariant",
+        "discount-zero-invariant",
+        "regression-without-repeat",
+        "already-failing-prerequisites",
+        "misleading-repeat",
+        "scope-escalation-control"
+      ],
+      "recoveries": 7,
+      "modelSubstituteRequests": 179,
+      "producerModelReservations": 180,
+      "tools": 235,
+      "publicTests": 47,
+      "gradingTestProcesses": 38,
+      "promptBytes": 1428384,
+      "retainedRegressions": 0,
+      "unknownRegressionGrades": 2,
+      "explicitRegressionRollbacks": 7,
+      "sameContextDuplicateEditsExecuted": 0,
+      "suppressedDuplicateProposals": 12,
+      "suppressedScopeProposals": 4,
+      "finishReconsiderations": 6,
+      "exhausted": 1,
+      "gradeOutcomes": {
+        "completed": 12,
+        "failed": 1,
+        "blocked": 2
+      }
+    }
+  },
+  "frozenGate": {
+    "gains": [
+      "affine-zero-invariant",
+      "clamp-lower-invariant",
+      "discount-zero-invariant",
+      "misleading-repeat"
+    ],
+    "families": [
+      "affine",
+      "clamp",
+      "discount"
+    ],
+    "losses": [],
+    "overhead": [
+      {
+        "caseId": "direct-affine",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 64,
+        "cMs": 66,
+        "allowedMs": 105
+      },
+      {
+        "caseId": "regression-without-repeat",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 106,
+        "cMs": 107,
+        "allowedMs": 157.5
+      },
+      {
+        "caseId": "already-failing-prerequisites",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 140,
+        "cMs": 136,
+        "allowedMs": 200
+      },
+      {
+        "caseId": "public-pass-unresolved",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 64,
+        "cMs": 68,
+        "allowedMs": 105
+      },
+      {
+        "caseId": "no-alternative",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 109,
+        "cMs": 110,
+        "allowedMs": 161.25
+      },
+      {
+        "caseId": "exhausted-search",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 211,
+        "cMs": 223,
+        "allowedMs": 288.75
+      },
+      {
+        "caseId": "independent-verifier-error",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 65,
+        "cMs": 70,
+        "allowedMs": 106.25
+      },
+      {
+        "caseId": "authority-stops-dispatch",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 31,
+        "cMs": 30,
+        "allowedMs": 63.75
+      },
+      {
+        "caseId": "uncertain-call",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 33,
+        "cMs": 33,
+        "allowedMs": 66.25
+      },
+      {
+        "caseId": "scope-escalation-control",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 136,
+        "cMs": 130,
+        "allowedMs": 195
+      }
+    ],
+    "noAddedRegressions": true,
+    "negativesRejected": true,
+    "accepted": true
+  },
+  "evidenceSha256": {
+    "producer-freeze.json": "c0fb2a84b8e84c157cb4f425d4b96933506c82da8ef0021da7f44b49a73e0a56",
+    "results.json": "b462cc256b42e7b47c9826a87c071455b9572ff524301df2ecb56e004a87706f"
+  }
+}
