@@ -108,3 +108,24 @@ test("invalid registration closes an already allocated sandbox before rejection"
   await assert.rejects(runRepositoryProducer({ task, environment, limits: { ...limits, maximumModelRequests: Infinity }, model: model([]), sandbox: s.value, beforeAction() {} }), /PRODUCER_LIMITS/);
   assert.equal(closed, 1);
 });
+test("known pre-dispatch model cap preserves prior charges and ends with complete accounting", async () => {
+  const { RepositoryProducerModelLimit } = await import("../src/repository-producer.ts");
+  const s = sandbox(); let closed = false, requests = 0;
+  s.value.close = async () => { closed = true; };
+  const result = await runRepositoryProducer({ task, environment, limits, sandbox: s.value, beforeAction() {}, model: {
+    async request() {
+      if (++requests === 2) throw new RepositoryProducerModelLimit();
+      return { outputText: JSON.stringify({ action: "read", path: "src/file.ts" }), inputTokens: 5, outputTokens: 3, accountedCostUsd: .004 };
+    },
+  } });
+  assert.equal(result.status, "exhausted"); assert.equal(result.reason, "PRODUCER_MODEL_LIMIT");
+  assert.equal(result.modelRequests, 2); assert.equal(result.accountedCostUsd, .004);
+  assert.equal(result.inputTokens, 5); assert.equal(result.outputTokens, 3);
+  assert.equal(result.unreconciledModelRequests, 0); assert.equal(result.accountingComplete, true); assert.equal(closed, true);
+});
+test("an untyped error with the same text cannot erase unknown dispatch exposure", async () => {
+  const result = await runRepositoryProducer({ task, environment, limits, sandbox: sandbox().value, beforeAction() {}, model: {
+    async request() { throw Error("PRODUCER_MODEL_LIMIT"); },
+  } });
+  assert.equal(result.status, "failed"); assert.equal(result.accountingComplete, false); assert.equal(result.unreconciledModelRequests, 1);
+});

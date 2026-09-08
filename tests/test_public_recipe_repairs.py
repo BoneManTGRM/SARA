@@ -21,7 +21,7 @@ class RecipeTests(unittest.TestCase):
         recipe = dict(repository='preactjs/preact', baseCommit='a' * 40,
                       runtimeImage='node@sha256:' + 'b' * 64,
                       nodeRuntimeImage='node@sha256:' + 'c' * 64,
-                      packageManager='npm@6.14.18', browser=True,
+                      packageManager='npm@6.14.18', browser=True, nodeGypVersion='9.4.1',
                       installCommand=RECIPES[2]['installCommand'])
         lines = builder.dockerfile(recipe).splitlines()
         self.assertEqual(lines[:2], ['FROM ' + recipe['nodeRuntimeImage'] + ' AS public_node_runtime', 'FROM ' + recipe['runtimeImage']])
@@ -31,6 +31,10 @@ class RecipeTests(unittest.TestCase):
         self.assertIn('USER 1000:1000', lines[:install])
         self.assertNotIn('USER root', lines[lines.index('USER 1000:1000'):])
         self.assertNotIn('Check-Valid-Until', '\n'.join(lines))
+        self.assertIn('RUN npm install --global --force node-gyp@9.4.1', lines)
+        self.assertIn('ENV npm_config_node_gyp=/usr/local/bin/node-gyp', lines)
+        with self.assertRaises(ValueError):
+            builder.dockerfile(dict(recipe, nodeGypVersion='latest'))
         for changed in ['node:14', 'evil@sha256:' + 'd' * 64, 'node@sha256:' + 'd' * 64 + '\nRUN true']:
             with self.assertRaises(ValueError):
                 builder.dockerfile(dict(recipe, nodeRuntimeImage=changed))
@@ -45,6 +49,7 @@ class RecipeTests(unittest.TestCase):
                     recipe = json.loads(Path(command[2]).read_text())
                     self.assertEqual(recipe['runtimeImage'], 'node@sha256:' + 'b' * 64)
                     self.assertEqual(recipe['nodeRuntimeImage'], 'node@sha256:' + 'c' * 64)
+                    self.assertEqual(recipe['nodeGypVersion'], '9.4.1')
                     build = output / 'build'
                     build.mkdir()
                     (build / 'build-receipt.json').write_text(json.dumps({'image': 'sha256:' + 'e' * 64}))
@@ -108,6 +113,9 @@ const options={stdin:{contents:'import server from "preact/compat/server"; conso
                       'esbuild': {'singleBundle': False, 'target': 'es2015', 'plugins': [{'name': 'custom'}]},
                       'browsers': ['ChromeNoSandboxHeadless']}
             (root / 'karma.conf.js').write_text('module.exports=' + json.dumps(config))
+            glob = root / 'node_modules/glob'
+            glob.mkdir(parents=True)
+            (glob / 'index.js').write_text("exports.sync=(pattern)=>pattern.includes('polyfills')?['/work/test/polyfills.js']:['/work/test/browser/a.test.js','/work/compat/test/browser/b.test.js'];")
             fake = root / 'node_modules/karma'
             fake.mkdir(parents=True)
             fake.joinpath('index.js').write_text("""
@@ -121,17 +129,26 @@ exports.Server=class {
  start(){
   if(process.env.BABEL_NO_MODULES!=='true'||process.env.COVERAGE!=='true')throw Error('UPSTREAM_ENV');
   fs.writeFileSync('captured-config.json',JSON.stringify(this.config));
-  console.log(process.env.TEST_KARMA_MESSAGE);this.done(Number(process.env.TEST_KARMA_EXIT));
+  console.log(process.env.TEST_KARMA_MESSAGE);if(process.env.TEST_KARMA_MESSAGE==='child-killed')process.kill(process.pid,'SIGKILL');this.done(Number(process.env.TEST_KARMA_EXIT));
  }
 };
 """)
-            for message, exitcode, expected in [('465 tests completed', 0, 0), ('ERROR [esbuild]: The service was stopped', 0, 1), ('tests failed', 1, 1)]:
+            for message, exitcode, expected in [('465 tests completed', 0, 0), ('ERROR [esbuild]: The service was stopped', 0, 1), ('tests failed', 1, 1), ('child-killed', 0, 1)]:
                 env = dict(os.environ, TEST_KARMA_MESSAGE=message, TEST_KARMA_EXIT=str(exitcode))
                 result = subprocess.run(RECIPES[9]['publicTestCommand'], cwd=root, env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, expected, result.stderr)
                 self.assertIn(message, result.stdout)
                 captured = json.loads((root / 'captured-config.json').read_text())
                 self.assertEqual(captured.pop('singleRun'), True)
+                self.assertEqual(captured['esbuild']['singleBundle'], True)
+                captured['esbuild']['singleBundle'] = False
+                inventory = next(json.loads(line) for line in result.stdout.splitlines() if line.startswith('{') and json.loads(line).get('event') == 'public_test_inventory')
+                self.assertEqual(inventory['files'], ['/work/compat/test/browser/b.test.js', '/work/test/browser/a.test.js', '/work/test/polyfills.js'])
+                diagnostic = next(json.loads(line) for line in result.stdout.splitlines() if line.startswith('{') and json.loads(line).get('event') == 'public_test_process')
+                self.assertEqual(diagnostic['status'], None if message == 'child-killed' else exitcode)
+                self.assertEqual(diagnostic['signal'], 'SIGKILL' if message == 'child-killed' else None)
+                self.assertIn('memoryEventsBefore', diagnostic)
+                self.assertIn('memoryEventsAfter', diagnostic)
                 aliases = captured['esbuild'].pop('alias')
                 self.assertEqual(aliases, {'preact/compat/server': str(root / 'compat/server.browser.js')})
                 self.assertEqual(captured, config)

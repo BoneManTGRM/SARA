@@ -22,6 +22,8 @@ try:
     runtime = json.loads(subprocess.check_output(["docker", "image", "inspect", recipe["runtimeTag"]], text=True))[0]["RepoDigests"][0]
     resolved = {"repository": task["repo"], "baseCommit": task["base_commit"], "runtimeImage": runtime,
                 "packageManager": recipe["packageManager"], "installCommand": recipe["installCommand"], "browser": recipe.get("browser", False)}
+    if recipe.get("nodeGypVersion"):
+        resolved["nodeGypVersion"] = recipe["nodeGypVersion"]
     if recipe.get("nodeRuntimeTag"):
         subprocess.run(["docker", "pull", recipe["nodeRuntimeTag"]], check=True, timeout=300)
         resolved["nodeRuntimeImage"] = json.loads(subprocess.check_output(

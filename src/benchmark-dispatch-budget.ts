@@ -2,6 +2,17 @@ import { readBoundedProviderBody } from "./bounded-provider-body.ts";
 import { writeBenchmarkAudit } from "./coding-benchmark-audit.ts";
 import { sha256 } from "./canonical.ts";
 
+/** A known rejection before generation dispatch. It does not represent an
+ * uncertain provider charge or authorize retrying a dispatched request. */
+export class BenchmarkDispatchLimitError extends Error {
+  readonly dispatchOccurred = false;
+  readonly exposureUncertain = false;
+  constructor(readonly limit: "input_tokens" | "arm_budget" | "total_budget" | "attempt_budget" | "attempt_requests", message: string) {
+    super(message);
+    this.name = "BenchmarkDispatchLimitError";
+  }
+}
+
 export interface BenchmarkDispatchBudgetConfig {
   directory: string;
   beforeDispatch(): Promise<void>;
@@ -31,6 +42,8 @@ export interface BenchmarkDispatchBudgetConfig {
 export function createBenchmarkDispatchBudget(config: BenchmarkDispatchBudgetConfig) {
   const c = { ...config, arms: [...config.arms], attempts: config.attempts.map(a => ({ ...a })) };
   const error = (suffix: string) => new Error(`${c.errorPrefix ?? "BENCHMARK_DISPATCH"}_${suffix}`);
+  const limitError = (limit: BenchmarkDispatchLimitError["limit"], suffix: string) =>
+    new BenchmarkDispatchLimitError(limit, `${c.errorPrefix ?? "BENCHMARK_DISPATCH"}_${suffix}`);
   const positive = (n: number) => Number.isSafeInteger(n) && n > 0;
   const label = (s: string) => typeof s === "string" && /^[a-zA-Z0-9._:/-]{1,240}$/u.test(s);
   if (typeof c.beforeDispatch !== "function" || c.model !== "gpt-5.6-luna" || c.reasoning !== "medium" ||
@@ -94,10 +107,11 @@ export function createBenchmarkDispatchBudget(config: BenchmarkDispatchBudgetCon
       // Repository calls instead require the successful exact model/input count.
       const countKey = sha256(JSON.stringify([attemptId, c.model, body.input, body.text ?? null]));
       const bound = c.inputBound === "utf8_bytes_with_framing_reserve" ? Buffer.byteLength(copy.body, "utf8") + 1024 : counts.get(countKey);
-      if (generation && (bound === undefined || bound > c.maximumInputTokens)) throw error("INPUT_TOKEN_BOUND_REQUIRED");
-      if (generation && (maximumRequestMicros > c.armCapMicros - spent[arm] || maximumRequestMicros > c.totalCapMicros - total)) throw error("ARM_BUDGET_EXHAUSTED");
-      if (generation && (maximumRequestMicros > c.attemptCapMicros - spentAttempt[attemptId] ||
-        dispatchedAttempt[attemptId] >= c.maximumGenerationRequestsPerAttempt)) throw error("ATTEMPT_BUDGET_EXHAUSTED");
+      if (generation && (bound === undefined || bound > c.maximumInputTokens)) throw limitError("input_tokens", "INPUT_TOKEN_BOUND_REQUIRED");
+      if (generation && maximumRequestMicros > c.armCapMicros - spent[arm]) throw limitError("arm_budget", "ARM_BUDGET_EXHAUSTED");
+      if (generation && maximumRequestMicros > c.totalCapMicros - total) throw limitError("total_budget", "ARM_BUDGET_EXHAUSTED");
+      if (generation && maximumRequestMicros > c.attemptCapMicros - spentAttempt[attemptId]) throw limitError("attempt_budget", "ATTEMPT_BUDGET_EXHAUSTED");
+      if (generation && dispatchedAttempt[attemptId] >= c.maximumGenerationRequestsPerAttempt) throw limitError("attempt_requests", "ATTEMPT_BUDGET_EXHAUSTED");
       inFlight = true; const number = ++sequence; let didDispatch = false;
       const audit = (kind: string, payload: object) => writeBenchmarkAudit(c.directory,
         `${c.auditPrefix ?? "benchmark-budget"}-${String(number).padStart(4,"0")}-${kind}.json`, { arm, attemptId, ...payload });
@@ -137,7 +151,10 @@ export function createBenchmarkDispatchBudget(config: BenchmarkDispatchBudgetCon
           spent[arm] += micros; spentAttempt[attemptId] += micros; total += micros;
           reserved = 0; reservedAttempt[attemptId] = 0; completed[arm]++; completedAttempt[attemptId]++;
         } else {
-          if (!Number.isSafeInteger(data.input_tokens) || data.input_tokens < 0 || data.input_tokens > c.maximumInputTokens) throw error("INPUT_TOKEN_BOUND_REQUIRED");
+          // A valid count above the configured cap is known, not uncertain.
+          // Keep it for the pre-generation limit check and leave other attempts
+          // eligible. Malformed counts still close the budget below.
+          if (!Number.isSafeInteger(data.input_tokens) || data.input_tokens < 0) throw error("INPUT_TOKEN_BOUND_REQUIRED");
           await audit("response", { inputTokens: data.input_tokens, requestDigest: sha256(copy.body), responseDigest: sha256(raw) });
           counts.set(countKey, data.input_tokens);
         }

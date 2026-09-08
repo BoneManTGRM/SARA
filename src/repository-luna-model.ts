@@ -1,6 +1,6 @@
 import { OpenAIResponsesClient } from "./openai-worker.ts";
-import type { createBenchmarkDispatchBudget } from "./benchmark-dispatch-budget.ts";
-import type { RepositoryProducerModel } from "./repository-producer.ts";
+import { BenchmarkDispatchLimitError, type createBenchmarkDispatchBudget } from "./benchmark-dispatch-budget.ts";
+import { RepositoryProducerModelLimit, type RepositoryProducerModel } from "./repository-producer.ts";
 
 /** Host-only adapter. Its mandatory budget owns dispatch accounting; the
  * budget's authority callback must also check the kernel's current permit.
@@ -19,11 +19,17 @@ export function createRepositoryLunaModel(input: {
       if (signal.aborted || remaining < 100) throw new Error("REPOSITORY_MODEL_DEADLINE");
       const before = budget.snapshot().estimatedByAttemptUsd[attemptId] ?? 0;
       let accountedGeneration: { inputTokens: number; billableOutputTokens: number } | null = null;
+      let knownLimit: BenchmarkDispatchLimitError | null = null;
       const client = new OpenAIResponsesClient({ apiKey,
         timeoutMs: Math.min(120000, remaining),
         fetchImpl: async (resource, init) => {
-          const response = await boundedFetch(resource, { ...init,
-            signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal });
+          let response;
+          try { response = await boundedFetch(resource, { ...init,
+            signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }); }
+          catch (error) {
+            if (error instanceof BenchmarkDispatchLimitError) knownLimit = error;
+            throw error;
+          }
           if (String(resource) === "https://api.openai.com/v1/responses") {
             // The budget has already validated identity/completion/usage and
             // durably settled this response, even if it contains no text.
@@ -40,6 +46,7 @@ export function createRepositoryLunaModel(input: {
       let response;
       try { response = await client.execute({ prompt, reasoningLevel: "medium", maximumOutputTokens }); }
       catch (error) {
+        if (knownLimit) throw new RepositoryProducerModelLimit();
         if (!accountedGeneration) throw error;
         // Refusal/empty text is an invalid producer action with known charges,
         // not a claim that the provider request was free or unaccounted.

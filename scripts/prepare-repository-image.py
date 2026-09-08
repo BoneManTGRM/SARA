@@ -16,7 +16,7 @@ import tempfile
 
 def dockerfile(recipe):
     required = {"repository", "baseCommit", "runtimeImage", "installCommand"}
-    if not required <= set(recipe) or set(recipe) - required - {"packageManager", "browser", "nodeRuntimeImage"}:
+    if not required <= set(recipe) or set(recipe) - required - {"packageManager", "browser", "nodeRuntimeImage", "nodeGypVersion"}:
         raise ValueError("Only public repository, commit, runtime image and install command are allowed")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", recipe["repository"]):
         raise ValueError("Invalid repository")
@@ -27,6 +27,9 @@ def dockerfile(recipe):
     node_runtime = recipe.get("nodeRuntimeImage")
     if node_runtime is not None and not re.fullmatch(r"node@sha256:[a-f0-9]{64}", node_runtime):
         raise ValueError("Digest-pinned official Node donor required")
+    node_gyp = recipe.get("nodeGypVersion")
+    if node_gyp is not None and not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", node_gyp):
+        raise ValueError("Exact node-gyp version required")
     command = recipe["installCommand"]
     if not isinstance(command, list) or not command or any(not isinstance(x, str) or "\0" in x or "\n" in x for x in command):
         raise ValueError("Install command must be an argument array")
@@ -43,6 +46,11 @@ def dockerfile(recipe):
         setup += ["ENV COREPACK_HOME=/opt/corepack", "RUN npm install --global --force corepack@0.31.0 && corepack enable && corepack prepare " + manager + " --activate && chmod -R a+rX /opt/corepack"]
     elif manager:
         setup.append("RUN npm install --global --force " + manager)
+    if node_gyp:
+        # npm6's bundled node-gyp5 is incompatible with Bookworm Python3.11.
+        # Override the build tool only; npm ci still honors the repository lock.
+        setup += ["RUN npm install --global --force node-gyp@" + node_gyp,
+                  "ENV npm_config_node_gyp=/usr/local/bin/node-gyp"]
     # Fetch exactly one public commit. No future branches, tags or credentials.
     checkout = ("git init /sara/base && cd /sara/base && "
                 f"git fetch --depth=1 https://github.com/{recipe['repository']}.git {recipe['baseCommit']} && "
