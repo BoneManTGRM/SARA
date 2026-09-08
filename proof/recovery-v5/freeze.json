@@ -1,0 +1,14 @@
+{
+  "files": {
+    "proof/recovery-v5/model.ts": "6384af73690a85fdc93cec77aa0cf647401e056441ce12c31548e6381665f48a",
+    "proof/recovery-v5/settings.json": "c1e082014bfce505388d9c8b2495acca6d71a0cd4cd3a15dc0d316e2f67f5134",
+    "proof/recovery-v5/current-producer.txt": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b",
+    "proof/recovery-v5/program.cjs": "53dbad21554b399c319d45c3baa43357b3d574e8ae1e119a22992fcc409b9797",
+    "proof/recovery-v5/heldout.json": "ec0d9c1f12026206a6f24da967b2adc62d1de979f7812f081a3400ef08244345",
+    "proof/recovery-v5/baseline-producer.txt": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+    "proof/recovery-v5/run.mts": "cbeca7cec4c16bf9c6d5e66e6bdd44a24c3dddf8546ea978b575ba993e6142c1",
+    "proof/recovery-v5/development.json": "b362c956e09138956529e6fb0cfdbdfd5e163d385002c79ec2f220c8e298d46b",
+    "proof/recovery-v5/summarize.py": "97abd848094cddb1876d2582ad7682e4f6c64712f7f998f504fc2ac9235f0352"
+  },
+  "note": "Common setup frozen before candidate development. Prior v4 heldout is now development replay. New heldout has two distinct toy program families; not external qualification."
+}

@@ -1,0 +1,13 @@
+{
+  "localStartingHead": "5247e0c26cf6077ff19d557bc44f94529bdee42c",
+  "remoteStartingHead": "8709d8de1c014db9d14cd9620fae4dc058e10f6a",
+  "currentMainInspected": "5a1144cb795789964d54d6fb8bcded9fb90462c0",
+  "commonFreeze": "224690a458baaa4c2b9668cf8d2ce2cf074d4481",
+  "candidateFreeze": "2fa3445c465b7a6bfaa632991b79d54f3fdefe1f",
+  "workflowFix": "e1e1ffadc321ef4554232e8521ee7d4a448bf346",
+  "siteSource": "4968b934694cd7e2ccd9ab8bc40e0ce1da15f113",
+  "siteSavedVersion": 50,
+  "siteDeployed": false,
+  "candidateSha256": "072b0c4ef63b6475d498feda54d0755319a0487643e6c1e86f5a56737cbb056d",
+  "activeProducerSha256": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b"
+}

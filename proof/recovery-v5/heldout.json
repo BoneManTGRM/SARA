@@ -1,0 +1,92 @@
+[
+  {
+    "id": "uppercase-join",
+    "family": "join",
+    "initial": {
+      "uppercase": false,
+      "separator": ""
+    },
+    "space": {
+      "uppercase": [
+        true
+      ],
+      "separator": [
+        "-",
+        ""
+      ]
+    },
+    "publicCases": [
+      [
+        [
+          "1",
+          "2"
+        ],
+        "12"
+      ]
+    ],
+    "gradeCases": [
+      [
+        [
+          "ab",
+          "cd"
+        ],
+        "ABCD"
+      ],
+      [
+        [],
+        ""
+      ]
+    ],
+    "requirement": "Join all strings without a separator and uppercase the result.",
+    "partialProgress": {
+      "uppercase": true
+    }
+  },
+  {
+    "id": "descending-sort",
+    "family": "sort",
+    "initial": {
+      "descending": false,
+      "limit": 10
+    },
+    "space": {
+      "descending": [
+        true
+      ],
+      "limit": [
+        0,
+        10
+      ]
+    },
+    "publicCases": [
+      [
+        [
+          7
+        ],
+        "7"
+      ]
+    ],
+    "gradeCases": [
+      [
+        [
+          2,
+          5,
+          1
+        ],
+        "5,2,1"
+      ],
+      [
+        [
+          4,
+          4,
+          3
+        ],
+        "4,4,3"
+      ]
+    ],
+    "requirement": "Numerically sort up to ten numbers in descending order and return a comma-separated string.",
+    "partialProgress": {
+      "descending": true
+    }
+  }
+]

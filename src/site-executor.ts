@@ -1,3 +1,4 @@
+import { PublicationCommandFailure } from "./github-draft-publisher.ts";
 import { sha256 } from "./canonical.ts";
 import type { SaraKernel } from "./kernel.ts";
 import type { SiteDirectiveClaim, SiteDirectiveFailedResult } from "./site-executor-client.ts";
@@ -11,6 +12,7 @@ import {
 type ExecutorDependencies = {
   kernel: SaraKernel;
   stateDirectory: string;
+  executionUrl?: string;
   claim(): Promise<SiteDirectiveClaim | null>;
   record(
     directiveId: string,
@@ -25,16 +27,23 @@ export async function executeOneSiteDirective(
 ): Promise<"NO_DIRECTIVE" | "SHADOW_RECORDED"> {
   const claimed = await dependencies.claim();
   if (!claimed) return "NO_DIRECTIVE";
+  const execution: { phase: "candidate" | "publication" | "recording" } = { phase: "candidate" };
   try {
     const result = await runClaimedSiteDirective(
       dependencies.kernel,
       dependencies.stateDirectory,
       claimed.directive,
-      dependencies.publisher,
+      { async publish(candidate) { execution.phase = "publication"; return dependencies.publisher.publish(candidate); } },
     );
+    execution.phase = "recording";
     await dependencies.record(claimed.directive.id, claimed.claim.id, result);
     return "SHADOW_RECORDED";
   } catch (error) {
+    // A lost recording response does not prove the published result was rejected.
+    // Preserve uncertainty instead of issuing a contradictory second write.
+    if (execution.phase === "recording") throw new Error("Self-build result recording is uncertain; reconcile the existing claim before retrying.");
+    const failureCode = error instanceof PublicationCommandFailure ? error.failureCode
+      : execution.phase === "publication" ? "DRAFT_PUBLICATION_FAILED" : "CANDIDATE_VERIFICATION_FAILED";
     const failureInput = error instanceof Error
       ? `${error.name}:${error.message}`
       : "UnknownError:non-error rejection";
@@ -43,7 +52,9 @@ export async function executeOneSiteDirective(
       status: "FAILED",
       maximumCostUsd: 0,
       generatorId: siteGeneratorId(claimed.directive),
-      failureCode: "SELF_BUILD_EXECUTION_FAILED",
+      failureCode,
+      ...(error instanceof PublicationCommandFailure ? { outputDigest: error.outputDigest } : {}),
+      ...(dependencies.executionUrl && /^https:\/\/github\.com\/BoneManTGRM\/SARA\/actions\/runs\/[1-9][0-9]*$/.test(dependencies.executionUrl) ? { executionUrl: dependencies.executionUrl } : {}),
       failureDigest: sha256(failureInput),
       lessons: [
         "The candidate was rejected before production authority was possible.",
@@ -51,6 +62,6 @@ export async function executeOneSiteDirective(
       ],
     };
     await dependencies.record(claimed.directive.id, claimed.claim.id, result);
-    throw new Error("Self-build directive failed after recording bounded evidence.");
+    throw new Error(`Self-build directive failed after recording bounded evidence. [${failureCode}]`);
   }
 }

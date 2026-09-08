@@ -23,6 +23,8 @@ const kernel = await SaraKernel.boot({ stateDirectory });
 const outcome = await executeOneSiteDirective({
   kernel,
   stateDirectory,
+  executionUrl: process.env.GITHUB_RUN_ID && /^[1-9][0-9]*$/.test(process.env.GITHUB_RUN_ID)
+    ? `https://github.com/BoneManTGRM/SARA/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined,
   claim: () => claimSiteDirective(oidcToken),
   record: (directiveId, claimId, result) =>
     recordSiteDirectiveResult(oidcToken, directiveId, claimId, result),

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "baselineSource": "31752fe68dfaa6ce8c33d145390b576db0693a28",
+  "baselineProducerSha256": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+  "limits": {
+    "maximumModelRequests": 50,
+    "maximumToolSteps": 200,
+    "maximumPublicTests": 6,
+    "maximumOutputBytes": 2097152,
+    "maximumWallMilliseconds": 1800000
+  },
+  "repetitions": 3,
+  "randomness": "none; deterministic hypotheses and response policy; wall-clock timing is nondeterministic",
+  "acceptance": {
+    "primary": "at least two additional B-unresolved tasks in two distinct program families under responsive AND imperfect policies",
+    "noLostBResolved": true,
+    "noAddedRegressions": true,
+    "allNegativeControlsRejected": true,
+    "maximumEqualOutcomeExtraRequests": 4,
+    "maximumEqualOutcomeExtraTools": 4,
+    "maximumEqualOutcomeExtraTests": 1,
+    "medianRuntimeFactor": 1.35,
+    "medianRuntimeSlackMs": 50,
+    "maximumEqualOutcomePromptFactor": 1.4,
+    "maximumEqualOutcomePromptSlackBytes": 4096,
+    "maximumTotalRequestAndToolFactor": 1.35,
+    "maximumTotalTestFactor": 1.35
+  },
+  "currentSource": "8709d8de1c014db9d14cd9620fae4dc058e10f6a",
+  "currentProducerSha256": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b",
+  "policies": [
+    "responsive",
+    "imperfect",
+    "unresponsive"
+  ]
+}

@@ -1,0 +1,517 @@
+{
+  "fixtureScenarios": 2,
+  "toyProgramFamilies": 2,
+  "policyConditions": 6,
+  "repetitions": 3,
+  "producerOutcomes": 54,
+  "independence": "Policies, repetitions and related variations are not independent task evidence. Assistant-authored toy fixtures are not external qualification.",
+  "policies": {
+    "responsive": {
+      "A": {
+        "resolved": 2,
+        "recoveries": 2,
+        "recoveriesFinishedByProducer": 2,
+        "resolvedAfterExhaustion": 0,
+        "requests": 22,
+        "reservations": 22,
+        "tools": 32,
+        "tests": 6,
+        "gradingProcesses": 6,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 0,
+        "failedPublicTestsAfterBaseline": 2,
+        "exhausted": 0,
+        "producerOutcomes": {
+          "finished": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 112442,
+        "observedOutputBytes": 4209,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 0,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 2
+        },
+        "sumCaseMedianProducerMs": 235,
+        "untestedExportsRejected": 0
+      },
+      "B": {
+        "resolved": 0,
+        "recoveries": 0,
+        "recoveriesFinishedByProducer": 0,
+        "resolvedAfterExhaustion": 0,
+        "requests": 24,
+        "reservations": 24,
+        "tools": 32,
+        "tests": 6,
+        "gradingProcesses": 6,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 2,
+        "duplicateProposalsSuppressed": 2,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 0,
+        "failedPublicTestsAfterBaseline": 2,
+        "exhausted": 0,
+        "producerOutcomes": {
+          "finished": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 145933,
+        "observedOutputBytes": 3399,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 2,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 0
+        },
+        "sumCaseMedianProducerMs": 289,
+        "untestedExportsRejected": 0
+      },
+      "C": {
+        "resolved": 2,
+        "recoveries": 2,
+        "recoveriesFinishedByProducer": 2,
+        "resolvedAfterExhaustion": 0,
+        "requests": 22,
+        "reservations": 22,
+        "tools": 36,
+        "tests": 6,
+        "gradingProcesses": 6,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 2,
+        "duplicateProposalsSuppressed": 0,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 2,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 0,
+        "failedPublicTestsAfterBaseline": 2,
+        "exhausted": 0,
+        "producerOutcomes": {
+          "finished": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 126390,
+        "observedOutputBytes": 4227,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 2,
+          "alignmentReuseTransitions": 2,
+          "scenariosFinallyAligned": 2
+        },
+        "sumCaseMedianProducerMs": 285,
+        "untestedExportsRejected": 0
+      }
+    },
+    "imperfect": {
+      "A": {
+        "resolved": 2,
+        "recoveries": 2,
+        "recoveriesFinishedByProducer": 2,
+        "resolvedAfterExhaustion": 0,
+        "requests": 34,
+        "reservations": 34,
+        "tools": 50,
+        "tests": 12,
+        "gradingProcesses": 6,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 6,
+        "failedPublicTestsAfterBaseline": 8,
+        "exhausted": 0,
+        "producerOutcomes": {
+          "finished": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 255752,
+        "observedOutputBytes": 6588,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 0,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 2
+        },
+        "sumCaseMedianProducerMs": 521,
+        "untestedExportsRejected": 0
+      },
+      "B": {
+        "resolved": 0,
+        "recoveries": 0,
+        "recoveriesFinishedByProducer": 0,
+        "resolvedAfterExhaustion": 0,
+        "requests": 36,
+        "reservations": 36,
+        "tools": 38,
+        "tests": 6,
+        "gradingProcesses": 6,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 2,
+        "duplicateProposalsSuppressed": 8,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 0,
+        "failedPublicTestsAfterBaseline": 2,
+        "exhausted": 0,
+        "producerOutcomes": {
+          "finished": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 298492,
+        "observedOutputBytes": 4578,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 2,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 0
+        },
+        "sumCaseMedianProducerMs": 264,
+        "untestedExportsRejected": 0
+      },
+      "C": {
+        "resolved": 2,
+        "recoveries": 2,
+        "recoveriesFinishedByProducer": 2,
+        "resolvedAfterExhaustion": 0,
+        "requests": 34,
+        "reservations": 34,
+        "tools": 42,
+        "tests": 6,
+        "gradingProcesses": 6,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 2,
+        "duplicateProposalsSuppressed": 6,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 2,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 0,
+        "failedPublicTestsAfterBaseline": 2,
+        "exhausted": 0,
+        "producerOutcomes": {
+          "finished": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 275562,
+        "observedOutputBytes": 5352,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 2,
+          "alignmentReuseTransitions": 2,
+          "scenariosFinallyAligned": 2
+        },
+        "sumCaseMedianProducerMs": 261,
+        "untestedExportsRejected": 0
+      }
+    },
+    "unresponsive": {
+      "A": {
+        "resolved": 0,
+        "recoveries": 0,
+        "recoveriesFinishedByProducer": 0,
+        "resolvedAfterExhaustion": 0,
+        "requests": 32,
+        "reservations": 32,
+        "tools": 48,
+        "tests": 12,
+        "gradingProcesses": 6,
+        "retainedRegressions": 2,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 8,
+        "failedPublicTestsAfterBaseline": 10,
+        "exhausted": 2,
+        "producerOutcomes": {
+          "exhausted": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 227562,
+        "observedOutputBytes": 6438,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 0,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 2
+        },
+        "sumCaseMedianProducerMs": 495,
+        "untestedExportsRejected": 0
+      },
+      "B": {
+        "resolved": 0,
+        "recoveries": 0,
+        "recoveriesFinishedByProducer": 0,
+        "resolvedAfterExhaustion": 0,
+        "requests": 100,
+        "reservations": 100,
+        "tools": 68,
+        "tests": 4,
+        "gradingProcesses": 6,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 2,
+        "duplicateProposalsSuppressed": 44,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 0,
+        "failedPublicTestsAfterBaseline": 2,
+        "exhausted": 2,
+        "producerOutcomes": {
+          "exhausted": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 1888119,
+        "observedOutputBytes": 11245,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 2,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 0
+        },
+        "sumCaseMedianProducerMs": 214,
+        "untestedExportsRejected": 0
+      },
+      "C": {
+        "resolved": 0,
+        "recoveries": 0,
+        "recoveriesFinishedByProducer": 0,
+        "resolvedAfterExhaustion": 0,
+        "requests": 100,
+        "reservations": 100,
+        "tools": 72,
+        "tests": 4,
+        "gradingProcesses": 6,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 0,
+        "regressionRollbacks": 2,
+        "duplicateProposalsSuppressed": 42,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 2,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 0,
+        "failedPublicTestsAfterBaseline": 2,
+        "exhausted": 2,
+        "producerOutcomes": {
+          "exhausted": 2
+        },
+        "gradeOutcomes": {
+          "completed": 2
+        },
+        "uncertainAccounting": 0,
+        "unreconciledReservations": 0,
+        "promptBytes": 1910157,
+        "observedOutputBytes": 11307,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 2,
+          "scenariosEverAligned": 2,
+          "alignmentLossTransitions": 2,
+          "alignmentReuseTransitions": 2,
+          "scenariosFinallyAligned": 0
+        },
+        "sumCaseMedianProducerMs": 205,
+        "untestedExportsRejected": 2
+      }
+    }
+  },
+  "gate": {
+    "losses": [],
+    "gainsByPolicy": {
+      "responsive": {
+        "cases": [
+          "uppercase-join--policy--responsive",
+          "descending-sort--policy--responsive"
+        ],
+        "families": [
+          "join",
+          "sort"
+        ]
+      },
+      "imperfect": {
+        "cases": [
+          "uppercase-join--policy--imperfect",
+          "descending-sort--policy--imperfect"
+        ],
+        "families": [
+          "join",
+          "sort"
+        ]
+      },
+      "unresponsive": {
+        "cases": [],
+        "families": []
+      }
+    },
+    "overhead": [
+      {
+        "caseId": "uppercase-join--policy--unresponsive",
+        "requests": 0,
+        "tools": 2,
+        "tests": 0,
+        "bMs": 111,
+        "cMs": 101,
+        "allowedMs": 199.85000000000002,
+        "cPrompt": 965722,
+        "allowedPrompt": 1328802.5999999999
+      },
+      {
+        "caseId": "descending-sort--policy--unresponsive",
+        "requests": 0,
+        "tools": 2,
+        "tests": 0,
+        "bMs": 103,
+        "cMs": 104,
+        "allowedMs": 189.05,
+        "cPrompt": 944435,
+        "allowedPrompt": 1322756
+      }
+    ],
+    "totals": {
+      "responsive": {
+        "A": {
+          "modelRequests": 22,
+          "tools": 32,
+          "tests": 6
+        },
+        "B": {
+          "modelRequests": 24,
+          "tools": 32,
+          "tests": 6
+        },
+        "C": {
+          "modelRequests": 22,
+          "tools": 36,
+          "tests": 6
+        }
+      },
+      "imperfect": {
+        "A": {
+          "modelRequests": 34,
+          "tools": 50,
+          "tests": 12
+        },
+        "B": {
+          "modelRequests": 36,
+          "tools": 38,
+          "tests": 6
+        },
+        "C": {
+          "modelRequests": 34,
+          "tools": 42,
+          "tests": 6
+        }
+      },
+      "unresponsive": {
+        "A": {
+          "modelRequests": 32,
+          "tools": 48,
+          "tests": 12
+        },
+        "B": {
+          "modelRequests": 100,
+          "tools": 68,
+          "tests": 4
+        },
+        "C": {
+          "modelRequests": 100,
+          "tools": 72,
+          "tests": 4
+        }
+      }
+    },
+    "noAddedRegressions": true,
+    "negativesRejected": true,
+    "accepted": true
+  },
+  "overheadViolations": [],
+  "frozenOutcomesUnchanged": true,
+  "costs": {
+    "physicalProviderCalls": 0,
+    "newProviderSpendUsd": 0,
+    "newHostingSpendUsd": 0,
+    "existingComputeEconomicCost": "unmeasured",
+    "actualSweBenchAttempts": 0
+  },
+  "files": {
+    "producer-freeze.json": "f9518fb244228372c2a1b6d9cfefdd1c708f821cf37730f69bd295d901f9d4cb",
+    "prompt-original.json": "10dd0311f587b8e0b4e3166d98504dc536a25bd9dc4ae513c63d44565e5ece7b",
+    "results.json": "120ce8f2286f8d473629b4b9f52bd458f66f7d460ff8f20e0b7ab0ceec949e66"
+  }
+}

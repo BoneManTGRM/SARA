@@ -1,0 +1,924 @@
+{
+  "fixtureScenarios": 15,
+  "toyProgramFamilies": 5,
+  "policyConditions": 45,
+  "repetitions": 3,
+  "producerOutcomes": 405,
+  "independence": "Policies, repetitions and related variations are not independent task evidence. Assistant-authored toy fixtures are not external qualification.",
+  "policies": {
+    "responsive": {
+      "A": {
+        "resolved": 9,
+        "recoveries": 8,
+        "recoveriesFinishedByProducer": 8,
+        "resolvedAfterExhaustion": 0,
+        "requests": 140,
+        "reservations": 141,
+        "tools": 203,
+        "tests": 42,
+        "gradingProcesses": 38,
+        "retainedRegressions": 1,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 0,
+        "failedPublicTestsAfterBaseline": 16,
+        "exhausted": 1,
+        "producerOutcomes": {
+          "finished": 12,
+          "exhausted": 1,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 823547,
+        "observedOutputBytes": 27091,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 6,
+          "alignmentLossTransitions": 0,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 6
+        },
+        "sumCaseMedianProducerMs": 3046,
+        "untestedExportsRejected": 0
+      },
+      "B": {
+        "resolved": 4,
+        "recoveries": 3,
+        "recoveriesFinishedByProducer": 3,
+        "resolvedAfterExhaustion": 0,
+        "requests": 146,
+        "reservations": 147,
+        "tools": 203,
+        "tests": 42,
+        "gradingProcesses": 38,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 7,
+        "duplicateProposalsSuppressed": 5,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 2,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 2,
+        "failedPublicTestsAfterBaseline": 16,
+        "exhausted": 1,
+        "producerOutcomes": {
+          "finished": 12,
+          "exhausted": 1,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 974164,
+        "observedOutputBytes": 24362,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 6,
+          "alignmentLossTransitions": 5,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 1
+        },
+        "sumCaseMedianProducerMs": 3075,
+        "untestedExportsRejected": 0
+      },
+      "C": {
+        "resolved": 9,
+        "recoveries": 8,
+        "recoveriesFinishedByProducer": 8,
+        "resolvedAfterExhaustion": 0,
+        "requests": 143,
+        "reservations": 144,
+        "tools": 216,
+        "tests": 42,
+        "gradingProcesses": 38,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 7,
+        "duplicateProposalsSuppressed": 0,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 2,
+        "repeatedEditsExecuted": 5,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 2,
+        "failedPublicTestsAfterBaseline": 16,
+        "exhausted": 1,
+        "producerOutcomes": {
+          "finished": 12,
+          "exhausted": 1,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 959118,
+        "observedOutputBytes": 26548,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 6,
+          "alignmentLossTransitions": 5,
+          "alignmentReuseTransitions": 5,
+          "scenariosFinallyAligned": 6
+        },
+        "sumCaseMedianProducerMs": 2824,
+        "untestedExportsRejected": 0
+      }
+    },
+    "imperfect": {
+      "A": {
+        "resolved": 7,
+        "recoveries": 6,
+        "recoveriesFinishedByProducer": 6,
+        "resolvedAfterExhaustion": 0,
+        "requests": 180,
+        "reservations": 181,
+        "tools": 264,
+        "tests": 67,
+        "gradingProcesses": 38,
+        "retainedRegressions": 1,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 30,
+        "failedPublicTestsAfterBaseline": 43,
+        "exhausted": 3,
+        "producerOutcomes": {
+          "finished": 10,
+          "exhausted": 3,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 1221946,
+        "observedOutputBytes": 33784,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 6,
+          "alignmentLossTransitions": 0,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 6
+        },
+        "sumCaseMedianProducerMs": 4797,
+        "untestedExportsRejected": 0
+      },
+      "B": {
+        "resolved": 3,
+        "recoveries": 2,
+        "recoveriesFinishedByProducer": 1,
+        "resolvedAfterExhaustion": 1,
+        "requests": 196,
+        "reservations": 197,
+        "tools": 231,
+        "tests": 46,
+        "gradingProcesses": 38,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 7,
+        "duplicateProposalsSuppressed": 26,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 5,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 10,
+        "failedPublicTestsAfterBaseline": 22,
+        "exhausted": 3,
+        "producerOutcomes": {
+          "finished": 10,
+          "exhausted": 3,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 1764153,
+        "observedOutputBytes": 34707,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 6,
+          "alignmentLossTransitions": 5,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 1
+        },
+        "sumCaseMedianProducerMs": 3220,
+        "untestedExportsRejected": 0
+      },
+      "C": {
+        "resolved": 8,
+        "recoveries": 7,
+        "recoveriesFinishedByProducer": 6,
+        "resolvedAfterExhaustion": 1,
+        "requests": 193,
+        "reservations": 194,
+        "tools": 244,
+        "tests": 46,
+        "gradingProcesses": 38,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 7,
+        "duplicateProposalsSuppressed": 21,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 5,
+        "repeatedEditsExecuted": 5,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 10,
+        "failedPublicTestsAfterBaseline": 22,
+        "exhausted": 3,
+        "producerOutcomes": {
+          "finished": 10,
+          "exhausted": 3,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 1755225,
+        "observedOutputBytes": 36884,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 6,
+          "alignmentLossTransitions": 5,
+          "alignmentReuseTransitions": 5,
+          "scenariosFinallyAligned": 6
+        },
+        "sumCaseMedianProducerMs": 3119,
+        "untestedExportsRejected": 0
+      }
+    },
+    "unresponsive": {
+      "A": {
+        "resolved": 1,
+        "recoveries": 0,
+        "recoveriesFinishedByProducer": 0,
+        "resolvedAfterExhaustion": 0,
+        "requests": 168,
+        "reservations": 169,
+        "tools": 250,
+        "tests": 68,
+        "gradingProcesses": 38,
+        "retainedRegressions": 7,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 40,
+        "failedPublicTestsAfterBaseline": 50,
+        "exhausted": 10,
+        "producerOutcomes": {
+          "exhausted": 10,
+          "finished": 3,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 1045689,
+        "observedOutputBytes": 31142,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 5,
+          "alignmentLossTransitions": 0,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 5
+        },
+        "sumCaseMedianProducerMs": 4323,
+        "untestedExportsRejected": 0
+      },
+      "B": {
+        "resolved": 1,
+        "recoveries": 0,
+        "recoveriesFinishedByProducer": 0,
+        "resolvedAfterExhaustion": 0,
+        "requests": 446,
+        "reservations": 447,
+        "tools": 329,
+        "tests": 36,
+        "gradingProcesses": 38,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 7,
+        "duplicateProposalsSuppressed": 156,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 24,
+        "repeatedEditsExecuted": 0,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 9,
+        "failedPublicTestsAfterBaseline": 18,
+        "exhausted": 10,
+        "producerOutcomes": {
+          "exhausted": 10,
+          "finished": 3,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 8625553,
+        "observedOutputBytes": 71845,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 5,
+          "alignmentLossTransitions": 5,
+          "alignmentReuseTransitions": 0,
+          "scenariosFinallyAligned": 0
+        },
+        "sumCaseMedianProducerMs": 2994,
+        "untestedExportsRejected": 0
+      },
+      "C": {
+        "resolved": 1,
+        "recoveries": 0,
+        "recoveriesFinishedByProducer": 0,
+        "resolvedAfterExhaustion": 0,
+        "requests": 446,
+        "reservations": 447,
+        "tools": 339,
+        "tests": 36,
+        "gradingProcesses": 38,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "regressionRollbacks": 7,
+        "duplicateProposalsSuppressed": 151,
+        "equivalentTransitionsRestored": 0,
+        "scopeSuppressed": 24,
+        "repeatedEditsExecuted": 5,
+        "repeatedKnownFailedTransitionsExecuted": 0,
+        "sameFailedCandidateRetested": 9,
+        "failedPublicTestsAfterBaseline": 18,
+        "exhausted": 10,
+        "producerOutcomes": {
+          "exhausted": 10,
+          "finished": 3,
+          "failed": 2
+        },
+        "gradeOutcomes": {
+          "completed": 12,
+          "failed": 1,
+          "blocked": 2
+        },
+        "uncertainAccounting": 1,
+        "unreconciledReservations": 1,
+        "promptBytes": 8719054,
+        "observedOutputBytes": 72752,
+        "partialProgress": {
+          "meaning": "post-freeze requirement-aligned fields; not proof of intermediate correctness",
+          "scenariosAssessed": 6,
+          "scenariosEverAligned": 5,
+          "alignmentLossTransitions": 5,
+          "alignmentReuseTransitions": 5,
+          "scenariosFinallyAligned": 0
+        },
+        "sumCaseMedianProducerMs": 2885,
+        "untestedExportsRejected": 5
+      }
+    }
+  },
+  "gate": {
+    "losses": [],
+    "gainsByPolicy": {
+      "responsive": {
+        "cases": [
+          "scale-batch--policy--responsive",
+          "range-batch--policy--responsive",
+          "price-batch--policy--responsive",
+          "prefix-can-regress--policy--responsive",
+          "misleading-price-batch--policy--responsive"
+        ],
+        "families": [
+          "affine",
+          "clamp",
+          "discount"
+        ]
+      },
+      "imperfect": {
+        "cases": [
+          "scale-batch--policy--imperfect",
+          "range-batch--policy--imperfect",
+          "price-batch--policy--imperfect",
+          "prefix-can-regress--policy--imperfect",
+          "misleading-price-batch--policy--imperfect"
+        ],
+        "families": [
+          "affine",
+          "clamp",
+          "discount"
+        ]
+      },
+      "unresponsive": {
+        "cases": [],
+        "families": []
+      }
+    },
+    "overhead": [
+      {
+        "caseId": "scale-batch--policy--unresponsive",
+        "requests": 0,
+        "tools": 2,
+        "tests": 0,
+        "bMs": 194,
+        "cMs": 165,
+        "allowedMs": 311.90000000000003,
+        "cPrompt": 911519,
+        "allowedPrompt": 1259004.2
+      },
+      {
+        "caseId": "range-batch--policy--unresponsive",
+        "requests": 0,
+        "tools": 2,
+        "tests": 0,
+        "bMs": 197,
+        "cMs": 151,
+        "allowedMs": 315.95000000000005,
+        "cPrompt": 917303,
+        "allowedPrompt": 1265690.5999999999
+      },
+      {
+        "caseId": "price-batch--policy--unresponsive",
+        "requests": 0,
+        "tools": 2,
+        "tests": 0,
+        "bMs": 207,
+        "cMs": 223,
+        "allowedMs": 329.45000000000005,
+        "cPrompt": 924151,
+        "allowedPrompt": 1280070
+      },
+      {
+        "caseId": "prefix-can-regress--policy--unresponsive",
+        "requests": 0,
+        "tools": 2,
+        "tests": 0,
+        "bMs": 218,
+        "cMs": 183,
+        "allowedMs": 344.3,
+        "cPrompt": 911019,
+        "allowedPrompt": 1258304.2
+      },
+      {
+        "caseId": "direct-repair--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 140,
+        "cMs": 116,
+        "allowedMs": 239,
+        "cPrompt": 13010,
+        "allowedPrompt": 22310
+      },
+      {
+        "caseId": "direct-repair--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 118,
+        "cMs": 140,
+        "allowedMs": 209.3,
+        "cPrompt": 13010,
+        "allowedPrompt": 22310
+      },
+      {
+        "caseId": "direct-repair--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 179,
+        "cMs": 183,
+        "allowedMs": 291.65,
+        "cPrompt": 13010,
+        "allowedPrompt": 22310
+      },
+      {
+        "caseId": "red-baseline-composition--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 384,
+        "cMs": 285,
+        "allowedMs": 568.4000000000001,
+        "cPrompt": 110284,
+        "allowedPrompt": 156572.8
+      },
+      {
+        "caseId": "red-baseline-composition--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 494,
+        "cMs": 455,
+        "allowedMs": 716.9000000000001,
+        "cPrompt": 170617,
+        "allowedPrompt": 236259.4
+      },
+      {
+        "caseId": "red-baseline-composition--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 439,
+        "cMs": 394,
+        "allowedMs": 642.6500000000001,
+        "cPrompt": 106655,
+        "allowedPrompt": 148919
+      },
+      {
+        "caseId": "misleading-price-batch--policy--unresponsive",
+        "requests": 0,
+        "tools": 2,
+        "tests": 0,
+        "bMs": 208,
+        "cMs": 169,
+        "allowedMs": 330.8,
+        "cPrompt": 923896,
+        "allowedPrompt": 1279213.2
+      },
+      {
+        "caseId": "public-test-insufficient--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 156,
+        "cMs": 109,
+        "allowedMs": 260.6,
+        "cPrompt": 13244,
+        "allowedPrompt": 22639
+      },
+      {
+        "caseId": "public-test-insufficient--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 153,
+        "cMs": 141,
+        "allowedMs": 256.55,
+        "cPrompt": 13245,
+        "allowedPrompt": 22639
+      },
+      {
+        "caseId": "public-test-insufficient--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 146,
+        "cMs": 143,
+        "allowedMs": 247.10000000000002,
+        "cPrompt": 13245,
+        "allowedPrompt": 22639
+      },
+      {
+        "caseId": "no-feasible-repair--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 131,
+        "cMs": 115,
+        "allowedMs": 226.85000000000002,
+        "cPrompt": 26992,
+        "allowedPrompt": 41435.399999999994
+      },
+      {
+        "caseId": "no-feasible-repair--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 127,
+        "cMs": 156,
+        "allowedMs": 221.45000000000002,
+        "cPrompt": 79363,
+        "allowedPrompt": 113856
+      },
+      {
+        "caseId": "no-feasible-repair--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 185,
+        "cMs": 174,
+        "allowedMs": 299.75,
+        "cPrompt": 884921,
+        "allowedPrompt": 1236094.5999999999
+      },
+      {
+        "caseId": "test-budget--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 460,
+        "cMs": 467,
+        "allowedMs": 671,
+        "cPrompt": 281020,
+        "allowedPrompt": 388536
+      },
+      {
+        "caseId": "test-budget--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 343,
+        "cMs": 350,
+        "allowedMs": 513.05,
+        "cPrompt": 133826,
+        "allowedPrompt": 185760
+      },
+      {
+        "caseId": "test-budget--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 395,
+        "cMs": 425,
+        "allowedMs": 583.25,
+        "cPrompt": 104037,
+        "allowedPrompt": 145253.8
+      },
+      {
+        "caseId": "independent-verifier-unavailable--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 116,
+        "cMs": 153,
+        "allowedMs": 206.60000000000002,
+        "cPrompt": 12815,
+        "allowedPrompt": 22037
+      },
+      {
+        "caseId": "independent-verifier-unavailable--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 204,
+        "cMs": 122,
+        "allowedMs": 325.40000000000003,
+        "cPrompt": 12815,
+        "allowedPrompt": 22037
+      },
+      {
+        "caseId": "independent-verifier-unavailable--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 162,
+        "cMs": 128,
+        "allowedMs": 268.70000000000005,
+        "cPrompt": 12815,
+        "allowedPrompt": 22037
+      },
+      {
+        "caseId": "authority-interruption--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 42,
+        "cMs": 58,
+        "allowedMs": 106.7,
+        "cPrompt": 1064,
+        "allowedPrompt": 5585.6
+      },
+      {
+        "caseId": "authority-interruption--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 70,
+        "cMs": 78,
+        "allowedMs": 144.5,
+        "cPrompt": 1064,
+        "allowedPrompt": 5585.6
+      },
+      {
+        "caseId": "authority-interruption--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 69,
+        "cMs": 68,
+        "allowedMs": 143.15,
+        "cPrompt": 1064,
+        "allowedPrompt": 5585.6
+      },
+      {
+        "caseId": "uncertain-accounting--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 73,
+        "cMs": 49,
+        "allowedMs": 148.55,
+        "cPrompt": 2647,
+        "allowedPrompt": 7801.799999999999
+      },
+      {
+        "caseId": "uncertain-accounting--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 47,
+        "cMs": 41,
+        "allowedMs": 113.45,
+        "cPrompt": 2647,
+        "allowedPrompt": 7801.799999999999
+      },
+      {
+        "caseId": "uncertain-accounting--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 44,
+        "cMs": 55,
+        "allowedMs": 109.4,
+        "cPrompt": 2647,
+        "allowedPrompt": 7801.799999999999
+      },
+      {
+        "caseId": "scope-escalation--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 250,
+        "cMs": 270,
+        "allowedMs": 387.5,
+        "cPrompt": 129947,
+        "allowedPrompt": 183924.59999999998
+      },
+      {
+        "caseId": "scope-escalation--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 404,
+        "cMs": 347,
+        "allowedMs": 595.4000000000001,
+        "cPrompt": 535891,
+        "allowedPrompt": 746553.7999999999
+      },
+      {
+        "caseId": "scope-escalation--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 166,
+        "cMs": 184,
+        "allowedMs": 274.1,
+        "cPrompt": 2109151,
+        "allowedPrompt": 2950016.5999999996
+      },
+      {
+        "caseId": "single-edit-delay--policy--responsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 219,
+        "cMs": 211,
+        "allowedMs": 345.65000000000003,
+        "cPrompt": 43171,
+        "allowedPrompt": 63786.399999999994
+      },
+      {
+        "caseId": "single-edit-delay--policy--imperfect",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 222,
+        "cMs": 222,
+        "allowedMs": 349.70000000000005,
+        "cPrompt": 102670,
+        "allowedPrompt": 146186.19999999998
+      },
+      {
+        "caseId": "single-edit-delay--policy--unresponsive",
+        "requests": 0,
+        "tools": 0,
+        "tests": 0,
+        "bMs": 185,
+        "cMs": 240,
+        "allowedMs": 299.75,
+        "cPrompt": 883621,
+        "allowedPrompt": 1234274.5999999999
+      }
+    ],
+    "totals": {
+      "responsive": {
+        "A": {
+          "modelRequests": 140,
+          "tools": 203,
+          "tests": 42
+        },
+        "B": {
+          "modelRequests": 146,
+          "tools": 203,
+          "tests": 42
+        },
+        "C": {
+          "modelRequests": 143,
+          "tools": 216,
+          "tests": 42
+        }
+      },
+      "imperfect": {
+        "A": {
+          "modelRequests": 180,
+          "tools": 264,
+          "tests": 67
+        },
+        "B": {
+          "modelRequests": 196,
+          "tools": 231,
+          "tests": 46
+        },
+        "C": {
+          "modelRequests": 193,
+          "tools": 244,
+          "tests": 46
+        }
+      },
+      "unresponsive": {
+        "A": {
+          "modelRequests": 168,
+          "tools": 250,
+          "tests": 68
+        },
+        "B": {
+          "modelRequests": 446,
+          "tools": 329,
+          "tests": 36
+        },
+        "C": {
+          "modelRequests": 446,
+          "tools": 339,
+          "tests": 36
+        }
+      }
+    },
+    "noAddedRegressions": true,
+    "negativesRejected": true,
+    "accepted": true
+  },
+  "overheadViolations": [],
+  "frozenOutcomesUnchanged": true,
+  "costs": {
+    "physicalProviderCalls": 0,
+    "newProviderSpendUsd": 0,
+    "newHostingSpendUsd": 0,
+    "existingComputeEconomicCost": "unmeasured",
+    "actualSweBenchAttempts": 0
+  },
+  "files": {
+    "producer-freeze.json": "71469d7ecaa6c92d5e6d660b39c58919009276071c13c16fac294f1f33a32c28",
+    "prompt-original.json": "1b85f38ceb3c8e0334126e44e5b02ca7ea6fbfc7de997bd9948894c6547430d4",
+    "results.json": "e8fc7a59ba6bbcd22e8e1a0cf097d45f3ad728301e21a2b698e4ba242e1d8850"
+  }
+}
