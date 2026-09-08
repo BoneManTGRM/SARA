@@ -113,6 +113,14 @@ const options={stdin:{contents:'import server from "preact/compat/server"; conso
                       'esbuild': {'singleBundle': False, 'target': 'es2015', 'plugins': [{'name': 'custom'}]},
                       'browsers': ['ChromeNoSandboxHeadless'], 'plugins': ['karma-*'], 'reporters': ['mocha']}
             (root / 'karma.conf.js').write_text('module.exports=' + json.dumps(config))
+            # This is a recipe unit test, outside the Docker cgroup. GitHub's
+            # host root need not expose memory.events. Supply explicit fixture
+            # counters only to the test's outer Node process; real Docker
+            # qualification continues to read and enforce actual counters.
+            counters = root / 'fixture-counters.cjs'
+            counters.write_text("const fs=require('fs'),read=fs.readFileSync;fs.readFileSync=function(p,...args){return p==='/sys/fs/cgroup/memory.events'?'oom 0\\noom_kill 0\\n':read.call(this,p,...args)};")
+            command = list(RECIPES[9]['publicTestCommand'])
+            command[command.index('node') + 1:command.index('node') + 1] = ['--require', str(counters)]
             glob = root / 'node_modules/glob'
             glob.mkdir(parents=True)
             (glob / 'index.js').write_text("exports.sync=(pattern)=>pattern.includes('polyfills')?['/work/test/polyfills.js']:['/work/test/browser/a.test.js','/work/compat/test/browser/b.test.js'];")
@@ -141,8 +149,8 @@ exports.Server=class {
 """)
             for message, exitcode, expected in [('465 tests completed', 0, 0), ('ERROR [esbuild]: The service was stopped', 0, 1), ('tests failed', 1, 1), ('child-killed', 0, 1), ('missing-completion', 0, 1)]:
                 env = dict(os.environ, TEST_KARMA_MESSAGE=message, TEST_KARMA_EXIT=str(exitcode))
-                result = subprocess.run(RECIPES[9]['publicTestCommand'], cwd=root, env=env, capture_output=True, text=True)
-                self.assertEqual(result.returncode, expected, result.stderr)
+                result = subprocess.run(command, cwd=root, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 self.assertIn(message, result.stdout)
                 captured = json.loads((root / 'captured-config.json').read_text())
                 self.assertEqual(captured.pop('singleRun'), True)
