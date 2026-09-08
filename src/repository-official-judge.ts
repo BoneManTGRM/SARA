@@ -12,10 +12,12 @@ export interface RepositoryJudgeConfiguration {
   datasetPath: string;
   harnessPath: string;
   image: string;
+  fixtureProxyImage?: string;
 }
 export function validateRepositoryJudgeConfiguration(config: RepositoryJudgeConfiguration): void {
   if (!/^[a-f0-9]{64}$/.test(config.environmentDigest) || !isAbsolute(config.datasetPath)
-    || !isAbsolute(config.harnessPath) || !/^swebench\/[a-z0-9._-]+@sha256:[a-f0-9]{64}$/.test(config.image)) {
+    || !isAbsolute(config.harnessPath) || !/^swebench\/[a-z0-9._-]+@sha256:[a-f0-9]{64}$/.test(config.image)
+    || (config.fixtureProxyImage !== undefined && !/^python@sha256:[a-f0-9]{64}$/.test(config.fixtureProxyImage))) {
     throw new Error("REPOSITORY_JUDGE_CONFIGURATION");
   }
 }
@@ -28,6 +30,7 @@ export interface OfficialRepositoryResult {
   environmentDigest: string;
   taskDigest: string;
   image: string;
+  fixtureProxyImage: string | null;
   repository: string;
   baseCommit: string;
   resolved: boolean;
@@ -49,7 +52,8 @@ export async function runOfficialRepositoryJudge(stateDirectory: string, receipt
   const request = { schemaVersion: 1, instanceId: input.task.instanceId, arm: input.task.arm,
     runId: `sara-judge-${randomUUID()}`, patch: input.proposal.patch, patchDigest: receipt.patchDigest,
     repository: input.environment.repository, baseCommit: input.environment.baseCommit,
-    environmentDigest: receipt.environmentDigest, taskDigest: receipt.taskDigest, image: config.image };
+    environmentDigest: receipt.environmentDigest, taskDigest: receipt.taskDigest, image: config.image,
+    fixtureProxyImage: config.fixtureProxyImage ?? null };
   const requestPath = join(root, "judge-request.json");
   const file = await open(requestPath, "wx", 0o600);
   try { await file.writeFile(canonicalJson(request)); await file.sync(); } finally { await file.close(); }
@@ -71,13 +75,17 @@ export async function runOfficialRepositoryJudge(stateDirectory: string, receipt
       const ids = listed.stdout.trim().split(/\s+/).filter(Boolean);
       if (ids.some(id => !/^[a-f0-9]{12,64}$/.test(id)) || ids.length > 10) throw new Error("JUDGE_CLEANUP_IDENTITY");
       if (ids.length) await promisify(execFile)("docker", ["rm", "--force", ...ids], options);
+      const networks = await promisify(execFile)("docker", ["network", "ls", "--quiet", "--filter", `label=sara.repositoryJudgeRun=${request.runId}`], options);
+      const networkIds = networks.stdout.trim().split(/\s+/).filter(Boolean);
+      if (networkIds.some(id => !/^[a-f0-9]{12,64}$/.test(id)) || networkIds.length > 2) throw new Error("JUDGE_NETWORK_CLEANUP_IDENTITY");
+      if (networkIds.length) await promisify(execFile)("docker", ["network", "rm", ...networkIds], options);
     } catch (error) { dispatchError = `JUDGE_CLEANUP_FAILED: ${String(error).slice(0, 500)}; ${dispatchError ?? ""}`; }
     const file = await open(join(root, "judge-dispatch.json"), "wx", 0o600);
     try { await file.writeFile(canonicalJson({ runId: request.runId, dispatchError: dispatchError ?? null })); await file.sync(); }
     finally { await file.close(); }
   }
   const result = JSON.parse(await readFile(join(output, "judge-receipt.json"), "utf8")) as OfficialRepositoryResult;
-  for (const key of ["instanceId", "arm", "runId", "patchDigest", "environmentDigest", "taskDigest", "image", "repository", "baseCommit"] as const) {
+  for (const key of ["instanceId", "arm", "runId", "patchDigest", "environmentDigest", "taskDigest", "image", "fixtureProxyImage", "repository", "baseCommit"] as const) {
     if (result[key] !== request[key]) throw new Error("REPOSITORY_JUDGE_RECEIPT_BINDING");
   }
   if (dispatchError || !result.gradeCompleted) result.resolved = false;

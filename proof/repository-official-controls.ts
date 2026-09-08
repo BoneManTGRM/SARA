@@ -19,7 +19,8 @@ for (const label of ["base", "reference"] as const) {
   const binding = repositoryBinding(environment, task);
   const kernel = await SaraKernel.boot({ stateDirectory, ownerTokenSha256: sha256("official-control-owner-only"),
     repositoryEnvironments: [environment], repositoryJudges: [{ environmentDigest: binding.environmentDigest,
-      datasetPath: input.datasetPath, harnessPath: input.harnessPath, image: input.judgeImage }] });
+      datasetPath: input.datasetPath, harnessPath: input.harnessPath, image: input.judgeImage,
+      ...(input.fixtureProxyImage ? { fixtureProxyImage: input.fixtureProxyImage } : {}) }] });
   try {
     const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, { objective: `Official ${label} grading control`,
       expectedOwnerValue: 1, requiredCapabilities: ["repository-judge"], acceptanceCriteria: ["Official grader produces the expected control result"], maximumBudgetUsd: 0 });

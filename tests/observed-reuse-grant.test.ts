@@ -46,6 +46,6 @@ test('superseded observed launcher pins remain frozen and reject integrated main
   const pins=JSON.parse(text.match(/const hardeningPins = (\{[\s\S]*?\});/)![1]) as Record<string,string>;
   assert.equal(Object.keys(pins).length,8);
   const drift=[];for(const [path,digest] of Object.entries(pins)){if(sha256(await readFile(new URL('../'+path,import.meta.url)))!==digest)drift.push(path);}
-  assert.deepEqual(drift,['src/coding-repair-memory.ts','src/reusable-coding-candidate-generator.ts','src/main.ts']);
+  assert.deepEqual(drift,['src/coding-repair-memory.ts','src/reusable-coding-candidate-generator.ts','src/observed-reuse-benchmark.ts','src/main.ts']);
   assert(text.includes('OBSERVED_REUSE_BENCHMARK_GRANT as grant'));
 });

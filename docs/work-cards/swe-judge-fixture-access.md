@@ -1,7 +1,9 @@
 # Proposed judge-only fixture access
 
-Status: proposal, not activated. The current work card requires network-none
-judging. This exception needs an explicit owner decision before implementation.
+Status: engineering qualification candidate under the owner’s benchmark request.
+No production or paid benchmark activation is authorized by this work card.
+The general producer isolation rule remains unchanged; this candidate addresses
+a required read-only public fixture in the independent official judge.
 
 Evidence: workflow 34173241960, artifact kernel-official-7-34173241960.
 Its stock report records PASS_TO_PASS failure for the existing issue-4999 query
@@ -14,10 +16,11 @@ Proposed exception:
 - Apply only to frozen-patch official judges for axios__axios-5085, including
   both reference controls and both comparison arms. Producer containers remain
   completely offline. No official results reach an active producer.
-- Permit HTTPS CONNECT only to postman-echo.com:443 through a separate bounded
-  proxy. No arbitrary hosts, raw IP targets, redirects to other hosts, private
+- Permit only an absolute-form GET to https://postman-echo.com:443/get with a
+  bounded query through a separate proxy; CONNECT is denied. No arbitrary hosts, raw IP targets, redirects to other hosts, private
   addresses, cloud metadata, host network, or published inbound ports.
-- Put the judge on an internal network with only the proxy reachable. Prevent
+- Put the judge on an internal network with isolated gateway mode (no host
+  bridge address), with only the proxy reachable. Prevent
   direct external routes and DNS egress; do not simply enable Docker's normal
   outbound network. The proxy independently resolves and validates the fixed
   public destination and has no access to owner state or provider credentials.

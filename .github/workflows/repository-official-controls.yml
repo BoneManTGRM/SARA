@@ -4,6 +4,8 @@ on:
     branches: [feat/swe-repository-executor]
     paths:
       - .github/workflows/repository-official-controls.yml
+      - scripts/swe-judge-fixture-proxy.py
+      - scripts/swe-judge-fixture-runtime.py
       - scripts/swe-bench-judge.py
       - scripts/prepare-official-control.py
       - src/repository-official-judge.ts
@@ -19,7 +21,7 @@ jobs:
       max-parallel: 2
       matrix:
         # Follow up only failed controls; complete matrix: run 34174004857.
-        index: [0, 2, 3, 5, 7]
+        index: [5, 7]
     steps:
       - uses: actions/checkout@v4
         with:

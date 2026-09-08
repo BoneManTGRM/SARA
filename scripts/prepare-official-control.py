@@ -32,7 +32,12 @@ subprocess.run(["python3", "scripts/prepare-repository-image.py", str(recipe_pat
 image = json.loads((args.output / "build/build-receipt.json").read_text())["image"]
 subprocess.run(["docker", "pull", row["image"]], check=True, timeout=900)
 official = json.loads(subprocess.check_output(["docker", "image", "inspect", row["image"]], text=True))[0]["RepoDigests"][0]
+fixture_proxy_image = None
+if row["instance_id"] == "axios__axios-5085":
+    subprocess.run(["docker", "pull", "python:3.11-slim-bookworm"], check=True, timeout=300)
+    fixture_proxy_image = json.loads(subprocess.check_output(["docker", "image", "inspect", "python:3.11-slim-bookworm"], text=True))[0]["RepoDigests"][0]
 control = {"task": pilot.agent_input(row), "referencePatch": row["patch"], "judgeImage": official,
+           "fixtureProxyImage": fixture_proxy_image,
            "datasetPath": str(dataset.resolve()), "harnessPath": str(args.harness.resolve()),
            "environment": {"schemaVersion": 1, "repository": row["repo"], "baseCommit": row["base_commit"],
                            "image": image, "publicTestCommand": ["git", "diff", "--check"], "timeoutSeconds": 900}}

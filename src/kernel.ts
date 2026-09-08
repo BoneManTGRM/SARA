@@ -1,5 +1,8 @@
 import { maintenanceJobs, maintenanceRequestDigest, validateMaintenanceRequest, type MaintenanceRequest, type MaintenanceJob } from "./website-maintenance.ts";
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
+import { initializeCodingBenchmarkStore, withCodingBenchmarkExecution } from "./coding-repair-benchmark-store.ts";
+import { validateRepositoryBenchmarkAuthorization, type RepositoryBenchmarkAuthorization,
+  type RepositoryBenchmarkExecution, type RepositoryBenchmarkPermit } from "./repository-benchmark-permit.ts";
 import { runOfficialRepositoryJudge, validateRepositoryJudgeConfiguration,
   type RepositoryJudgeConfiguration } from "./repository-official-judge.ts";
 import { repositoryBinding, validateRepositoryEnvironment, verifyRepositoryArtifact, verifyRepositoryPatch,
@@ -455,6 +458,11 @@ export class SaraKernel {
   readonly #buildQueue = new KernelBuildQueue();
   readonly #repositoryEnvironments = new Map<string, RepositoryEnvironment>();
   readonly #repositoryJudges = new Map<string, RepositoryJudgeConfiguration>();
+  #repositoryBenchmarkAuthorization?: RepositoryBenchmarkAuthorization;
+  readonly #repositoryBenchmarkPermits = new WeakMap<RepositoryBenchmarkPermit, {
+    jobId: string; taskDigest: string; environmentDigest: string; attemptId: string; epoch: string | null;
+    authorityDigest: string; registrationDigest: string; capUsd: number; used: boolean; active(): boolean;
+  }>();
   readonly #constitution: SaraConstitution;
   readonly #ownerTokenSha256: string;
   readonly constitutionDigest: string;
@@ -496,6 +504,8 @@ export class SaraKernel {
     repositoryEnvironments?: readonly RepositoryEnvironment[];
     /** Judge-only trusted boot config; never included in producer inputs. */
     repositoryJudges?: readonly RepositoryJudgeConfiguration[];
+    /** Absent by default. Runtime callback must validate a fresh source-bound owner grant. */
+    repositoryBenchmarkAuthorization?: RepositoryBenchmarkAuthorization;
     now?: () => Date;
   }): Promise<SaraKernel> {
     if (![0, 1, 2].includes(options.selfBuildVerificationWorkers ?? 0)) throw new Error("KERNEL_VERIFICATION_WORKERS_INVALID");
@@ -536,6 +546,13 @@ export class SaraKernel {
         validateRepositoryJudgeConfiguration(judge);
         if (!kernel.#repositoryEnvironments.has(judge.environmentDigest)) throw new Error("REPOSITORY_JUDGE_UNKNOWN_ENVIRONMENT");
         kernel.#repositoryJudges.set(judge.environmentDigest, judge);
+      }
+      if (options.repositoryBenchmarkAuthorization) {
+        const supplied = options.repositoryBenchmarkAuthorization;
+        const authorization = { manifest: structuredClone(supplied.manifest), registration: structuredClone(supplied.registration),
+          assertRuntimeAuthority: supplied.assertRuntimeAuthority.bind(supplied) };
+        validateRepositoryBenchmarkAuthorization(authorization, kernel.#repositoryEnvironments);
+        kernel.#repositoryBenchmarkAuthorization = authorization;
       }
       await store.append("system_booted", SARA_PRINCIPAL, {
         constitutionDigest: loaded.digest,
@@ -1801,35 +1818,113 @@ export class SaraKernel {
     });
   }
 
-  /** Qualification only: paid repository generation stays closed until a fresh
-   * source-bound run grant is integrated. No global memory or promotion record. */
+  /** One whole-run durable claim. No configured authorization means no paid path.
+   * Neither this permit nor a zero-budget lab job creates or credits any funds. */
+  async withRepositoryBenchmarkExecution<T>(principal: Principal,
+    approval: { registrationDigest: string; authorityDigest: string },
+    execute: (execution: RepositoryBenchmarkExecution) => Promise<T>): Promise<T> {
+    approval = structuredClone(approval);
+    const config = this.#repositoryBenchmarkAuthorization;
+    if (!config) throw new Error("REPOSITORY_FRESH_PAID_GRANT_REQUIRED");
+    if (!this.isVerifiedOwner(principal)) throw new Error("REPOSITORY_BENCHMARK_OWNER_REQUIRED");
+    if (approval.registrationDigest !== config.manifest.bindings.policyDigest || approval.authorityDigest !== config.manifest.bindings.authorityDigest) {
+      throw new Error("REPOSITORY_BENCHMARK_APPROVAL_MISMATCH");
+    }
+    const epoch = await this.serializeMutation(async () => {
+      await this.authorize(principal, { action: "sandbox_development", targetId: `repository-benchmark:${config.manifest.benchmarkId}`, external: true });
+      await config.assertRuntimeAuthority();
+      return (await this.state()).events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null;
+    });
+    await initializeCodingBenchmarkStore({ stateDirectory: this.#store.stateDirectory, manifest: config.manifest });
+    return withCodingBenchmarkExecution({ stateDirectory: this.#store.stateDirectory, manifest: config.manifest, execute: async () => {
+      let active = true;
+      const issued = new Set<string>();
+      try {
+        return await execute(Object.freeze({
+          evidenceDirectory: join(this.#store.stateDirectory, "coding-repair-benchmarks", config.manifest.benchmarkId, "repository-trace"),
+          permitFor: async (jobId: string, attemptId: string) => this.serializeMutation(async () => {
+          if (!active) throw new Error("REPOSITORY_BENCHMARK_EXECUTION_CLOSED");
+          await config.assertRuntimeAuthority();
+          await this.authorize(principal, { action: "sandbox_development", targetId: `repository-benchmark:${jobId}`, external: true });
+          const state = await this.state();
+          if (!active) throw new Error("REPOSITORY_BENCHMARK_EXECUTION_CLOSED");
+          if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== epoch) throw new Error("REPOSITORY_AUTHORITY_CHANGED");
+          if (state.jobs.find(j => j.id === jobId)?.status !== "authorized") throw new Error("REPOSITORY_JOB_NOT_AUTHORIZED");
+          const attempt = config.registration.attempts.find(a => a.attemptId === attemptId);
+          if (!attempt || issued.has(attemptId)) throw new Error("REPOSITORY_BENCHMARK_ATTEMPT_CONSUMED_OR_UNKNOWN");
+          const environment = this.#repositoryEnvironments.get(attempt.environmentDigest)!;
+          const binding = repositoryBinding(environment, attempt.task);
+          const permit = Object.freeze({ permitId: randomUUID() });
+          // Claim the attempt before returning its opaque capability. A failed
+          // receipt never makes this attempt eligible for a second issue.
+          issued.add(attemptId);
+          await this.#store.append("repository_benchmark_permit_issued", principal, { jobId, attemptId, ...binding,
+            benchmarkId: config.manifest.benchmarkId, registrationDigest: approval.registrationDigest,
+            authorityDigest: approval.authorityDigest, maximumOwnerGrantExposureUsd: config.registration.spend.attemptMicros / 1e6,
+            fundingSource: "separately_reserved_owner_benchmark_grant", actualCostKnown: false, productionAuthority: false });
+          this.#repositoryBenchmarkPermits.set(permit, { jobId, attemptId, ...binding, epoch, authorityDigest: approval.authorityDigest,
+            registrationDigest: approval.registrationDigest, capUsd: config.registration.spend.attemptMicros / 1e6,
+            used: false, active: () => active });
+          return permit;
+        }) }));
+      } finally { active = false; }
+    } });
+  }
+
+  /** Ordinary generation remains $0; paid benchmark work needs the one-use
+   * kernel permit issued inside the existing durable whole-run claim. */
   async runRepositoryBuildCycle(principal: Principal, jobId: string, environmentDigest: string,
-    task: RepositoryTask, generator: RepositoryGenerator) {
+    task: RepositoryTask, generator: RepositoryGenerator, permit?: RepositoryBenchmarkPermit) {
     const configured = this.#repositoryEnvironments.get(environmentDigest);
     if (!configured) throw new Error("REPOSITORY_ENVIRONMENT_NOT_QUALIFIED");
     const environment = structuredClone(configured);
     task = structuredClone(task);
     const binding = repositoryBinding(environment, task);
-    if (generator.external || generator.maximumCostUsd !== 0) throw new Error("REPOSITORY_FRESH_PAID_GRANT_REQUIRED");
+    const paid = permit ? this.#repositoryBenchmarkPermits.get(permit) : undefined;
+    if (permit && !paid) throw new Error("REPOSITORY_BENCHMARK_PERMIT_INVALID");
+    if (paid) {
+      if (!paid.active() || paid.used || paid.jobId !== jobId || paid.taskDigest !== binding.taskDigest || paid.environmentDigest !== environmentDigest ||
+        generator.external !== true || !Number.isFinite(generator.maximumCostUsd) || generator.maximumCostUsd <= 0 || generator.maximumCostUsd > paid.capUsd) {
+        throw new Error("REPOSITORY_BENCHMARK_PERMIT_MISMATCH");
+      }
+    } else if (generator.external || generator.maximumCostUsd !== 0) throw new Error("REPOSITORY_FRESH_PAID_GRANT_REQUIRED");
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{1,127}$/.test(generator.id)) throw new Error("REPOSITORY_GENERATOR_INVALID");
     const generate = generator.generate.bind(generator), generatorId = generator.id;
     const admissionEpoch = await this.serializeMutation(async () => {
-      await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}`, external: false });
+      if (paid) {
+        if (!paid.active() || paid.used) throw new Error("REPOSITORY_BENCHMARK_PERMIT_CONSUMED");
+        await this.#repositoryBenchmarkAuthorization!.assertRuntimeAuthority();
+      }
+      await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}`, external: Boolean(paid) });
       const state = await this.state();
       const job = state.jobs.find(j => j.id === jobId);
       if (job?.status !== "authorized") throw new Error("REPOSITORY_JOB_NOT_AUTHORIZED");
+      if (paid) {
+        if (!paid.active()) throw new Error("REPOSITORY_BENCHMARK_EXECUTION_CLOSED");
+        if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== paid.epoch) throw new Error("REPOSITORY_AUTHORITY_CHANGED");
+        paid.used = true;
+      }
       await this.#store.append("job_status_changed", principal, { jobId, from: job.status, status: "running",
-        generatorId, ...binding, productionAuthority: false });
+        generatorId, ...binding, productionAuthority: false, ...(paid ? { benchmarkAttemptId: paid.attemptId,
+          authorityDigest: paid.authorityDigest, maximumOwnerGrantExposureUsd: paid.capUsd, actualCostKnown: false,
+          fundingSource: "separately_reserved_owner_benchmark_grant" } : {}) });
       return state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null;
     });
     const reauthorize = async () => {
-      await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}:verify`, external: false });
+      if (paid) {
+        if (!paid.active()) throw new Error("REPOSITORY_BENCHMARK_EXECUTION_CLOSED");
+        await this.#repositoryBenchmarkAuthorization!.assertRuntimeAuthority();
+      }
+      await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}:verify`, external: Boolean(paid) });
       const state = await this.state();
       if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("REPOSITORY_JOB_NOT_RUNNING");
       if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== admissionEpoch) throw new Error("REPOSITORY_AUTHORITY_CHANGED");
+      if (paid && !paid.active()) throw new Error("REPOSITORY_BENCHMARK_EXECUTION_CLOSED");
     };
     try {
-      const proposal = structuredClone(await generate({ task: structuredClone(task), environment: structuredClone(environment), ...binding }));
+      const beforeAction = () => this.serializeMutation(reauthorize);
+      await beforeAction();
+      const proposal = structuredClone(await generate({ task: structuredClone(task), environment: structuredClone(environment), ...binding, beforeAction }));
       const receipt = await this.#buildQueue.run(async () => {
         await this.serializeMutation(reauthorize);
         return verifyRepositoryPatch(this.#store.stateDirectory, environment, task, proposal);

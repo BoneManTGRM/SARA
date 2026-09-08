@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SaraKernel, SARA_PRINCIPAL } from "../src/kernel.ts";
 import { sha256 } from "../src/canonical.ts";
+import { createRepositoryProducerSandbox, runRepositoryProducer } from "../src/repository-producer.ts";
 import { RepositorySession, repositoryBinding, verifyRepositoryArtifact,
   type RepositoryEnvironment, type RepositoryTask } from "../src/repository-executor.ts";
 
@@ -56,8 +57,36 @@ try {
     await verifyRepositoryArtifact(output, receipt);
     receipts.push({ control, receipt });
   }
+  for (const arm of ["conventional", "reparodynamic"] as const) {
+    const task: RepositoryTask = { instanceId: "scripted-producer", problemStatement: "Return two from value.cjs.", arm, runId: "docker-producer-qualification" };
+    const binding = repositoryBinding(environment, task);
+    const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, { objective: `Qualify ${arm} repository producer`, expectedOwnerValue: 1,
+      requiredCapabilities: ["repository-producer"], acceptanceCriteria: ["Kernel dispatch checks and fresh verification"], maximumBudgetUsd: 0 });
+    const actions = [{ action: "read", path: "value.cjs" }, { action: "edit", path: "value.cjs", oldText: "module.exports = 1;", newText: "module.exports = 2;" }, { action: "test" }, { action: "finish" }];
+    const receipt = await kernel.runRepositoryBuildCycle(SARA_PRINCIPAL, job.id, binding.environmentDigest, task, {
+      id: "scripted-repository-producer", external: false, maximumCostUsd: 0,
+      async generate(input) {
+        await input.beforeAction();
+        const sandbox = await createRepositoryProducerSandbox(input.environment);
+        let index = 0;
+        try {
+          const result = await runRepositoryProducer({ task: input.task, environment: input.environment, sandbox,
+            beforeAction: input.beforeAction,
+            limits: { maximumModelRequests: 4, maximumToolSteps: 20, maximumPublicTests: 3, maximumOutputBytes: 200000, maximumWallMilliseconds: 60000 },
+            model: { async request() { return { outputText: JSON.stringify(actions[index++]), inputTokens: 0, outputTokens: 0, accountedCostUsd: 0 }; } } });
+          assert.equal(result.status, "finished");
+          assert.equal(result.accountingComplete, true);
+          assert.equal(result.modelRequests, 4);
+          await writeFile(join(output, `scripted-${arm}.json`), JSON.stringify(result, null, 2));
+          return { environmentDigest: input.environmentDigest, taskDigest: input.taskDigest, patch: result.patch };
+        } finally { await sandbox.close(); }
+      },
+    });
+    assert.equal(receipt.exitCode, 0);
+    await verifyRepositoryArtifact(output, receipt);
+  }
   const events = await kernel.inspectAudit();
-  assert.equal(events.filter(e => e.type === "repository_build_cycle_completed").length, 3);
+  assert.equal(events.filter(e => e.type === "repository_build_cycle_completed").length, 5);
   assert.equal(events.filter(e => e.type === "mutation_created").length, 0);
   const positive = receipts[1]!.receipt;
   const originalPatch = await readFile(join(output, positive.artifactRelativePath, "patch.diff"), "utf8");

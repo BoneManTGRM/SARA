@@ -1,4 +1,4 @@
-import { readBoundedProviderBody } from "./bounded-provider-body.ts";
+import { createBenchmarkDispatchBudget } from "./benchmark-dispatch-budget.ts";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -31,81 +31,19 @@ export const OBSERVED_REUSE_PROTOCOL = Object.freeze({ schemaVersion: 2, rounds:
   control: "All arms share the released repair controller and bounds. Regenerate starts a new proposal store per job. Ordinary memory retains repairs with the released legacy checker. Optimized retains repairs with the native intermediate checker. Each memory arm learns its own live repair.",
   failureRule: "Retain every planned outcome; do not calculate a success speedup unless all compared jobs verify. Uncertain provider dispatch closes the suite. No paid replay.",
 });
-const MAXIMUM_REQUEST_MICROS = 15600;
-const ARM_CAP_MICROS = 50000;
-
-/** Conservative pre-dispatch reservation. Unknown charges retain the reservation
- * and close the suite. Amounts use the same frozen accounting contract as the
- * existing provider adapter; these are estimated exposure, not a billing audit. */
+/** Compatibility wrapper; this accounting object is never spending authority. */
 export function createObservedReuseBudget(input: { directory: string; beforeDispatch(): Promise<void>; fetchImpl?: typeof fetch }) {
-  const spent = Object.fromEntries(OBSERVED_REUSE_ARMS.map(arm => [arm, 0])) as Record<ObservedReuseArm, number>;
-  let reserved = 0, closed = false, inFlight = false, sequence = 0, generations = 0;
-  const dispatched = Object.fromEntries(OBSERVED_REUSE_ARMS.map(a => [a, 0])) as Record<ObservedReuseArm, number>;
-  const counted = Object.fromEntries(OBSERVED_REUSE_ARMS.map(a => [a, 0])) as Record<ObservedReuseArm, number>;
-  const completed = Object.fromEntries(OBSERVED_REUSE_ARMS.map(a => [a, 0])) as Record<ObservedReuseArm, number>;
-  const actualFetch = input.fetchImpl ?? fetch;
-  const snapshot = () => ({ estimatedByArmUsd: Object.fromEntries(OBSERVED_REUSE_ARMS.map(a => [a, spent[a] / 1e6])),
-    estimatedTotalUsd: Object.values(spent).reduce((a,b) => a+b, 0) / 1e6,
-    unresolvedReservedUsd: reserved / 1e6, closed, generationRequests: generations, generationRequestsByArm: { ...dispatched },
-    tokenCountRequestsByArm: { ...counted }, completedGenerationRequestsByArm: { ...completed }, providerChargesReconciled: false });
-  return { snapshot, fetchFor(arm: ObservedReuseArm): typeof fetch {
+  const budget = createBenchmarkDispatchBudget({ ...input, model: "gpt-5.6-luna", reasoning: "medium",
+    arms: [...OBSERVED_REUSE_ARMS], attempts: OBSERVED_REUSE_ARMS.map(arm => ({ id: arm, arm })),
+    maximumInputTokens: 30000, maximumOutputTokens: 8000,
+    inputPriceTenthsMicros: 2, outputPriceTenthsMicros: 12,
+    totalCapMicros: 150000, armCapMicros: 50000, attemptCapMicros: 50000,
+    maximumGenerationRequestsPerAttempt: Number.MAX_SAFE_INTEGER,
+    inputBound: "utf8_bytes_with_framing_reserve", allowStructuredText: true,
+    errorPrefix: "REUSE_SPEED", auditPrefix: "reuse-budget" });
+  return { snapshot: budget.snapshot, fetchFor(arm: ObservedReuseArm) {
     if (!OBSERVED_REUSE_ARMS.includes(arm)) throw new Error("REUSE_SPEED_INVALID_ARM");
-    return async (resource, init) => {
-      if (closed || inFlight) throw new Error("REUSE_SPEED_BUDGET_CLOSED_OR_BUSY");
-      const url = typeof resource === "string" ? resource : resource instanceof URL ? resource.href : resource.url;
-      if (!init || init.method !== "POST" || typeof init.body !== "string" ||
-        !["https://api.openai.com/v1/responses", "https://api.openai.com/v1/responses/input_tokens"].includes(url)) throw new Error("REUSE_SPEED_ENDPOINT_REJECTED");
-      const copy = { ...init, body: init.body, headers: new Headers(init.headers), redirect: "error" as const };
-      const body = JSON.parse(copy.body);
-      const generation = url.endsWith("/responses");
-      if (body.model !== "gpt-5.6-luna" || typeof body.input !== "string" || !body.input.trim() ||
-        Object.keys(body).some(k => !["model","input","store","max_output_tokens","reasoning","text"].includes(k)) ||
-        (generation && (body.max_output_tokens !== 8000 || body.reasoning?.effort !== "medium" || body.store !== false))) throw new Error("REUSE_SPEED_PROVIDER_CONTRACT_CHANGED");
-      if (generation && (spent[arm] + MAXIMUM_REQUEST_MICROS > ARM_CAP_MICROS ||
-        Object.values(spent).reduce((a,b) => a+b, 0) + MAXIMUM_REQUEST_MICROS > 150000)) throw new Error("REUSE_SPEED_ARM_BUDGET_EXHAUSTED");
-      inFlight = true; const number = ++sequence; let didDispatch = false;
-      try {
-        await input.beforeDispatch();
-        if (generation) {
-          reserved = MAXIMUM_REQUEST_MICROS;
-          await writeBenchmarkAudit(input.directory, `reuse-budget-${String(number).padStart(4,"0")}-reservation.json`, {
-            arm, reservedUsd: reserved / 1e6, previousEstimateUsd: spent[arm] / 1e6, requestDigest: sha256(copy.body),
-            replayAllowed: false, at: new Date().toISOString() });
-        }
-        await input.beforeDispatch();
-        if (copy.signal?.aborted) throw new Error("PROVIDER_ABORTED_BEFORE_DISPATCH");
-        await writeBenchmarkAudit(input.directory, `reuse-budget-${String(number).padStart(4,"0")}-dispatch-intent.json`, {
-          arm, operation: generation ? "generation" : "token_count", requestDigest: sha256(copy.body),
-          state: "dispatch_intent", providerAcceptanceKnown: false, replayAllowed: false });
-        // An intent is not proof of provider acceptance. Recheck after durable I/O.
-        await input.beforeDispatch();
-        if (copy.signal?.aborted) throw new Error("PROVIDER_ABORTED_BEFORE_DISPATCH");
-        didDispatch = true;
-        if (generation) { generations++; dispatched[arm]++; } else counted[arm]++;
-        const response = await actualFetch(url, copy);
-        const raw = await readBoundedProviderBody(response, copy.signal);
-        if (Buffer.byteLength(raw) > 1048576) throw new Error("REUSE_SPEED_PROVIDER_RESPONSE_BOUND");
-        const data = JSON.parse(raw);
-        if (!response.ok) throw new Error("REUSE_SPEED_PROVIDER_HTTP_FAILURE");
-        if (generation) {
-          const i = data.usage?.input_tokens, o = data.usage?.output_tokens;
-          if (data.status !== "completed" || !Number.isSafeInteger(i) || i < 0 || i > 30000 ||
-            !Number.isSafeInteger(o) || o < 0 || o > 8000) throw new Error("REUSE_SPEED_PROVIDER_USAGE_UNKNOWN");
-          const micros = Math.ceil(i * 0.2 + o * 1.2);
-          await writeBenchmarkAudit(input.directory, `reuse-budget-${String(number).padStart(4,"0")}-response.json`, {
-            arm, estimatedCostUsd: micros / 1e6, responseDigest: sha256(raw), providerChargesReconciled: false });
-          spent[arm] += micros; reserved = 0; completed[arm]++;
-        }
-        return new Response(raw, {status: response.status, statusText: response.statusText, headers: response.headers});
-      } catch (error) {
-        closed = true;
-        // Even a failed receipt can leave a durable reservation; never replay.
-        if (generation || didDispatch) await writeBenchmarkAudit(input.directory,
-          `reuse-budget-${String(number).padStart(4,"0")}-error.json`, { arm, unresolvedReservedUsd: reserved / 1e6,
-            failureCode: didDispatch ? "PROVIDER_OR_EVIDENCE_UNCERTAIN" : "NOT_DISPATCHED", networkInvoked: didDispatch, replayAllowed: false }).catch(() => {});
-        throw error;
-      } finally { inFlight = false; }
-    };
+    return budget.fetchFor(arm);
   } };
 }
 

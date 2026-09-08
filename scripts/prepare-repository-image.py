@@ -16,7 +16,7 @@ import tempfile
 
 def dockerfile(recipe):
     required = {"repository", "baseCommit", "runtimeImage", "installCommand"}
-    if not required <= set(recipe) or set(recipe) - required - {"packageManager", "browser"}:
+    if not required <= set(recipe) or set(recipe) - required - {"packageManager", "browser", "nodeRuntimeImage"}:
         raise ValueError("Only public repository, commit, runtime image and install command are allowed")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", recipe["repository"]):
         raise ValueError("Invalid repository")
@@ -24,6 +24,9 @@ def dockerfile(recipe):
         raise ValueError("Exact base commit required")
     if not re.fullmatch(r"[a-z0-9./_-]+@sha256:[a-f0-9]{64}", recipe["runtimeImage"]):
         raise ValueError("Digest-pinned Node/Git runtime required")
+    node_runtime = recipe.get("nodeRuntimeImage")
+    if node_runtime is not None and not re.fullmatch(r"node@sha256:[a-f0-9]{64}", node_runtime):
+        raise ValueError("Digest-pinned official Node donor required")
     command = recipe["installCommand"]
     if not isinstance(command, list) or not command or any(not isinstance(x, str) or "\0" in x or "\n" in x for x in command):
         raise ValueError("Install command must be an argument array")
@@ -46,8 +49,20 @@ def dockerfile(recipe):
                 "git checkout --detach FETCH_HEAD && git config core.hooksPath /dev/null && "
                 "git reflog expire --expire=now --all && git gc --prune=now && "
                 "chown -R 1000:1000 /sara/base")
+    stages = []
+    runtime_copy = []
+    if node_runtime:
+        # Use an older ABI without inheriting the donor's expired apt sources.
+        # npm and headers must match the binary; never copy its OS/rootfs.
+        stages = [f"FROM {node_runtime} AS public_node_runtime"]
+        runtime_copy = [
+            "COPY --from=public_node_runtime /usr/local/bin/node /usr/local/bin/node",
+            "RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/include/node",
+            "COPY --from=public_node_runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm",
+            "COPY --from=public_node_runtime /usr/local/include/node /usr/local/include/node",
+        ]
     return "\n".join([
-        f"FROM {recipe['runtimeImage']}", "USER root", *setup, "RUN " + checkout,
+        *stages, f"FROM {recipe['runtimeImage']}", "USER root", *runtime_copy, *setup, "RUN " + checkout,
         "WORKDIR /sara/base", "USER 1000:1000", "ENV HOME=/tmp",
         "RUN " + json.dumps(command),
         "RUN test -z \"$(git status --porcelain --untracked-files=no)\" && test \"$(git rev-list --all --count)\" = 1",

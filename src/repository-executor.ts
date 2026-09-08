@@ -29,7 +29,8 @@ export interface RepositoryGenerator {
   external: boolean;
   maximumCostUsd: number;
   generate(input: { task: RepositoryTask; environment: RepositoryEnvironment;
-    environmentDigest: string; taskDigest: string; memoryNamespace: string }): Promise<RepositoryPatch>;
+    environmentDigest: string; taskDigest: string; memoryNamespace: string;
+    beforeAction: () => Promise<void> }): Promise<RepositoryPatch>;
 }
 export interface RepositoryVerification {
   schemaVersion: 1;

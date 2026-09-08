@@ -36,8 +36,10 @@ the candidate can edit public tests. A zero exit status is not proof of issue
 resolution. Official judge-owned test integration is still required. Generator
 callbacks are trusted host code, as in the existing kernel; their declared cost
 is not a sandbox that prevents a malicious callback from making network calls.
-Only the supplied deterministic qualification producer is asserted to use no
-model calls. Paid generation remains unavailable in this candidate.
+Only the supplied scripted qualification producer is asserted to use no model
+calls. Paid generation now has a separate kernel permit and shared-budget
+integration; it remains unavailable by default. No active grant or production
+launch configuration is installed.
 
 ## Next qualification stage
 
@@ -48,3 +50,26 @@ containers have no network, host mounts, credentials or added capabilities.
 Preserve every setup/grade failure. Reference controls must be labeled as such
 and cannot count as SARA predictions. The kernel must bind official reports to
 the frozen patch and recheck authority before accepting a resolved result.
+
+Fixture compatibility extension: the owner-authorized qualification now includes
+a fixed, read-only Postman Echo proxy candidate solely for Axios-5085 official
+grading, as specified in swe-judge-fixture-access.md. Producer containers stay
+network-none. This is no permission for paid runs or production activation.
+
+## Matched runner integration
+
+The candidate includes a strict repository tool producer, matched twenty-row
+comparison, exact-token Luna adapter, existing conservative dispatch budget,
+and kernel-issued one-use benchmark permits. A pure preflight validates all
+registered tasks before the existing whole-run claim. The kernel supplies the
+durable trace directory; each action rechecks authority and the stop epoch.
+Producer cleanup drains late container starts. Unknown provider accounting
+stops further production and retains exposure. All producer outcomes freeze
+before official grading. These host APIs do not authorize their own spending.
+
+Scripted Docker qualification now runs the ordinary producer for both arms and
+independently verifies their patches. It is still not a Luna benchmark attempt.
+A real run requires a durable Docker host, source-bound registration, ten
+qualified public images and judge configurations, authenticated approval of a
+fresh allowance, and the boot runtime-authority callback. No credentials or
+historical grants are supplied by this candidate.

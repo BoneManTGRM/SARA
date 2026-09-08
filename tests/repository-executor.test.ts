@@ -61,7 +61,7 @@ test("kernel refuses unknown images and paid launch before calling producer", as
 test("producer receives no shared memories; binding forgery fails without acceptance or promotion", async () => withKernel(async (kernel, jobId) => {
   await assert.rejects(kernel.runRepositoryBuildCycle(SARA_PRINCIPAL, jobId, sha256(canonicalJson(environment)), task, {
     id: "qualification", external: false, maximumCostUsd: 0, async generate(input) {
-      assert.deepEqual(Object.keys(input).sort(), ["environment", "environmentDigest", "memoryNamespace", "task", "taskDigest"].sort());
+      assert.deepEqual(Object.keys(input).sort(), ["beforeAction", "environment", "environmentDigest", "memoryNamespace", "task", "taskDigest"].sort());
       return { environmentDigest: input.environmentDigest, taskDigest: "0".repeat(64), patch };
     },
   }), /BINDING_MISMATCH/);
@@ -80,4 +80,20 @@ test("stop and resume during production revokes repository acceptance", async ()
     },
   }), /AUTHORITY_CHANGED/);
   assert.ok(!(await kernel.inspectAudit()).some(e => e.type === "repository_build_cycle_completed"));
+}));
+
+
+test("kernel dispatch callback rejects a stop-resume epoch before another producer action", async () => withKernel(async (kernel, jobId) => {
+  const owner = kernel.authenticateOwnerToken("repository-test-owner");
+  let authorized = 0;
+  await assert.rejects(kernel.runRepositoryBuildCycle(SARA_PRINCIPAL, jobId, sha256(canonicalJson(environment)), task, {
+    id: "dispatch-qualification", external: false, maximumCostUsd: 0, async generate(input) {
+      await input.beforeAction(); authorized++;
+      await kernel.setEmergencyStop(owner, true);
+      await kernel.setEmergencyStop(owner, false);
+      await input.beforeAction(); authorized++;
+      return { environmentDigest: input.environmentDigest, taskDigest: input.taskDigest, patch };
+    },
+  }), /AUTHORITY_CHANGED/);
+  assert.equal(authorized, 1);
 }));

@@ -16,7 +16,7 @@ spec.loader.exec_module(pilot)
 
 
 def validate_request(request, tasks):
-    required = {"schemaVersion", "instanceId", "arm", "runId", "patch", "patchDigest", "environmentDigest", "taskDigest", "image", "repository", "baseCommit"}
+    required = {"schemaVersion", "instanceId", "arm", "runId", "patch", "patchDigest", "environmentDigest", "taskDigest", "image", "repository", "baseCommit", "fixtureProxyImage"}
     if set(request) != required or request["schemaVersion"] != 1:
         raise ValueError("JUDGE_REQUEST_SCHEMA")
     if request["arm"] not in ("conventional", "reparodynamic"):
@@ -35,6 +35,10 @@ def validate_request(request, tasks):
         raise ValueError("JUDGE_INSTANCE")
     if request["repository"] != matches[0]["repo"] or request["baseCommit"] != matches[0]["base_commit"]:
         raise ValueError("JUDGE_PRODUCER_BASE_MISMATCH")
+    if request["fixtureProxyImage"] is not None:
+        if (request["instanceId"] != "axios__axios-5085" or
+                not re.fullmatch(r"python@sha256:[a-f0-9]{64}", request["fixtureProxyImage"])):
+            raise ValueError("JUDGE_FIXTURE_POLICY")
     expected = matches[0]["image"].rsplit(":", 1)[0] + "@sha256:"
     if not request["image"].startswith(expected) or not re.fullmatch(r"[a-f0-9]{64}", request["image"][len(expected):]):
         raise ValueError("JUDGE_IMAGE_IDENTITY")
@@ -42,14 +46,17 @@ def validate_request(request, tasks):
 
 
 class CheckedContainer:
-    def __init__(self, container, base_commit):
+    def __init__(self, container, base_commit, fixture=None):
         self.container, self.base_commit = container, base_commit
+        self.fixture = fixture
 
     def __getattr__(self, name):
         return getattr(self.container, name)
 
     def start(self):
         self.container.start()
+        if self.fixture:
+            self.fixture.verify_judge_network(self.container)
         diagnostics = {}
         for name, command in {
             "identity": ["id"], "hosts": ["cat", "/etc/hosts"],
@@ -85,6 +92,18 @@ class CheckedContainer:
             if restored.exit_code:
                 raise ValueError("JUDGE_LOCKFILE_NORMALIZATION_FAILED")
             clean = self.container.exec_run(git + ["status", "--porcelain", "--untracked-files=no"], workdir="/testbed")
+        # The Docusaurus image's Corepack setup adds only packageManager.
+        # Bind normalization to the exact observed diff, not arbitrary manifests.
+        if (self.base_commit == "0589b1475d56b0b541348aa56f201ec7c56c56d5"
+                and head.exit_code == 0 and head.output.decode().strip() == self.base_commit
+                and clean.exit_code == 0 and clean.output == b" M package.json\n"
+                and hashlib.sha256(initial_diff.output).hexdigest() == "c01754d90bb5c2b79bb20813bbe95895999eaa68aa56b0ae62e6c70f75197e18"):
+            Path("image-package-manager-normalization.diff").write_bytes(initial_diff.output)
+            restored = self.container.exec_run(git + ["restore", "--source=" + self.base_commit,
+                                                      "--worktree", "--", "package.json"], workdir="/testbed")
+            if restored.exit_code:
+                raise ValueError("JUDGE_PACKAGE_MANAGER_NORMALIZATION_FAILED")
+            clean = self.container.exec_run(git + ["status", "--porcelain", "--untracked-files=no"], workdir="/testbed")
         if head.exit_code or head.output.decode().strip() != self.base_commit or clean.exit_code or clean.output.strip():
             raise ValueError("JUDGE_IMAGE_BASE_MISMATCH:" + json.dumps({
                 "headExitCode": head.exit_code, "head": head.output.decode(errors="replace")[:1000],
@@ -92,10 +111,11 @@ class CheckedContainer:
 
 
 class RestrictedContainers:
-    def __init__(self, containers, base_commit, run_id):
+    def __init__(self, containers, base_commit, run_id, fixture=None):
         self.containers = containers
         self.base_commit = base_commit
         self.run_id = run_id
+        self.fixture = fixture
 
     def __getattr__(self, name):
         return getattr(self.containers, name)
@@ -110,13 +130,15 @@ class RestrictedContainers:
                       nano_cpus=2_000_000_000, pids_limit=256,
                       labels={"sara.repositoryJudgeRun": self.run_id},
                       extra_hosts={"localhost": "127.0.0.1"})
-        return CheckedContainer(self.containers.create(**kwargs), self.base_commit)
+        if self.fixture:
+            kwargs.update(self.fixture.judge_options())
+        return CheckedContainer(self.containers.create(**kwargs), self.base_commit, self.fixture)
 
 
 class RestrictedClient:
-    def __init__(self, client, base_commit, run_id):
+    def __init__(self, client, base_commit, run_id, fixture=None):
         self.client = client
-        self.containers = RestrictedContainers(client.containers, base_commit, run_id)
+        self.containers = RestrictedContainers(client.containers, base_commit, run_id, fixture)
 
     def __getattr__(self, name):
         return getattr(self.client, name)
@@ -131,10 +153,12 @@ def grade(request, dataset, manifest_path, harness, output):
                "runId": request["runId"], "patchDigest": request["patchDigest"],
                "environmentDigest": request["environmentDigest"], "taskDigest": request["taskDigest"],
                "image": request["image"], "harnessRevision": pilot.HARNESS_REVISION,
+               "fixtureProxyImage": request["fixtureProxyImage"],
                "repository": request["repository"], "baseCommit": request["baseCommit"],
                "datasetSha256": pilot.DATASET_SHA256, "resolved": False, "gradeCompleted": False,
                "containerPolicy": "network-none-cap-drop-all-2cpu-2g-256pids", "modelRequests": 0}
     previous = Path.cwd()
+    fixture = None
     try:
         actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=harness, text=True).strip()
         dirty = subprocess.check_output(["git", "status", "--porcelain"], cwd=harness, text=True).strip()
@@ -153,7 +177,17 @@ def grade(request, dataset, manifest_path, harness, output):
         import swebench.harness.run_evaluation as evaluation
         if not Path(evaluation.__file__).resolve().is_relative_to(harness.resolve()):
             raise ValueError("JUDGE_IMPORTED_HARNESS_MISMATCH")
-        client = RestrictedClient(docker.from_env(), row["base_commit"], request["runId"])
+        raw_client = docker.from_env()
+        if request["fixtureProxyImage"]:
+            runtime_spec = importlib.util.spec_from_file_location("fixture_runtime", Path(__file__).with_name("swe-judge-fixture-runtime.py"))
+            runtime = importlib.util.module_from_spec(runtime_spec)
+            runtime_spec.loader.exec_module(runtime)
+            fixture = runtime.FixtureRuntime(raw_client, request["runId"], request["fixtureProxyImage"], output)
+            fixture.start()
+            receipt.update(containerPolicy="internal-network-fixed-postman-get-proxy-cap-drop-all-2cpu-2g-256pids",
+                           fixtureProxyImageId=fixture.image_id,
+                           fixtureProxySourceDigest=pilot.digest(Path(__file__).with_name("swe-judge-fixture-proxy.py").read_bytes()))
+        client = RestrictedClient(raw_client, row["base_commit"], request["runId"], fixture)
         image = client.images.pull(request["image"])
         receipt["imageId"] = image.id
         test_spec = make_test_spec(row)
@@ -176,6 +210,11 @@ def grade(request, dataset, manifest_path, harness, output):
         receipt["error"] = type(error).__name__ + ": " + str(error)[:1000]
     finally:
         os.chdir(previous)
+        if fixture:
+            try:
+                fixture.close()
+            except Exception as error:
+                receipt.update(resolved=False, gradeCompleted=False, error="FIXTURE_CLEANUP_FAILED:" + str(error)[:500])
         receipt["elapsedMilliseconds"] = round((time.monotonic() - started) * 1000)
         pilot.write_json(output / "judge-receipt.json", receipt)
     return receipt

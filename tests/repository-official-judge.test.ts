@@ -9,6 +9,7 @@ test("judge config requires absolute private paths and immutable official image"
   validateRepositoryJudgeConfiguration(config);
   assert.throws(() => validateRepositoryJudgeConfiguration({ ...config, image: "swebench/task:latest" }));
   assert.throws(() => validateRepositoryJudgeConfiguration({ ...config, datasetPath: "../data" }));
+  assert.throws(() => validateRepositoryJudgeConfiguration({ ...config, fixtureProxyImage: "python:latest" }));
 });
 
 test("official judge binds task/patch/image and removes harness container privileges", () => {
@@ -17,9 +18,11 @@ import importlib.util,json,hashlib,tempfile,os
 spec=importlib.util.spec_from_file_location('judge','scripts/swe-bench-judge.py')
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 tasks=json.load(open('docs/benchmarks/swe-bench-multilingual-pilot.json'))['tasks']
-r=dict(schemaVersion=1,instanceId=tasks[0]['instance_id'],repository=tasks[0]['repo'],baseCommit=tasks[0]['base_commit'],arm='conventional',runId='test-1',patch='',patchDigest=hashlib.sha256(b'').hexdigest(),environmentDigest='a'*64,taskDigest='b'*64,image=tasks[0]['image'].rsplit(':',1)[0]+'@sha256:'+'c'*64)
+r=dict(schemaVersion=1,instanceId=tasks[0]['instance_id'],repository=tasks[0]['repo'],baseCommit=tasks[0]['base_commit'],arm='conventional',runId='test-1',fixtureProxyImage=None,patch='',patchDigest=hashlib.sha256(b'').hexdigest(),environmentDigest='a'*64,taskDigest='b'*64,image=tasks[0]['image'].rsplit(':',1)[0]+'@sha256:'+'c'*64)
 assert m.validate_request(r,tasks)==tasks[0]
-for changes in [dict(repository='wrong/repo'),dict(baseCommit='d'*40),dict(patch='forged'),dict(instanceId='not-selected'),dict(arm='extra'),dict(runId='../escape'),dict(image='swebench/other@sha256:'+'c'*64),dict(gold='secret')]:
+fixture=dict(r,instanceId=tasks[7]['instance_id'],repository=tasks[7]['repo'],baseCommit=tasks[7]['base_commit'],image=tasks[7]['image'].rsplit(':',1)[0]+'@sha256:'+'c'*64,fixtureProxyImage='python@sha256:'+'e'*64)
+assert m.validate_request(fixture,tasks)==tasks[7]
+for changes in [dict(repository='wrong/repo'),dict(baseCommit='d'*40),dict(patch='forged'),dict(instanceId='not-selected'),dict(arm='extra'),dict(runId='../escape'),dict(image='swebench/other@sha256:'+'c'*64),dict(gold='secret'),dict(fixtureProxyImage='python@sha256:'+'e'*64)]:
  try:m.validate_request(dict(r,**changes),tasks)
  except ValueError:pass
  else:raise AssertionError(changes)
@@ -79,4 +82,37 @@ test("public environment recipes cover the unchanged ten tasks without judge dat
   assert.deepEqual(recipes.tasks.map((r: {instanceId: string}) => r.instanceId), frozen.tasks.map((r: {instance_id: string}) => r.instance_id));
   assert.doesNotMatch(JSON.stringify(recipes), /test_patch|model_patch|hints_text|sweb\.eval/);
   for (const recipe of recipes.tasks) assert.ok(recipe.installCommand.length && recipe.publicTestCommand.length);
+});
+
+
+test("Docusaurus setup normalization accepts only the observed Corepack metadata diff", () => {
+  const code = `
+import importlib.util,pathlib,tempfile,os,types
+root=pathlib.Path.cwd()
+spec=importlib.util.spec_from_file_location('judge',root/'scripts/swe-bench-judge.py')
+m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+observed=(root/'tests/fixtures/docusaurus-image-metadata.diff').read_bytes()
+base='0589b1475d56b0b541348aa56f201ec7c56c56d5'
+class Container:
+ def __init__(self,diff):self.diff=diff;self.dirty=b' M package.json\\n';self.restored=False
+ def start(self):pass
+ def exec_run(self,command,**kwargs):
+  value=b'diagnostics'
+  if command[0]=='git':
+   if command[3]=='rev-parse':value=base.encode()
+   elif command[3]=='diff':value=self.diff
+   elif command[3]=='restore':self.restored=True;self.dirty=b'';value=b''
+   else:value=self.dirty
+  return types.SimpleNamespace(exit_code=0,output=value)
+with tempfile.TemporaryDirectory() as directory:
+ os.chdir(directory)
+ c=Container(observed);m.CheckedContainer(c,base).start();assert c.restored
+ assert pathlib.Path('image-package-manager-normalization.diff').read_bytes()==observed
+ c=Container(observed+b'unknown change')
+ try:m.CheckedContainer(c,base).start()
+ except ValueError as e:assert 'BASE_MISMATCH' in str(e)
+ else:raise AssertionError('unobserved manifest drift accepted')
+ assert not c.restored
+`;
+  execFileSync("python3", ["-c", code], { encoding: "utf8" });
 });

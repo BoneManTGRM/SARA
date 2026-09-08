@@ -22,6 +22,10 @@ try:
     runtime = json.loads(subprocess.check_output(["docker", "image", "inspect", recipe["runtimeTag"]], text=True))[0]["RepoDigests"][0]
     resolved = {"repository": task["repo"], "baseCommit": task["base_commit"], "runtimeImage": runtime,
                 "packageManager": recipe["packageManager"], "installCommand": recipe["installCommand"], "browser": recipe.get("browser", False)}
+    if recipe.get("nodeRuntimeTag"):
+        subprocess.run(["docker", "pull", recipe["nodeRuntimeTag"]], check=True, timeout=300)
+        resolved["nodeRuntimeImage"] = json.loads(subprocess.check_output(
+            ["docker", "image", "inspect", recipe["nodeRuntimeTag"]], text=True))[0]["RepoDigests"][0]
     path = args.output / "resolved-recipe.json"
     path.write_text(json.dumps(resolved, indent=2))
     subprocess.run(["python3", "scripts/prepare-repository-image.py", str(path), "--output", str(args.output / "build")], check=True, timeout=1900)

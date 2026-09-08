@@ -8,7 +8,7 @@ import { readBoundedProviderBody } from "../src/bounded-provider-body.ts";
 import { NativeCodingVerifier } from "../src/native-coding-verifier.ts";
 const url = "https://api.openai.com/v1/responses";
 const init = (): RequestInit => ({ method: "POST", body: JSON.stringify({ model: "gpt-5.6-luna", input: "bounded fixture", store: false, max_output_tokens: 8000, reasoning: { effort: "medium" } }) });
-const reply = () => new Response(JSON.stringify({ status: "completed", usage: { input_tokens: 100, output_tokens: 100 } }));
+const reply = () => new Response(JSON.stringify({ status: "completed", model: "gpt-5.6-luna", usage: { input_tokens: 100, output_tokens: 100 } }));
 async function directory(fn: (root: string) => Promise<void>) { const root = await mkdtemp(join(tmpdir(), "observed-dispatch-")); try { await fn(root); } finally { await rm(root, { recursive: true, force: true }); } }
 
 test("dispatched failed request is counted, held and never retried", () => directory(async root => {

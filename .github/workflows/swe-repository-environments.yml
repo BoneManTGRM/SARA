@@ -20,7 +20,7 @@ jobs:
       matrix:
         # Targeted follow-up; the complete ten-task matrix remains in run
         # 34174004849. These indices do not change benchmark selection.
-        index: [2, 4, 5]
+        index: [2, 4, 5, 7, 9]
     steps:
       - uses: actions/checkout@v4
         with:
