@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { boundedCandidateFailureFeedback, CLOUDFLARE_FREE_MODEL, cloudflareQualificationReasoningEffort } from "./cloudflare-free-generator.ts";
+import { boundedCandidateFailureFeedback, CLOUDFLARE_FREE_MODEL, cloudflareQualificationReasoningEffort, cloudflareQualificationThinkingMode } from "./cloudflare-free-generator.ts";
 import type { SkillCandidateProposal } from "./types.ts";
 
 const MAX_PROPOSAL_BYTES = 64 * 1024;
@@ -21,14 +21,16 @@ async function writeEvidence(directory: string, attempt: number, kind: string, v
   });
 }
 
-export async function recordLearningCall(directory: string, attempt: number, objective: string, reasoningEffort?: "low"): Promise<void> {
+export async function recordLearningCall(directory: string, attempt: number, objective: string, reasoningEffort?: "low", thinkingMode?: "disabled"): Promise<void> {
   if (!objective.trim() || objective.length > 1000) throw new Error("Learning evidence objective must contain 1–1,000 characters.");
   const selected = cloudflareQualificationReasoningEffort(reasoningEffort);
+  const selectedThinking = cloudflareQualificationThinkingMode(thinkingMode);
   await writeEvidence(directory, attempt, "call", {
     schemaVersion: 1, attempt, event: "generator_call_entered", model: CLOUDFLARE_FREE_MODEL,
     objectiveSha256: digest(objective), recordedAt: new Date().toISOString(),
     maximumCompletionTokens: 8192, usage: "unknown_until_provider_evidence",
     ...(selected ? { reasoningEffort: selected } : {}),
+    ...(selectedThinking ? { requestedThinkingMode: selectedThinking } : {}),
   });
 }
 

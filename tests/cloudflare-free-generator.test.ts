@@ -4,6 +4,7 @@ import {
   CLOUDFLARE_FREE_MODEL,
   createCloudflareFreeCandidateGenerator,
   cloudflareQualificationReasoningEffort,
+  cloudflareQualificationThinkingMode,
 } from "../src/cloudflare-free-generator.ts";
 
 const ACCOUNT_ID = "a".repeat(32);
@@ -31,6 +32,42 @@ function candidate() {
 }
 
 describe("Cloudflare free candidate generator", () => {
+  it("rejects unsupported thinking settings before dispatch without exposing their value", () => {
+    assert.equal(cloudflareQualificationThinkingMode("current"), undefined);
+    assert.equal(cloudflareQualificationThinkingMode(undefined), undefined);
+    for (const invalid of ["", "enabled", "PRIVATE", false, null, {enable_thinking:false}]) {
+      assert.throws(() => createCloudflareFreeCandidateGenerator({
+        accountId: ACCOUNT_ID, apiToken: API_TOKEN, workersPlan: "free",
+        thinkingMode: invalid as "disabled",
+        async fetcher() { assert.fail("Invalid configuration must not dispatch"); },
+      }), error => {
+        assert.equal((error as Error).message, "Cloudflare qualification thinking mode must be current or disabled.");
+        return true;
+      });
+    }
+  });
+
+  it("stops without fallback when disabled thinking is unsupported or still returns no content", async () => {
+    for (const response of [
+      new Response("PRIVATE provider error", {status:400}),
+      Response.json({choices:[{finish_reason:"length", message:{reasoning_content:"PRIVATE"}}],
+        usage:{prompt_tokens:605, completion_tokens:8192}}),
+    ]) {
+      let calls = 0;
+      const generator = createCloudflareFreeCandidateGenerator({
+        accountId: ACCOUNT_ID, apiToken: API_TOKEN, workersPlan: "free",
+        reasoningEffort: "low", thinkingMode: "disabled",
+        async fetcher() { calls += 1; return response; },
+      });
+      await assert.rejects(() => generator.generate(input()), (error: Error) => {
+        assert.match(error.message, /HTTP 400|no candidate content.*completion_tokens=8192/);
+        assert.doesNotMatch(error.message, /PRIVATE/);
+        return true;
+      });
+      assert.equal(calls, 1);
+    }
+  });
+
   it("rejects unsupported reasoning settings before dispatch without exposing their value", () => {
     assert.equal(cloudflareQualificationReasoningEffort("current"), undefined);
     assert.equal(cloudflareQualificationReasoningEffort(undefined), undefined);
@@ -64,6 +101,32 @@ describe("Cloudflare free candidate generator", () => {
     assert.deepEqual(otherwiseIdentical, requests[0]);
     assert.equal(requests[1].max_completion_tokens, 8192);
     assert.equal(requests[1].model, CLOUDFLARE_FREE_MODEL);
+  });
+
+  it("changes only the thinking template when selected, including on a repair request", async () => {
+    for (const reasoningEffort of [undefined, "low"] as const) {
+      for (const repairProposal of [undefined, candidate()]) {
+        const requests: Record<string, unknown>[] = [];
+        for (const thinkingMode of [undefined, "disabled"] as const) {
+          const generator = createCloudflareFreeCandidateGenerator({
+            accountId: ACCOUNT_ID, apiToken: API_TOKEN, workersPlan: "free",
+            reasoningEffort, repairProposal, ...{thinkingMode},
+            async fetcher(_url, init) {
+              requests.push(JSON.parse(String(init?.body)));
+              return Response.json({choices:[{message:{content:JSON.stringify(candidate())}}]});
+            },
+          });
+          assert.deepEqual(await generator.generate(input()), candidate());
+        }
+        assert.equal(requests.length, 2);
+        assert.equal(requests[0].chat_template_kwargs, undefined);
+        const {chat_template_kwargs, ...otherwiseIdentical} = requests[1];
+        assert.deepEqual(chat_template_kwargs, {enable_thinking:false});
+        assert.deepEqual(otherwiseIdentical, requests[0]);
+        assert.equal(requests[1].max_completion_tokens, 8192);
+        assert.equal(requests[1].model, CLOUDFLARE_FREE_MODEL);
+      }
+    }
   });
 
   it("uses one fixed-model request and returns one JSON proposal", async () => {

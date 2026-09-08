@@ -65,7 +65,27 @@ test("interrupted call retains a start record without inventing an accepted outc
     assert.equal(record.usage, "unknown_until_provider_evidence");
     assert.equal(record.objectiveSha256, digest("Learn a public audit."));
     assert.equal(record.reasoningEffort, undefined);
+    assert.equal(record.requestedThinkingMode, undefined);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("the requested thinking mode survives an interrupted call without claiming provider compliance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sara-learning-thinking-"));
+  try {
+    await recordLearningCall(root, 1, "Learn a public audit.", "low", "disabled");
+    const before = await readFile(join(root, "attempt-1-call.json"), "utf8");
+    const saved = JSON.parse(before);
+    assert.equal(saved.requestedThinkingMode, "disabled");
+    assert.equal(saved.reasoningEffort, "low");
+    assert.equal(saved.maximumCompletionTokens, 8192);
+    assert.equal(saved.usage, "unknown_until_provider_evidence");
+    await assert.rejects(() => recordLearningCall(root, 1, "Learn a public audit.", "low"), /EEXIST/);
+    await assert.rejects(() => recordLearningCall(root, 3, "Learn a public audit.", "low", "disabled"), /must be 1 or 2/);
+    await assert.rejects(() => recordLearningCall(root, 2, "Learn a public audit.", "low", "PRIVATE" as "disabled"),
+      /thinking mode must be current or disabled/);
+    assert.deepEqual(await readdir(root), ["attempt-1-call.json"]);
+    assert.equal(await readFile(join(root, "attempt-1-call.json"), "utf8"), before);
+  } finally { await rm(root, {recursive:true,force:true}); }
 });
 
 test("the opt-in reasoning setting is durable before a response and does not expand attempts", async () => {
