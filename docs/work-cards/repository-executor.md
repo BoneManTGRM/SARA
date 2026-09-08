@@ -38,3 +38,13 @@ callbacks are trusted host code, as in the existing kernel; their declared cost
 is not a sandbox that prevents a malicious callback from making network calls.
 Only the supplied deterministic qualification producer is asserted to use no
 model calls. Paid generation remains unavailable in this candidate.
+
+## Next qualification stage
+
+Owner instructed continued preparation on 2026-09-08. Qualify all ten public
+dependency environments from starting-commit manifests, without exposing judge
+images to a model. Add a concrete pinned official-grader adapter whose Docker
+containers have no network, host mounts, credentials or added capabilities.
+Preserve every setup/grade failure. Reference controls must be labeled as such
+and cannot count as SARA predictions. The kernel must bind official reports to
+the frozen patch and recheck authority before accepting a resolved result.

@@ -22,6 +22,8 @@ test("repository binding isolates arms, tasks, runs, commands and images", () =>
   assert.notEqual(repositoryBinding({ ...environment, publicTestCommand: ["true"] }, task).environmentDigest, binding.environmentDigest);
   assert.throws(() => validateRepositoryEnvironment({ ...environment, image: "node:latest" }));
   assert.throws(() => repositoryBinding(environment, { ...task, runId: "../../shared" }));
+  assert.throws(() => repositoryBinding(environment, { ...task, test_patch: "SECRET" } as RepositoryTask), /TASK_FIELDS/);
+  assert.throws(() => repositoryBinding({ ...environment, referencePatch: "SECRET" } as RepositoryEnvironment, task), /ENVIRONMENT_FIELDS/);
 });
 
 test("repository patch refuses traversal, Git metadata, symlinks, submodules and binary encodings", () => {

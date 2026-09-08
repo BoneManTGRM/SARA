@@ -1,4 +1,6 @@
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
+import { runOfficialRepositoryJudge, validateRepositoryJudgeConfiguration,
+  type RepositoryJudgeConfiguration } from "./repository-official-judge.ts";
 import { repositoryBinding, validateRepositoryEnvironment, verifyRepositoryArtifact, verifyRepositoryPatch,
   type RepositoryEnvironment, type RepositoryGenerator, type RepositoryTask } from "./repository-executor.ts";
 import { performance } from "node:perf_hooks";
@@ -451,6 +453,7 @@ export class SaraKernel {
   #previewVerificationPool?: KernelVerificationPool;
   readonly #buildQueue = new KernelBuildQueue();
   readonly #repositoryEnvironments = new Map<string, RepositoryEnvironment>();
+  readonly #repositoryJudges = new Map<string, RepositoryJudgeConfiguration>();
   readonly #constitution: SaraConstitution;
   readonly #ownerTokenSha256: string;
   readonly constitutionDigest: string;
@@ -490,6 +493,8 @@ export class SaraKernel {
     selfBuildVerificationWorkers?: 0 | 1 | 2;
     /** Trusted, public-base-only qualification images. No request can install one. */
     repositoryEnvironments?: readonly RepositoryEnvironment[];
+    /** Judge-only trusted boot config; never included in producer inputs. */
+    repositoryJudges?: readonly RepositoryJudgeConfiguration[];
     now?: () => Date;
   }): Promise<SaraKernel> {
     if (![0, 1, 2].includes(options.selfBuildVerificationWorkers ?? 0)) throw new Error("KERNEL_VERIFICATION_WORKERS_INVALID");
@@ -525,6 +530,11 @@ export class SaraKernel {
       for (const environment of structuredClone(options.repositoryEnvironments ?? [])) {
         validateRepositoryEnvironment(environment);
         kernel.#repositoryEnvironments.set(sha256(canonicalJson(environment)), environment);
+      }
+      for (const judge of structuredClone(options.repositoryJudges ?? [])) {
+        validateRepositoryJudgeConfiguration(judge);
+        if (!kernel.#repositoryEnvironments.has(judge.environmentDigest)) throw new Error("REPOSITORY_JUDGE_UNKNOWN_ENVIRONMENT");
+        kernel.#repositoryJudges.set(judge.environmentDigest, judge);
       }
       await store.append("system_booted", SARA_PRINCIPAL, {
         constitutionDigest: loaded.digest,
@@ -1774,6 +1784,61 @@ export class SaraKernel {
         if (state.jobs.find(j => j.id === jobId)?.status === "running") await this.#store.append("job_status_changed", principal,
           { jobId, from: "running", status: "failed", generatorId,
             reason: error instanceof Error ? error.message.slice(0, 500) : "Repository cycle failed" });
+      });
+      throw error;
+    }
+  }
+
+  async runRepositoryOfficialAcceptance(principal: Principal, jobId: string) {
+    const handoff = await this.serializeMutation(async () => {
+      await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}:official`, external: false });
+      const state = await this.state();
+      if (state.events.some(e => e.type === "repository_judge_started" && (e.data as { jobId: string }).jobId === jobId)) throw new Error("REPOSITORY_JUDGE_ALREADY_CLAIMED");
+      const job = state.jobs.find(j => j.id === jobId);
+      if (!job || !["verified", "failed"].includes(job.status)) throw new Error("REPOSITORY_JUDGE_JOB_NOT_COMPLETE");
+      const event = state.events.find(e => e.type === "repository_build_cycle_completed" && (e.data as { jobId: string }).jobId === jobId);
+      if (!event) throw new Error("REPOSITORY_JUDGE_NO_KERNEL_CANDIDATE");
+      const stored = event.data as import("./repository-executor.ts").RepositoryVerification;
+      // Read exact persisted verifier receipt, then bind to the kernel's event.
+      const receipt = JSON.parse(await readFile(join(this.#store.stateDirectory, stored.artifactRelativePath, "receipt.json"), "utf8")) as typeof stored;
+      for (const key of ["candidateDigest", "environmentDigest", "taskDigest", "patchDigest", "outputDigest", "artifactRelativePath"] as const) {
+        if (receipt[key] !== stored[key]) throw new Error("REPOSITORY_JUDGE_CANDIDATE_DRIFT");
+      }
+      const config = this.#repositoryJudges.get(receipt.environmentDigest);
+      if (!config) throw new Error("REPOSITORY_JUDGE_NOT_CONFIGURED");
+      await verifyRepositoryArtifact(this.#store.stateDirectory, receipt);
+      await this.#store.append("repository_judge_started", principal, { jobId, candidateDigest: receipt.candidateDigest, judgeConfigurationDigest: sha256(canonicalJson(config)) });
+      await this.#store.append("job_status_changed", principal, { jobId, from: job.status, status: "running", phase: "official_repository_judge" });
+      return { receipt, config: structuredClone(config), epoch: state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null };
+    });
+    try {
+      const evidence = await this.#buildQueue.run(async () => {
+        await this.serializeMutation(async () => {
+          await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}:judge-dispatch`, external: false });
+          const state = await this.state();
+          if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("REPOSITORY_JUDGE_JOB_NOT_RUNNING");
+          if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== handoff.epoch) throw new Error("REPOSITORY_JUDGE_AUTHORITY_CHANGED");
+        });
+        return runOfficialRepositoryJudge(this.#store.stateDirectory, handoff.receipt, handoff.config);
+      });
+      return await this.serializeMutation(async () => {
+        await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}:judge-acceptance`, external: false });
+        const state = await this.state();
+        if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("REPOSITORY_JUDGE_JOB_NOT_RUNNING");
+        if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== handoff.epoch) throw new Error("REPOSITORY_JUDGE_AUTHORITY_CHANGED");
+        await verifyRepositoryArtifact(this.#store.stateDirectory, handoff.receipt);
+        if (sha256(await readFile(join(this.#store.stateDirectory, evidence.artifactRelativePath, "judge-receipt.json"))) !== evidence.judgeReceiptDigest) throw new Error("REPOSITORY_JUDGE_RECEIPT_DRIFT");
+        if (evidence.result.gradeCompleted && sha256(await readFile(join(this.#store.stateDirectory, evidence.artifactRelativePath, evidence.result.reportRelativePath!))) !== evidence.result.reportDigest) throw new Error("REPOSITORY_JUDGE_REPORT_DRIFT");
+        await this.#store.append("repository_official_acceptance_completed", principal, { jobId, ...evidence, attestation: "kernel_executed" });
+        await this.#store.append("job_status_changed", principal, { jobId, from: "running", status: evidence.result.gradeCompleted && evidence.result.resolved ? "verified" : "failed", phase: "official_repository_judge" });
+        return evidence;
+      });
+    } catch (error) {
+      await this.serializeMutation(async () => {
+        await this.#store.append("repository_official_acceptance_failed", principal, { jobId,
+          candidateDigest: handoff.receipt.candidateDigest, reason: error instanceof Error ? error.message.slice(0, 1000) : "JUDGE_FAILED" });
+        const state = await this.state();
+        if (state.jobs.find(j => j.id === jobId)?.status === "running") await this.#store.append("job_status_changed", principal, { jobId, from: "running", status: "failed", phase: "official_repository_judge" });
       });
       throw error;
     }

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "status": "public-base-recipes-requiring-execution-qualification",
+  "tasks": [
+    {"instanceId":"axios__axios-4731","runtimeTag":"node:16.20.2-bullseye","packageManager":"npm@8.19.4","installCommand":["npm","ci","--no-audit","--no-fund"],"publicTestCommand":["./node_modules/.bin/grunt","mochaTest"]},
+    {"instanceId":"immutable-js__immutable-js-2006","runtimeTag":"node:18.20.4-bookworm","packageManager":"npm@9.9.4","installCommand":["npm","ci","--no-audit","--no-fund"],"publicTestCommand":["sh","-c","npm run build && CI=true npm run unit-test -- --runInBand"]},
+    {"instanceId":"preactjs__preact-3454","runtimeTag":"node:14.21.3-bullseye","packageManager":"npm@8.19.4","browser":true,"installCommand":["env","HUSKY=0","npm","ci","--no-audit","--no-fund"],"publicTestCommand":["env","CHROME_BIN=/usr/bin/chromium","npm","run","test:karma"]},
+    {"instanceId":"vuejs__core-11739","runtimeTag":"node:20.9.0-bookworm","packageManager":"pnpm@9.9.0","installCommand":["env","PUPPETEER_SKIP_DOWNLOAD=true","pnpm","install","--frozen-lockfile"],"publicTestCommand":["pnpm","exec","vitest","run","-c","vitest.unit.config.ts","--maxWorkers=2","--minWorkers=1"]},
+    {"instanceId":"babel__babel-14532","runtimeTag":"node:18.20.4-bookworm","packageManager":"yarn@3.1.1","installCommand":["env","HUSKY=0","node",".yarn/releases/yarn-3.1.1.cjs","install","--immutable"],"publicTestCommand":["sh","-c","make build-no-bundle && BABEL_ENV=test yarn jest --runInBand --ci"]},
+    {"instanceId":"facebook__docusaurus-9897","runtimeTag":"node:18.20.4-bookworm","packageManager":"yarn@1.22.22","installCommand":["yarn","install","--frozen-lockfile","--ignore-scripts"],"publicTestCommand":["sh","-c","yarn build:packages && yarn test --runInBand"]},
+    {"instanceId":"mrdoob__three.js-26589","runtimeTag":"node:18.20.4-bookworm","packageManager":"npm@9.9.4","installCommand":["npm","ci","--no-audit","--no-fund"],"publicTestCommand":["npm","run","test-unit"]},
+    {"instanceId":"axios__axios-5085","runtimeTag":"node:18.20.4-bookworm","packageManager":"npm@9.9.4","installCommand":["npm","ci","--no-audit","--no-fund"],"publicTestCommand":["npm","run","test:mocha"]},
+    {"instanceId":"immutable-js__immutable-js-2005","runtimeTag":"node:18.20.4-bookworm","packageManager":"npm@9.9.4","installCommand":["npm","ci","--no-audit","--no-fund"],"publicTestCommand":["sh","-c","npm run build && CI=true npm run test:unit -- --runInBand"]},
+    {"instanceId":"preactjs__preact-4436","runtimeTag":"node:20.9.0-bookworm","packageManager":"npm@10.1.0","browser":true,"installCommand":["env","HUSKY=0","npm","ci","--no-audit","--no-fund"],"publicTestCommand":["env","CHROME_BIN=/usr/bin/chromium","npm","run","test:karma"]}
+  ]
+}

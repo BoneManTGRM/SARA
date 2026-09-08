@@ -5,9 +5,11 @@ import { KERNEL_BENCHMARK_PINS } from "./repeat-kernel-pins.ts";
 // Offline regression qualification only. Live repeat runs retain their old
 // immutable source pins and fail closed on this changed kernel.
 export const REPOSITORY_QUALIFICATION_PINS = Object.freeze({ ...KERNEL_BENCHMARK_PINS,
-  "src/kernel.ts": "72ef791bd859839c16132a27aa2f731f937c72043ae6f0400b556bfb9c280136",
-  "src/repository-executor.ts": "10d2321948f7c8ec2cb5b7e7c9b86a1136252a6aff0ae948f422b8b04565feba",
+  "src/kernel.ts": "62e1d374f19d5d566e92f5e71ff4e7e4920d93c80cd8d20084d2715410e36f38",
+  "src/repository-executor.ts": "069dfd230a954aff37c5cf8f207105e9ec627858ec36054b811031c9d4a105bf",
   "src/repeat-kernel-benchmark.ts": "6b4385adb6e1b431e1610d96d7654def0b156431688725d3aaad1aa5c26a92a6",
+  "src/repository-official-judge.ts": "2a46f37dad012746fcfaeacca97c58f70d339f9e9a764e7d3baf5b036f8c7018",
+  "scripts/swe-bench-judge.py": "6591d0675b889ebac6be1fabbe67a295dff008103f2125983537a7ce9b6bbae6",
 });
 export async function assertRepositoryQualificationImplementation(): Promise<void> {
   for (const [path, digest] of Object.entries(REPOSITORY_QUALIFICATION_PINS)) {

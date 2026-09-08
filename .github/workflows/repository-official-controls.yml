@@ -1,0 +1,50 @@
+name: Kernel official grading controls (no model calls)
+on:
+  push:
+    branches: [feat/swe-repository-executor]
+    paths:
+      - .github/workflows/repository-official-controls.yml
+      - scripts/swe-bench-judge.py
+      - scripts/prepare-official-control.py
+      - src/repository-official-judge.ts
+      - proof/repository-official-controls.ts
+permissions:
+  contents: read
+jobs:
+  official-controls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: npm ci
+      - name: Install pinned official harness
+        run: |
+          git clone https://github.com/SWE-bench/SWE-bench.git "$RUNNER_TEMP/harness"
+          git -C "$RUNNER_TEMP/harness" checkout 02e7a74ffd0b707aab73d203fe87bdc7c76afc8e
+          python -m pip install "$RUNNER_TEMP/harness"
+      - name: Prepare judge-only controls
+        run: python3 scripts/prepare-official-control.py --index '${{ matrix.index }}' --harness "$RUNNER_TEMP/harness" --output "$RUNNER_TEMP/official-setup"
+      - name: Run actual kernel-owned official grading
+        run: node --import tsx proof/repository-official-controls.ts "$RUNNER_TEMP/official-setup/control-input.json" "$RUNNER_TEMP/official-evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kernel-official-${{ matrix.index }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/official-evidence
+            ${{ runner.temp }}/official-setup/build
+          if-no-files-found: error
+          retention-days: 14

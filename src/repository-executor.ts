@@ -46,6 +46,7 @@ export interface RepositoryVerification {
 }
 
 export function validateRepositoryEnvironment(value: RepositoryEnvironment): void {
+  if (Object.keys(value).sort().join(",") !== "baseCommit,image,publicTestCommand,repository,schemaVersion,timeoutSeconds") throw new Error("REPOSITORY_ENVIRONMENT_FIELDS");
   if (value.schemaVersion !== 1 || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value.repository)
     || !/^[a-f0-9]{40}$/.test(value.baseCommit)
     || !/^(?:sha256:[a-f0-9]{64}|[a-z0-9./_-]+@sha256:[a-f0-9]{64})$/.test(value.image)
@@ -58,6 +59,7 @@ export function validateRepositoryEnvironment(value: RepositoryEnvironment): voi
 
 export function repositoryBinding(environment: RepositoryEnvironment, task: RepositoryTask) {
   validateRepositoryEnvironment(environment);
+  if (Object.keys(task).sort().join(",") !== "arm,instanceId,problemStatement,runId") throw new Error("REPOSITORY_TASK_FIELDS");
   if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(task.instanceId)
     || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(task.runId)
     || !["conventional", "reparodynamic"].includes(task.arm)

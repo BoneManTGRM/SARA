@@ -15,7 +15,8 @@ import tempfile
 
 
 def dockerfile(recipe):
-    if set(recipe) != {"repository", "baseCommit", "runtimeImage", "installCommand"}:
+    required = {"repository", "baseCommit", "runtimeImage", "installCommand"}
+    if not required <= set(recipe) or set(recipe) - required - {"packageManager", "browser"}:
         raise ValueError("Only public repository, commit, runtime image and install command are allowed")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", recipe["repository"]):
         raise ValueError("Invalid repository")
@@ -26,6 +27,18 @@ def dockerfile(recipe):
     command = recipe["installCommand"]
     if not isinstance(command, list) or not command or any(not isinstance(x, str) or "\0" in x or "\n" in x for x in command):
         raise ValueError("Install command must be an argument array")
+    manager = recipe.get("packageManager")
+    if manager is not None and not re.fullmatch(r"(?:npm|pnpm|yarn)@[0-9]+\.[0-9]+\.[0-9]+", manager):
+        raise ValueError("Exact package manager version required")
+    if recipe.get("browser", False) not in (True, False):
+        raise ValueError("Browser flag required")
+    setup = []
+    if recipe.get("browser"):
+        setup.append("RUN apt-get update && apt-get install -y --no-install-recommends chromium && rm -rf /var/lib/apt/lists/*")
+    if manager and manager.startswith("yarn@3."):
+        setup += ["ENV COREPACK_HOME=/opt/corepack", "RUN npm install --global --force corepack@0.31.0 && corepack enable && corepack prepare " + manager + " --activate && chmod -R a+rX /opt/corepack"]
+    elif manager:
+        setup.append("RUN npm install --global --force " + manager)
     # Fetch exactly one public commit. No future branches, tags or credentials.
     checkout = ("git init /sara/base && cd /sara/base && "
                 f"git fetch --depth=1 https://github.com/{recipe['repository']}.git {recipe['baseCommit']} && "
@@ -33,7 +46,7 @@ def dockerfile(recipe):
                 "git reflog expire --expire=now --all && git gc --prune=now && "
                 "chown -R 1000:1000 /sara/base")
     return "\n".join([
-        f"FROM {recipe['runtimeImage']}", "USER root", "RUN " + checkout,
+        f"FROM {recipe['runtimeImage']}", "USER root", *setup, "RUN " + checkout,
         "WORKDIR /sara/base", "USER 1000:1000", "ENV HOME=/tmp",
         "RUN " + json.dumps(command),
         "RUN test -z \"$(git status --porcelain --untracked-files=no)\" && test \"$(git rev-list --all --count)\" = 1",

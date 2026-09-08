@@ -1,0 +1,37 @@
+name: SWE public repository environments (no model calls)
+on:
+  push:
+    branches: [feat/swe-repository-executor]
+    paths:
+      - .github/workflows/swe-repository-environments.yml
+      - docs/benchmarks/swe-repository-recipes.json
+      - scripts/prepare-repository-image.py
+      - scripts/qualify-repository-environment.py
+      - proof/repository-environment.ts
+permissions:
+  contents: read
+jobs:
+  public-environment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: python3 scripts/qualify-repository-environment.py --index '${{ matrix.index }}' --output "$RUNNER_TEMP/public-environment"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: public-environment-${{ matrix.index }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-environment
+          if-no-files-found: error
+          retention-days: 14
