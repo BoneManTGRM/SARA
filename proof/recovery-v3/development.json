@@ -1,0 +1,31 @@
+[
+  {
+    "id": "dev-mode-loop",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "space": {
+      "mode": [
+        0,
+        1,
+        2
+      ]
+    },
+    "publicCases": [
+      [
+        0,
+        [
+          0,
+          2
+        ]
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ]
+  }
+]

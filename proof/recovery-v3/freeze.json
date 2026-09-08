@@ -1,0 +1,14 @@
+{
+  "purpose": "Frozen before candidate editing; new response policies and finite-domain substitute",
+  "files": {
+    "proof/recovery-v3/model.ts": "6384af73690a85fdc93cec77aa0cf647401e056441ce12c31548e6381665f48a",
+    "proof/recovery-v3/settings.json": "54e47c228c4c76107fa4073e269e9796c766fd1e6a2f73a8bf267c0a52605a8d",
+    "proof/recovery-v3/current-producer.txt": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b",
+    "proof/recovery-v3/program.cjs": "4fb87b91d2f2bd300c1f3441f3a55034720e484e0fc672d0f9a90d6282da86bd",
+    "proof/recovery-v3/heldout.json": "86fbe3a09bde95f4c9c291beb28e8c6de630155bdea87c6727a8ddbc55c69f84",
+    "proof/recovery-v3/baseline-producer.txt": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+    "proof/recovery-v3/run.mts": "2c23be6114830d13f347d03d32c0fe75e753004d99cc437b5eb87cf7882aa916",
+    "proof/recovery-v3/development.json": "a2085fe93d597572c5c3aca17c6e2c9df7e477da1be096fa7150f98d213ec6d1",
+    "docs/work-cards/recovery-stopping.md": "4152d3441b58e7dccbe7a40028adac142aee8e7084c0c80fed582aa8d7f784be"
+  }
+}
