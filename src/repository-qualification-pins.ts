@@ -16,7 +16,7 @@ export const REPOSITORY_QUALIFICATION_PINS = Object.freeze({ ...KERNEL_BENCHMARK
   "scripts/swe-judge-fixture-runtime.py": "1c1dfd992f83e25c0b6fc75d0679aa207f72745f3e011586553f450d4ea259a9",
   "src/observed-reuse-benchmark.ts": "38681ff2cf96c46df503f31b33fb7c861cbad8613847514a19489cde7d3bec8f",
   "src/benchmark-dispatch-budget.ts": "b5563467a3d935720527e6bd40d407080255d288ae8775db5cf6f8ffb204c2b7",
-  "src/repository-producer.ts": "3a168cddfb464cae1870ddf31eead17b0b7ea38df77b8fd490a11e041d15411f",
+  "src/repository-producer.ts": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b",
   "src/repository-comparison.ts": "fa9d3cabfcd25d501db4adba68243275dd915628a249d89b034b6bcfb6cbcec9",
   "src/repository-luna-model.ts": "51bc8eb8729f16994e7620505de820890de52818dd3eb0feee5e46af185914a9",
   "src/repository-benchmark-permit.ts": "941d9cf4563117bee9b35da4e91779545797cae88aa7e63ada13444b055e2e0b",

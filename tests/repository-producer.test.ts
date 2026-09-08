@@ -173,3 +173,46 @@ test("expanded anchors producing the same failed transition are restored and nev
   assert.equal(restores, 2); assert.equal(result.patch, "");
   assert.ok(result.events.some(e => e.kind === "decision" && (e.detail as { action: string }).action === "suppress_equivalent"));
 });
+
+test("rollback to the unrepaired baseline offers one evidence-bound recovery continuation", async () => {
+  let content = "original";
+  const patch = () => content === "original" ? "" : `diff --git a/src/file.ts b/src/file.ts\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1 +1 @@\n-original\n+${content}\n`;
+  const result = await runRepositoryProducer({ task: { ...task, arm: "reparodynamic" }, environment, limits,
+    model: model([{ action: "edit", path: "src/file.ts", oldText: "original", newText: "bad" }, { action: "test" },
+      { action: "finish" }, { action: "edit", path: "src/file.ts", oldText: "original", newText: "good" },
+      { action: "test" }, { action: "finish" }]), beforeAction() {}, sandbox: {
+      async execute(a) {
+        if (a.action === "test") return { exitCode: content === "bad" ? 1 : 0, output: "public feedback" };
+        if (a.action === "edit") content = content.replace(a.oldText, a.newText);
+        return { exitCode: 0, output: content };
+      }, async freezePatch() { return patch(); }, async restore() { content = "original"; }, async close() {},
+    } });
+  assert.match(result.patch, /\+good/);
+  assert.equal(result.publicTests, 3);
+  const rejection = result.events.find(e => e.kind === "decision" && (e.detail as { action: string }).action === "reject_finish")!;
+  assert.ok(rejection);
+  const evidence = result.events.find(e => e.digest === (rejection.detail as { failureEvidenceDigest: string }).failureEvidenceDigest)!;
+  assert.equal(evidence.kind, "failure_memory");
+  const publicTest = result.events.find(e => e.digest === (evidence.detail as { testEvidenceDigest: string }).testEvidenceDigest)!;
+  assert.equal((publicTest.detail as { exitCode: number }).exitCode, 1);
+});
+
+test("recovery continuation is single-use and cannot exceed the original request budget", async () => {
+  for (const ceiling of [3, 8]) {
+    let content = "original", calls = 0;
+    const actions = [{ action: "edit", path: "src/file.ts", oldText: "original", newText: "bad" }, { action: "test" }, { action: "finish" }, { action: "finish" }];
+    const result = await runRepositoryProducer({ task: { ...task, arm: "reparodynamic" }, environment,
+      limits: { ...limits, maximumModelRequests: ceiling }, beforeAction() {},
+      model: { async request() { return { outputText: JSON.stringify(actions[calls++]), inputTokens: 0, outputTokens: 0, accountedCostUsd: 0 }; } },
+      sandbox: { async execute(a) {
+        if (a.action === "test") return { exitCode: content === "bad" ? 1 : 0, output: "public feedback" };
+        if (a.action === "edit") content = a.newText;
+        return { exitCode: 0, output: content };
+      }, async freezePatch() { return content === "original" ? "" : "diff --git a/src/file.ts b/src/file.ts\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1 +1 @@\n-original\n+bad\n"; },
+      async restore() { content = "original"; }, async close() {} } });
+    assert.equal(calls, ceiling === 3 ? 3 : 4);
+    assert.equal(result.patch, "");
+    assert.equal(result.events.filter(e => e.kind === "decision" && (e.detail as { action: string }).action === "reject_finish").length, ceiling === 3 ? 0 : 1);
+    assert.equal(result.status, "finished");
+  }
+});

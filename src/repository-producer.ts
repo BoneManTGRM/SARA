@@ -153,6 +153,7 @@ export async function runRepositoryProducer(input: {
   const failedTactics = new Set<string>(), pendingTactics = new Set<string>(), changedPaths = new Set<string>();
   const failedTransitions = new Set<string>(), pendingTransitions = new Set<string>();
   let changedLines = 0;
+  let baselineRollbackEvidence: string | undefined, recoveryContinuationOffered = false;
   const event = (kind: string, detail: unknown) => result.events.push({ kind, digest: sha256(canonicalJson(detail)), detail });
   async function dispatch<T>(kind: "model" | "tool" | "freeze" | "restore", action: (signal: AbortSignal) => Promise<T>): Promise<T> {
     if (Date.now() >= deadline) throw new Error("PRODUCER_WALL_LIMIT");
@@ -208,7 +209,20 @@ export async function runRepositoryProducer(input: {
       let action: RepositoryAction;
       try { action = parseRepositoryAction(response.outputText); } catch (error) { event("invalid_action", { error: String(error) }); continue; }
       event("action", action);
-      if (action.action === "finish") { result.status = "finished"; result.reason = "model_finish"; break; }
+      if (action.action === "finish") {
+        // Restoring the public-green starting point removed a regression, not
+        // the issue. Offer one evidence-bound reconsideration, never a new
+        // allowance or an indefinite refusal to stop.
+        if (task.arm === "reparodynamic" && baselineRollbackEvidence && result.patch === ""
+          && !recoveryContinuationOffered && result.modelRequests < limits.maximumModelRequests) {
+          recoveryContinuationOffered = true;
+          event("decision", { action: "reject_finish", reason: "rollback_restored_unrepaired_baseline",
+            failureEvidenceDigest: baselineRollbackEvidence, restoredPatchDigest: sha256(result.patch),
+            instruction: "The failed repair was rolled back. Public green on the original checkout does not resolve the issue. Try a materially different hypothesis using the remaining original budget, or finish if no justified alternative remains." });
+          continue;
+        }
+        result.status = "finished"; result.reason = "model_finish"; break;
+      }
       if (action.action === "test") {
         await freeze(); const passed = await test();
         if (task.arm === "reparodynamic") {
@@ -222,6 +236,7 @@ export async function runRepositoryProducer(input: {
               contextBoundTransitions: [...pendingTransitions].slice(-8), omittedTransitions: Math.max(0, pendingTransitions.size - 8) });
           }
           if (!passed && championPassed) {
+            if (champion === "") baselineRollbackEvidence = result.events.at(-1)!.digest;
             await dispatch("restore", () => input.sandbox.restore(champion));
             result.patch = champion;
             await freeze();

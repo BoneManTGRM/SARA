@@ -1,0 +1,6 @@
+{
+  "producerSha256": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b",
+  "frozenBeforeHeldout": true,
+  "development": "Previous repeated-regression repaired; existing public-green hidden defect still rejected; 17 focused tests pass, two new tests fail before change",
+  "scope": "One bounded finish reconsideration after regression rollback to initial empty patch"
+}
