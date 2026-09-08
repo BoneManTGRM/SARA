@@ -17,7 +17,7 @@ import type { CommercialTerms } from "./commercial-terms.ts";
 import { paymentClientSecretDigest, publicPaymentIntent } from "./revenue-payment.ts";
 import { deliverySecretDigest } from "./revenue-delivery.ts";
 import { verifyBaseUsdcPayment } from "./usdc-payment.ts";
-import { sha256 } from "./canonical.ts";
+import { canonicalJson, sha256 } from "./canonical.ts";
 import { listRevenueServices } from "./revenue-service-catalog.ts";
 import { readRepositoryReadinessReportArtifact } from "./repository-readiness-report-artifacts.ts";
 import { readRevenueNicoArtifact, readRevenueNicoPackage } from "./revenue-nico-artifacts.ts";
@@ -726,6 +726,31 @@ async function handleOwnerRevenueWrite(
   }
   if (request.method === "POST" && url.pathname === "/api/emergency-stop") {
     await handleEmergencyStop(request, response, kernel, owner);
+    return true;
+  }
+  if (url.pathname === "/api/model-budget" && request.method === "GET") {
+    json(response,200,await kernel.modelBudgetStatus());
+    return true;
+  }
+  if (url.pathname === "/api/model-budget" && request.method === "POST") {
+    const body=await readJson(request);
+    const input={monthlyLimitUsd:body.monthlyLimitUsd,openingChargeUsd:body.openingChargeUsd,
+      inputUsdPerMillionTokens:body.inputUsdPerMillionTokens,outputUsdPerMillionTokens:body.outputUsdPerMillionTokens};
+    if(Object.values(input).some(value=>typeof value!=="number")) throw new Error("Model budget fields must be explicit numbers.");
+    const config=input as {monthlyLimitUsd:number;openingChargeUsd:number;inputUsdPerMillionTokens:number;outputUsdPerMillionTokens:number};
+    await kernel.configureModelBudget(owner,config,{approvalId:randomUUID(),action:"owner_funded_ceiling_change",
+      targetId:`model-budget:${sha256(canonicalJson(config))}`,approvedAt:new Date().toISOString(),ownerId:owner.id});
+    json(response,200,await kernel.modelBudgetStatus());
+    return true;
+  }
+  if (request.method === "POST" && url.pathname === "/api/autonomy/learning-mandate") {
+    const now=new Date();
+    const id=`internal-learning-${now.toISOString().slice(0,10)}`;
+    json(response,201,await kernel.activateStandingMandate(owner,{
+      id,ownerId:owner.id,allowedActions:["business_candidate_development"],allowedChannels:["internal"],
+      allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:2,
+      startsAt:now.toISOString(),expiresAt:new Date(now.getTime()+30*86_400_000).toISOString(),
+    },{approvalId:randomUUID(),action:"required_owner_approval_change",targetId:`standing-mandate:${id}`,approvedAt:now.toISOString(),ownerId:owner.id}));
     return true;
   }
   if (request.method === "POST" && url.pathname === "/api/autonomy/standing-mandate") {

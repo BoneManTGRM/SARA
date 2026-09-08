@@ -1,4 +1,6 @@
 import { WebsiteMaintenanceOperator } from "./website-maintenance.ts";
+import { AutonomousLearningWorker } from "./autonomous-learning-worker.ts";
+import { createCloudflareFreeCandidateGenerator } from "./cloudflare-free-generator.ts";
 import { observeSelfBuildHttp } from "./self-build-http-timing.ts";
 import { CodingDispatchJournal } from "./coding-dispatch-journal.ts";
 import { mkdir } from "node:fs/promises";
@@ -116,6 +118,12 @@ await activateApprovedAutonomousPaidMandate({
   ...(approvedAutonomousPaidMandateDigest ? { approvedDigest: approvedAutonomousPaidMandateDigest } : {}),
 });
 const bootStatus = await kernel.getStatus();
+const learningWorker = process.env.SARA_AUTONOMOUS_LEARNING_ENABLED === "true"
+  ? new AutonomousLearningWorker(kernel, createCloudflareFreeCandidateGenerator({
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
+    apiToken: process.env.CLOUDFLARE_API_TOKEN ?? "",
+    workersPlan: process.env.SARA_WORKERS_PLAN ?? "",
+  })) : null;
 const capabilityReadiness = PILOT_REQUIRED_CAPABILITIES.map((id) => ({
   id,
   status: bootStatus.capabilities.find((capability) => capability.id === id)?.status ?? "missing",
@@ -129,7 +137,7 @@ console.log(`SARA revenue readiness proof ${JSON.stringify({
   commercialTermsApproval: approvedTermsDigest === compiledTerms?.digest ? "exact" : termsApproved ? "v1_to_v2_migration" : "missing",
   reparodynamicCodingMode,
 })}`);
-const client = apiKey ? new OpenAIResponsesClient({ apiKey }) : null;
+const client = apiKey ? kernel.guardPaidModelClient(new OpenAIResponsesClient({ apiKey })) : null;
 if (reparodynamicCodingMode !== "off" && !client) {
   throw new Error("Reparodynamic coding requires OPENAI_API_KEY when its mode is shadow or canary.");
 }
@@ -180,7 +188,7 @@ const server = createSaraServer(kernel, {
             const status = await kernel.getStatus();
             if (status.emergencyStopped || !status.constitution.verified) throw new Error("CODING_DISPATCH_AUTHORITY_REVOKED");
           } });
-        return new OpenAIResponsesClient({ apiKey: apiKey!, fetchImpl: journal.fetch });
+        return kernel.guardPaidModelClient(new OpenAIResponsesClient({ apiKey: apiKey!, fetchImpl: journal.fetch }));
       },
       ...(nativeVerifier ? { nativeVerifier } : {}),
       stateDirectory,
@@ -207,6 +215,7 @@ observeSelfBuildHttp(server, {
 });
 server.listen(port, host, () => {
   websiteMaintenance.start();
+  learningWorker?.start();
   const address = server.address();
   const resolvedPort = typeof address === "object" && address ? address.port : port;
   console.log(`SARA owner dashboard listening on http://${host}:${resolvedPort}`);
@@ -245,6 +254,7 @@ server.listen(port, host, () => {
 
 function shutdown(): void {
   websiteMaintenance.stop();
+  learningWorker?.stop();
   operator?.stop();
   server.close(() => { void kernel.closeVerificationWorkers(); });
 }
