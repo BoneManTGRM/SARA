@@ -1,0 +1,15 @@
+{
+  "baselineLocal": "be446f7bcf96b51caaa823bbfcd82ddd313981e1",
+  "baselineRemote": "379b9a0e5ebbfb26ff65befca0c5b88c4960822b",
+  "controllerEdited": false,
+  "files": {
+    "proof/recovery-v4/baseline-producer.txt": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+    "proof/recovery-v4/current-producer.txt": "941d5fe29021d1195bda14855c0ed9d7f38ed0e9dc317da2f5ff58eef0dbfd5b",
+    "proof/recovery-v4/model.ts": "6384af73690a85fdc93cec77aa0cf647401e056441ce12c31548e6381665f48a",
+    "proof/recovery-v4/program.cjs": "4fb87b91d2f2bd300c1f3441f3a55034720e484e0fc672d0f9a90d6282da86bd",
+    "proof/recovery-v4/settings.json": "a17abc9ccd7b696d801456ffe4144cdd723943d098258f94180657441023f8d3",
+    "proof/recovery-v4/development.json": "4cd29b6759cdbba10393703baa99b1e72a7696cfee2181f46c07b2eaff417e62",
+    "proof/recovery-v4/heldout.json": "b362c956e09138956529e6fb0cfdbdfd5e163d385002c79ec2f220c8e298d46b",
+    "proof/recovery-v4/run.mts": "41869a4e8dc4ea21a08f001bc6d83ca87904d89d398e5bb742e4514652097c47"
+  }
+}

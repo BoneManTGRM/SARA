@@ -1,0 +1,39 @@
+[
+  {
+    "id": "dev-batch-prerequisite",
+    "family": "affine",
+    "initial": {
+      "a": 0,
+      "b": 0
+    },
+    "space": {
+      "a": [
+        2
+      ],
+      "b": [
+        1,
+        0
+      ]
+    },
+    "publicCases": [
+      [
+        0,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        3,
+        6
+      ],
+      [
+        -3,
+        -6
+      ]
+    ],
+    "requirement": "Return twice the input for every integer; preserve zero at zero.",
+    "partialProgress": {
+      "a": 2
+    }
+  }
+]
