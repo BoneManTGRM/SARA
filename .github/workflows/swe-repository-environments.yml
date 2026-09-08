@@ -8,6 +8,7 @@ on:
       - scripts/prepare-repository-image.py
       - scripts/qualify-repository-environment.py
       - proof/repository-environment.ts
+      - src/repository-executor.ts
 permissions:
   contents: read
 jobs:

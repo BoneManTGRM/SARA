@@ -55,6 +55,12 @@ introduced. Every producer result is frozen before the first official grade.
   qualify the environment. The streaming launcher now closes leftover batch
   processes before advancing. Normal qualification still requires the full
   vector under the original 900-second bound.
+- Source review found that the sandbox used `/bin/sleep` as PID 1 without a
+  child reaper. Repeated browser batches can leave orphaned descendants as
+  zombies and consume the unchanged 256-PID allowance. The follow-up adds
+  Docker's standard `--init` and a real orphan-reaping proof. PID exhaustion
+  is a plausible explanation for the later browser pause, not yet a measured
+  cause of that run; no timeout or resource cap is increased.
 - Real Docker proof `34177382219` passed both scripted repository producers,
   fresh kernel verification, poison rejection and artifact-tamper rejection.
   It made zero provider calls and zero benchmark attempts.

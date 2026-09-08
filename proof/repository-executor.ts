@@ -33,6 +33,50 @@ try {
   run("docker", ["build", "--iidfile", join(scratch, "image-id"), scratch]);
   const environment: RepositoryEnvironment = { schemaVersion: 1, repository: "qualification/public-fixture", baseCommit,
     image: (await readFile(join(scratch, "image-id"), "utf8")).trim(), publicTestCommand: ["node", "test.cjs"], timeoutSeconds: 10 };
+  // Exercise PID1's orphan reaper in an otherwise fresh isolated session.
+  // No host PIDs, signaling, credentials, or reference repairs are involved.
+  const reapingSession = await RepositorySession.start(environment);
+  try {
+    const reaping = await reapingSession.run(["node", "-e", `
+const fs=require('node:fs'),cp=require('node:child_process');
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function snapshot(){
+ const read=name=>{try{return fs.readFileSync('/sys/fs/cgroup/'+name,'utf8').trim()}catch{return null}};
+ let zombies=0;
+ for(const pid of fs.readdirSync('/proc').filter(name=>/^\\d+$/.test(name))){
+  try{const stat=fs.readFileSync('/proc/'+pid+'/stat','utf8');if(stat.slice(stat.lastIndexOf(')')+2).startsWith('Z '))zombies++}catch{}
+ }
+ return {zombies,pidsCurrent:read('pids.current'),pidsEvents:read('pids.events')};
+}
+(async()=>{
+ const baseline=snapshot(),orphanPids=[];
+ const grandchild="const parent=Number(process.argv[1]);const timer=setInterval(()=>{try{process.kill(parent,0)}catch(error){if(error.code==='ESRCH'){clearInterval(timer);process.exit(0)}else process.exit(2)}},5);";
+ const parent="const cp=require('node:child_process');const child=cp.spawn(process.execPath,['-e',"+JSON.stringify(grandchild)+",String(process.pid)],{detached:true,stdio:'ignore'});child.on('error',()=>process.exit(2));child.on('spawn',()=>{child.unref();process.stdout.write(String(child.pid),()=>process.exit(0))});";
+ for(let index=0;index<16;index++){
+  const pid=await new Promise((resolve,reject)=>{
+   const child=cp.spawn(process.execPath,['-e',parent],{stdio:['ignore','pipe','ignore']});let out='';
+   child.stdout.on('data',chunk=>out+=chunk);child.on('error',reject);
+   child.on('close',code=>code===0&&/^\\d+$/.test(out)?resolve(Number(out)):reject(Error('ORPHAN_PARENT_FAILED')));
+  });orphanPids.push(pid);
+ }
+ const deadline=Date.now()+2000;let final,remaining;
+ do{
+  final=snapshot();remaining=orphanPids.filter(pid=>fs.existsSync('/proc/'+pid));
+  if(!remaining.length&&final.zombies<=baseline.zombies)break;
+  await delay(25);
+ }while(Date.now()<deadline);
+ const passed=!remaining.length&&final.zombies<=baseline.zombies;
+ console.log(JSON.stringify({control:'orphan-descendant-reaping',baseline,final,orphanPids,remaining,passed}));
+ process.exitCode=passed?0:1;
+})().catch(error=>{console.error(error);process.exitCode=1});
+`]);
+    await writeFile(join(output, "orphan-reaping.log"), reaping.output);
+    const evidence = JSON.parse(reaping.output.trim());
+    await writeFile(join(output, "orphan-reaping.json"), JSON.stringify(evidence, null, 2));
+    assert.equal(reaping.exitCode, 0, "Container PID1 must reap all sixteen orphan descendants");
+    assert.equal(evidence.passed, true);
+    assert.equal(evidence.orphanPids.length, 16);
+  } finally { await reapingSession.close(); }
   kernel = await SaraKernel.boot({ stateDirectory: output, ownerTokenSha256: sha256("qualification-only-owner-token"), repositoryEnvironments: [environment] });
   const receipts = [];
   for (const control of ["base-fails", "patch-passes", "workspace-poison-fails"] as const) {

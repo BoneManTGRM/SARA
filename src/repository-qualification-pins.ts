@@ -8,7 +8,7 @@ export const REPOSITORY_QUALIFICATION_PINS = Object.freeze({ ...KERNEL_BENCHMARK
   "src/server.ts": "1a9c6d422ef52e0dad99781c9bca34471fa7236fe36702f980ab40f6f075e6f9",
   "src/main.ts": "b4dd67c4cdad3a9510d4f7d3a95cc2a395f5354e0695852cbc4324b6d641b3e2",
   "src/kernel.ts": "031a925d386321d3eb164aa0c9f36ed3dc5c9f4631bdecf941595b6c96821d5c",
-  "src/repository-executor.ts": "adb36d4ff8aaa0469dbf56fad2c4fe40362a53c3f2e7e2e166f6eef0e508f5d7",
+  "src/repository-executor.ts": "a28b05949025544860583214f39189bc7a15740dac5875616a9f5d189618f98d",
   "src/repeat-kernel-benchmark.ts": "6b4385adb6e1b431e1610d96d7654def0b156431688725d3aaad1aa5c26a92a6",
   "src/repository-official-judge.ts": "925a69b848f97a196e81c363cad8ed12f954aabcf1800dce36a2aa9ddd45ab1b",
   "scripts/swe-bench-judge.py": "6e405be3fba63e2bddc86ef6677c62021f7c47e3ac0edde7d461af9478d001bd",

@@ -130,7 +130,7 @@ export class RepositorySession {
     validateRepositoryEnvironment(environment);
     const session = new RepositorySession(environment);
     try {
-      const result = await docker(["run", "--detach", "--pull=never", "--name", session.#name,
+      const result = await docker(["run", "--detach", "--init", "--pull=never", "--name", session.#name,
         "--network=none", "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
         "--user=1000:1000", "--cpus=2", "--memory=2g", "--memory-swap=2g", "--pids-limit=256",
         "--tmpfs=/work:rw,exec,nosuid,nodev,size=4g,uid=1000,gid=1000",
