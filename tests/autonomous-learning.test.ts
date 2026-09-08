@@ -226,3 +226,29 @@ test("an evidence-responsive fixture repairs a rejected hypothesis and retains v
     assert.equal((await rebooted.routeOperationalSkillContext("Preserve rows")).length,0);
   } finally {await rm(directory,{recursive:true,force:true});}
 });
+
+test("metadata rejection queues one identical-contract follow-up across restart, then stops", async()=>{
+  const directory=await mkdtemp(join(tmpdir(),"sara-learning-metadata-"));
+  try {
+    let {kernel}=await setupQueue(directory);
+    const root=await enqueue(kernel,3);
+    let calls=0;
+    const generator={id:"recursive-rejection-fixture",external:false,maximumCostUsd:0,async generate(input: Parameters<import("../src/types.ts").CandidateGenerator["generate"]>[0]){
+      calls++;
+      if(calls===2) assert.ok(input.memoryContext.memories.some(memory=>memory.statement.includes("300 characters or fewer")));
+      return {schemaVersion:1 as const,skillName:"Rows",summary:"Read rows",source:"export function runSkill(input: unknown): unknown { return (input as string[])[0]; }",tests:[{name:"first",input:["A"],expected:"A"}],limitations:["x".repeat(438)]};
+    }};
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
+    let jobs=(await kernel.getStatus()).jobs;
+    const child=jobs.find(job=>job.learningParentJobId===root.id);
+    assert.ok(child);assert.equal(jobs.length,2);
+    assert.equal(child.learningRootJobId,root.id);
+    for(const key of ["objective","acceptanceCriteria","maximumBudgetUsd","expectedOwnerValue","requiredCapabilities"] as const) assert.deepEqual(child.workCard[key],root.workCard[key]);
+    kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
+    assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:child.id});
+    jobs=(await kernel.getStatus()).jobs;
+    assert.equal(jobs.length,2);assert.equal(jobs.filter(job=>job.learningParentJobId===root.id).length,1);
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");
+    assert.equal(calls,2);
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
