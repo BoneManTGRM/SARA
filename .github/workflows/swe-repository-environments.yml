@@ -29,7 +29,8 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - run: python3 scripts/qualify-repository-environment.py --index '${{ matrix.index }}' --output "$RUNNER_TEMP/public-environment"
+      # Short diagnostic only; the summary can never claim qualification.
+      - run: python3 scripts/qualify-repository-environment.py --index '${{ matrix.index }}' --diagnostic-timeout-seconds 120 --output "$RUNNER_TEMP/public-environment"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -93,15 +93,24 @@ export function validateRepositoryPatch(patch: string): void {
 }
 
 type CommandResult = { exitCode: number; output: string };
+/** Bounded diagnostics survive a failed command without changing its failure status. */
+export class RepositoryCommandError extends Error {
+  constructor(message: string, readonly output: string) { super(message); }
+}
 function docker(args: string[], timeoutSeconds: number, input?: string): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     // No shell, provider keys, Git credentials, Docker context overrides or host mounts.
     const child = spawn("docker", args, { env: { PATH: process.env.PATH }, stdio: ["pipe", "pipe", "pipe"] });
     let output = "", bytes = 0, failed = false;
-    const timer = setTimeout(() => { failed = true; child.kill("SIGKILL"); reject(new Error("REPOSITORY_COMMAND_TIMEOUT")); }, timeoutSeconds * 1000);
+    const fail = (message: string) => {
+      if (failed) return;
+      failed = true; clearTimeout(timer); child.kill("SIGKILL");
+      reject(new RepositoryCommandError(message, output));
+    };
+    const timer = setTimeout(() => fail("REPOSITORY_COMMAND_TIMEOUT"), timeoutSeconds * 1000);
     for (const stream of [child.stdout, child.stderr]) stream.on("data", (chunk: Buffer) => {
       bytes += chunk.length;
-      if (bytes > 2 * 1024 * 1024) { failed = true; child.kill("SIGKILL"); reject(new Error("REPOSITORY_OUTPUT_LIMIT")); }
+      if (bytes > 2 * 1024 * 1024) fail("REPOSITORY_OUTPUT_LIMIT");
       else output += chunk.toString("utf8");
     });
     child.on("error", error => { clearTimeout(timer); failed = true; reject(error); });
@@ -190,7 +199,8 @@ export async function verifyRepositoryPatch(stateDirectory: string, environment:
       await session.mustRun(["git", "apply", "--whitespace=nowarn", "-"], proposal.patch);
     }
     result = await session.run(environment.publicTestCommand);
-  } catch (error) { result = { exitCode: 1, output: error instanceof Error ? error.message : "REPOSITORY_VERIFIER_FAILED" }; }
+  } catch (error) { result = { exitCode: 1, output: error instanceof RepositoryCommandError
+    ? `${error.output}\n${error.message}` : error instanceof Error ? error.message : "REPOSITORY_VERIFIER_FAILED" }; }
   finally {
     if (session) try { await session.close(); }
     catch (error) {

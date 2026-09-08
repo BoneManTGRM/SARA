@@ -49,27 +49,33 @@ class RecipeTests(unittest.TestCase):
             builder.dockerfile(dict(recipe, referencePatch='hidden'))
 
     def test_qualifier_resolves_both_images_before_build(self):
-        with tempfile.TemporaryDirectory() as directory:
-            output = Path(directory) / 'qualification'
-            def run(command, **kwargs):
-                if 'scripts/prepare-repository-image.py' in command:
-                    recipe = json.loads(Path(command[2]).read_text())
-                    self.assertEqual(recipe['runtimeImage'], 'node@sha256:' + 'b' * 64)
-                    self.assertEqual(recipe['nodeRuntimeImage'], 'node@sha256:' + 'c' * 64)
-                    self.assertEqual(recipe['nodeGypVersion'], '9.4.1')
-                    build = output / 'build'
-                    build.mkdir()
-                    (build / 'build-receipt.json').write_text(json.dumps({'image': 'sha256:' + 'e' * 64}))
-                return subprocess.CompletedProcess(command, 0)
-            def inspect(command, **kwargs):
-                digest = 'c' if command[-1] == RECIPES[2]['nodeRuntimeTag'] else 'b'
-                return json.dumps([{'RepoDigests': ['node@sha256:' + digest * 64]}])
-            with patch.object(sys, 'argv', ['qualifier', '--index', '2', '--output', str(output)]), patch.object(subprocess, 'run', side_effect=run), patch.object(subprocess, 'check_output', side_effect=inspect), patch('builtins.print'):
-                with self.assertRaises(SystemExit) as result:
-                    runpy.run_path(str(ROOT / 'scripts/qualify-repository-environment.py'), run_name='__main__')
-                self.assertEqual(result.exception.code, 0)
-            frozen = json.loads((output / 'resolved-recipe.json').read_text())
-            self.assertNotIn('nodeRuntimeTag', frozen)
+        for extra, seconds, expected_exit in [([], 900, 0), (['--diagnostic-timeout-seconds', '120'], 120, 1)]:
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / 'qualification'
+                def run(command, **kwargs):
+                    if 'scripts/prepare-repository-image.py' in command:
+                        recipe = json.loads(Path(command[2]).read_text())
+                        self.assertEqual(recipe['runtimeImage'], 'node@sha256:' + 'b' * 64)
+                        self.assertEqual(recipe['nodeRuntimeImage'], 'node@sha256:' + 'c' * 64)
+                        self.assertEqual(recipe['nodeGypVersion'], '9.4.1')
+                        build = output / 'build'
+                        build.mkdir()
+                        (build / 'build-receipt.json').write_text(json.dumps({'image': 'sha256:' + 'e' * 64}))
+                    return subprocess.CompletedProcess(command, 0)
+                def inspect(command, **kwargs):
+                    digest = 'c' if command[-1] == RECIPES[2]['nodeRuntimeTag'] else 'b'
+                    return json.dumps([{'RepoDigests': ['node@sha256:' + digest * 64]}])
+                with patch.object(sys, 'argv', ['qualifier', '--index', '2', '--output', str(output)] + extra), patch.object(subprocess, 'run', side_effect=run), patch.object(subprocess, 'check_output', side_effect=inspect), patch('builtins.print'):
+                    with self.assertRaises(SystemExit) as result:
+                        runpy.run_path(str(ROOT / 'scripts/qualify-repository-environment.py'), run_name='__main__')
+                    self.assertEqual(result.exception.code, expected_exit)
+                frozen = json.loads((output / 'resolved-recipe.json').read_text())
+                self.assertNotIn('nodeRuntimeTag', frozen)
+                environment = json.loads((output / 'environment.json').read_text())
+                summary = json.loads((output / 'summary.json').read_text())
+                self.assertEqual(environment['timeoutSeconds'], seconds)
+                self.assertEqual(summary['diagnosticOnly'], bool(extra))
+                self.assertEqual(summary['qualificationPassed'], not bool(extra))
 
     def test_axios_grep_is_one_argument_without_shell_interpretation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -143,6 +149,7 @@ exports.Server=class {
   stdoutWrite.call(process.stdout,'BATCH_LOG_SENTINEL\\n');
   console.log(process.env.TEST_KARMA_MESSAGE);
   if(process.env.TEST_KARMA_MESSAGE==='child-killed')process.kill(process.pid,'SIGKILL');
+  if(process.env.TEST_KARMA_MESSAGE==='stream-gate'){const timer=setInterval(()=>{if(fs.existsSync('release')){clearInterval(timer);this.done(0)}},10);return;}
   const first=this.config.files.some(f=>f.pattern.endsWith('/0.test.js'));
   this.done(process.env.TEST_KARMA_MESSAGE==='first-batch-fails'?(first?1:0):Number(process.env.TEST_KARMA_EXIT));
  }
@@ -187,6 +194,29 @@ exports.Server=class {
                 summary = next(line for line in jsonlines if line.get('event')=='public_test_summary')
                 self.assertEqual(summary['scheduledTests'], len(tests))
                 self.assertEqual(summary['failed'], bool(expected))
+            # Child output must arrive before the child finishes, so timeout
+            # evidence survives a stalled browser or test. Buffered spawnSync fails.
+            import select
+            import time
+            env = dict(os.environ, TEST_KARMA_MESSAGE='stream-gate', TEST_KARMA_EXIT='0')
+            process = subprocess.Popen(RECIPES[9]['publicTestCommand'], cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            prefix = b''
+            try:
+                deadline = time.monotonic() + 3
+                while b'BATCH_LOG_SENTINEL' not in prefix and time.monotonic() < deadline:
+                    if select.select([process.stdout], [], [], 0.1)[0]:
+                        chunk = os.read(process.stdout.fileno(), 65536)
+                        if not chunk:
+                            break
+                        prefix += chunk
+                self.assertIn(b'public_test_batch_start', prefix)
+                self.assertIn(b'BATCH_LOG_SENTINEL', prefix)
+                self.assertIsNone(process.poll())
+            finally:
+                (root / 'release').write_text('ready')
+                tail, errors = process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 0, errors)
+            self.assertIn(b'public_test_summary', prefix + tail)
             package['exports']['./compat/server']['browser'] = './compat/server.js'
             (root / 'package.json').write_text(json.dumps(package))
             result = subprocess.run(RECIPES[9]['publicTestCommand'], cwd=root, capture_output=True, text=True)

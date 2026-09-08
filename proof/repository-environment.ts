@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { RepositorySession, type RepositoryEnvironment } from "../src/repository-executor.ts";
+import { RepositoryCommandError, RepositorySession, type RepositoryEnvironment } from "../src/repository-executor.ts";
 
 const [input, output] = process.argv.slice(2);
 if (!input || !output) throw new Error("Environment JSON and output directory required");
@@ -16,7 +16,10 @@ try {
   await writeFile(join(output, "public-tests.log"), result.output);
   receipt.exitCode = result.exitCode;
   receipt.publicTestsPassed = result.exitCode === 0;
-} catch (error) { receipt.error = error instanceof Error ? error.message : "PREPARATION_FAILED"; }
+} catch (error) {
+  receipt.error = error instanceof Error ? error.message : "PREPARATION_FAILED";
+  if (error instanceof RepositoryCommandError) await writeFile(join(output, "public-tests.log"), error.output);
+}
 finally {
   try { await session?.close(); } catch (error) { receipt.error = `CLEANUP_FAILED:${String(error)}`; receipt.publicTestsPassed = false; }
   await writeFile(join(output, "public-environment-receipt.json"), JSON.stringify(receipt, null, 2));

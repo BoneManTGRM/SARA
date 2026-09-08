@@ -33,19 +33,49 @@ introduced. Every producer result is frozen before the first official grade.
   `34174004849` failed with the same underlying issue. The candidate explicitly
   rejects compiler-error logs and resolves the browser import to the existing
   package browser export. Its next run stopped during compilation; termination
-  diagnostics and supported single-bundle preprocessing are being qualified.
-  No test or assertion is removed.
+  diagnostics showed no OOM kill. Single-bundle preprocessing caused debug
+  behavior to affect unrelated tests, so it was rejected. The follow-up keeps
+  upstream separate bundles and runs the complete discovered test inventory
+  in fresh four-file browser batches. No test or assertion is removed.
 
 - Public run `34177382225` passed cases 5 and 7. Cases 2, 4 and 9 remained
   failures; their follow-up retains the same resource bounds and test files.
+- Public run `34178214666` passed cases 2 and 4. Combined with earlier runs,
+  nine public environments have qualified. Case 9's four-file batching run
+  `34179307403` on commit `4a2d4a5b3eba7048486f11a3c06fce9defb48b43`
+  reached the unchanged 900-second command timeout. Its artifact is
+  `10038644763`, SHA-256
+  `8899581987d7d05d8f84700e19696dd2fac65341d892e676e9df5bd34fea3562`.
+  Case 9 remains unqualified. That failure also exposed missing timeout logs;
+  the follow-up preserves bounded command output and streams active batch
+  logs so a stalled browser can be diagnosed without widening limits.
 - Real Docker proof `34177382219` passed both scripted repository producers,
   fresh kernel verification, poison rejection and artifact-tamper rejection.
   It made zero provider calls and zero benchmark attempts.
-- On the same published source, CI `34177384269` and CodeQL `34177384273`
-  passed. The local `npm run verify` also passed all 1,070 tests and proofs.
+- CI `34178217653`, CodeQL `34178217638`, and Docker proof `34178214684`
+  passed on the preceding source. The final public batching fix passed local
+  `npm run verify`: all 1,075 tests and proofs, plus seven offline recipe
+  checks covering full inventory, fresh processes, support files, retained
+  failures and the unchanged executor argument bound.
 
 All original failed artifacts remain evidence. Each new environment fix still
 needs its real Docker run; passing offline tests alone does not qualify it.
+
+The following run IDs identify the retained qualification evidence. Official
+columns refer only to base/reference controls, never SARA attempts.
+
+| Task | Public environment run | Official control run |
+| --- | --- | --- |
+| Axios 4731 | 34174537169 | 34175065514 |
+| Immutable.js 2006 | 34174004849 | 34173241960 |
+| Preact 3454 | 34178214666 | 34175065514 |
+| Vue 11739 | 34174004849 | 34175065514 |
+| Babel 14532 | 34178214666 | 34173241960 |
+| Docusaurus 9897 | 34177382225 | 34177382246 |
+| Three.js 26589 | 34174004849 | 34173241960 |
+| Axios 5085 | 34177382225 | 34177382246 |
+| Immutable.js 2005 | 34174004849 | 34173241960 |
+| Preact 4436 | Failed timeout: 34179307403 | 34173241960 |
 
 ## Runner and allowance
 
