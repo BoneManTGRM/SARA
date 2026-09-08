@@ -1,0 +1,14 @@
+{
+  "producerSha256": "5a89bedef21ffd72eb91f60b49e7a0a1218576f4070cb2e74575006f961a846b",
+  "commonFreezeSha256": "9dfc3126fb0b98f1c0213bc26bb6fe380e7ad5b3b34f790e1971844e7b4bada1",
+  "developmentExperiments": 1,
+  "untouchedEvaluationRuns": 0,
+  "files": {
+    "proof/recovery-v4/candidate-producer.txt": "5a89bedef21ffd72eb91f60b49e7a0a1218576f4070cb2e74575006f961a846b",
+    "proof/recovery-v4/development-result.json": "842a7ecbe01e008e1f6c5badfca30e3a90bc3a6c306b6a309c6723e642e5a231",
+    "proof/recovery-v4/prompt-order/original.json": "1d3f707bed94e971ab14c2622c5261732f2968eeb8b05a7d95b01caf3442da13",
+    "proof/recovery-v4/prompt-order/objective-evidence-first.json": "330c0f3b6f019277c48481233b4147d28607180fa6496be04fa45614b29d4330",
+    "proof/recovery-v4/prompt-order/README.md": "fa9a15c6f58d85973b8248a94c39684e5c7e88860dc547eeb18317bc4ecb3922"
+  },
+  "testSha256": "849941b3cc535616066b95fef3eb9d6dc1c8af22b1e1cc8e6273f7910c7ab2f8"
+}

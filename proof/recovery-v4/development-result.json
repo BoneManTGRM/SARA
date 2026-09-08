@@ -1,0 +1,166 @@
+{
+  "experiment": 1,
+  "mechanism": "tested-terminal-transition attribution",
+  "baselineFreezeLocal": "fb560462c87301e7bbca830fb755cda8a32d3559",
+  "prediction": "untested useful prerequisite is no longer poisoned by failed batch",
+  "observed": [
+    {
+      "caseId": "dev-batch-prerequisite--policy--responsive",
+      "family": "affine",
+      "variants": {
+        "A": {
+          "resolved": true,
+          "gradeStatus": "completed",
+          "status": "finished",
+          "reason": "model_finish",
+          "modelRequests": 11,
+          "tools": 16,
+          "tests": 3,
+          "restores": 0,
+          "repeatedEdits": 0,
+          "regression": false,
+          "medianMs": 111,
+          "promptBytes": 53314,
+          "recovery": true
+        },
+        "B": {
+          "resolved": false,
+          "gradeStatus": "completed",
+          "status": "finished",
+          "reason": "model_finish",
+          "modelRequests": 12,
+          "tools": 16,
+          "tests": 3,
+          "restores": 1,
+          "repeatedEdits": 0,
+          "regression": false,
+          "medianMs": 113,
+          "promptBytes": 69721,
+          "recovery": false
+        },
+        "C": {
+          "resolved": true,
+          "gradeStatus": "completed",
+          "status": "finished",
+          "reason": "model_finish",
+          "modelRequests": 11,
+          "tools": 18,
+          "tests": 3,
+          "restores": 1,
+          "repeatedEdits": 1,
+          "regression": false,
+          "medianMs": 114,
+          "promptBytes": 60248,
+          "recovery": true
+        }
+      }
+    },
+    {
+      "caseId": "dev-batch-prerequisite--policy--imperfect",
+      "family": "affine",
+      "variants": {
+        "A": {
+          "resolved": true,
+          "gradeStatus": "completed",
+          "status": "finished",
+          "reason": "model_finish",
+          "modelRequests": 17,
+          "tools": 25,
+          "tests": 6,
+          "restores": 0,
+          "repeatedEdits": 0,
+          "regression": false,
+          "medianMs": 225,
+          "promptBytes": 121408,
+          "recovery": true
+        },
+        "B": {
+          "resolved": false,
+          "gradeStatus": "completed",
+          "status": "finished",
+          "reason": "model_finish",
+          "modelRequests": 18,
+          "tools": 19,
+          "tests": 3,
+          "restores": 1,
+          "repeatedEdits": 0,
+          "regression": false,
+          "medianMs": 121,
+          "promptBytes": 142378,
+          "recovery": false
+        },
+        "C": {
+          "resolved": true,
+          "gradeStatus": "completed",
+          "status": "finished",
+          "reason": "model_finish",
+          "modelRequests": 17,
+          "tools": 21,
+          "tests": 3,
+          "restores": 1,
+          "repeatedEdits": 1,
+          "regression": false,
+          "medianMs": 116,
+          "promptBytes": 131423,
+          "recovery": true
+        }
+      }
+    },
+    {
+      "caseId": "dev-batch-prerequisite--policy--unresponsive",
+      "family": "affine",
+      "variants": {
+        "A": {
+          "resolved": false,
+          "gradeStatus": "completed",
+          "status": "exhausted",
+          "reason": "PRODUCER_TEST_LIMIT",
+          "modelRequests": 16,
+          "tools": 24,
+          "tests": 6,
+          "restores": 0,
+          "repeatedEdits": 0,
+          "regression": true,
+          "medianMs": 220,
+          "promptBytes": 108038,
+          "recovery": false
+        },
+        "B": {
+          "resolved": false,
+          "gradeStatus": "completed",
+          "status": "exhausted",
+          "reason": "limits",
+          "modelRequests": 50,
+          "tools": 34,
+          "tests": 2,
+          "restores": 1,
+          "repeatedEdits": 0,
+          "regression": false,
+          "medianMs": 96,
+          "promptBytes": 896963,
+          "recovery": false
+        },
+        "C": {
+          "resolved": true,
+          "gradeStatus": "completed",
+          "status": "exhausted",
+          "reason": "limits",
+          "modelRequests": 50,
+          "tools": 36,
+          "tests": 2,
+          "restores": 1,
+          "repeatedEdits": 1,
+          "regression": false,
+          "medianMs": 95,
+          "promptBytes": 912119,
+          "recovery": true
+        }
+      }
+    }
+  ],
+  "decision": "retain unchanged for one held-out evaluation; not yet accepted",
+  "critique": "Responsive/imperfect gains reuse a requirement-aligned prefix. Ignored-policy patch happens to be correct and grades after exhaustion, not producer-recognized recovery. Model still supplies finite-domain enumeration; no discovery claim. Prefix-regression counterexample remains in frozen heldout. Single development case cannot satisfy diversity gate.",
+  "redExit": 1,
+  "focusedExit": 0,
+  "focusedTests": 20
+}
