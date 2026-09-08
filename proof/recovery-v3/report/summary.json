@@ -1,0 +1,524 @@
+{
+  "distinctTasks": 13,
+  "policyCases": 39,
+  "repetitions": 3,
+  "producerOutcomes": 351,
+  "policies": {
+    "responsive": {
+      "A": {
+        "resolved": 7,
+        "recoveries": 6,
+        "requests": 120,
+        "reservations": 121,
+        "tools": 174,
+        "tests": 36,
+        "gradingProcesses": 32,
+        "retainedRegressions": 1,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 1,
+        "earlyStops": 0,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 738609
+      },
+      "B": {
+        "resolved": 7,
+        "recoveries": 6,
+        "requests": 113,
+        "reservations": 114,
+        "tools": 168,
+        "tests": 36,
+        "gradingProcesses": 32,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 5,
+        "duplicateProposalsSuppressed": 0,
+        "scopeSuppressed": 2,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 1,
+        "earlyStops": 0,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 758117
+      },
+      "C": {
+        "resolved": 7,
+        "recoveries": 6,
+        "requests": 113,
+        "reservations": 114,
+        "tools": 168,
+        "tests": 36,
+        "gradingProcesses": 32,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 5,
+        "duplicateProposalsSuppressed": 0,
+        "scopeSuppressed": 2,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 1,
+        "earlyStops": 0,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 758116
+      }
+    },
+    "imperfect": {
+      "A": {
+        "resolved": 5,
+        "recoveries": 4,
+        "requests": 148,
+        "reservations": 149,
+        "tools": 217,
+        "tests": 55,
+        "gradingProcesses": 32,
+        "retainedRegressions": 1,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 3,
+        "earlyStops": 0,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 1008803
+      },
+      "B": {
+        "resolved": 6,
+        "recoveries": 5,
+        "requests": 151,
+        "reservations": 152,
+        "tools": 190,
+        "tests": 40,
+        "gradingProcesses": 32,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 5,
+        "duplicateProposalsSuppressed": 15,
+        "scopeSuppressed": 5,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 3,
+        "earlyStops": 0,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 1361758
+      },
+      "C": {
+        "resolved": 2,
+        "recoveries": 1,
+        "requests": 128,
+        "reservations": 129,
+        "tools": 165,
+        "tests": 36,
+        "gradingProcesses": 32,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 5,
+        "duplicateProposalsSuppressed": 15,
+        "scopeSuppressed": 5,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 3,
+        "earlyStops": 5,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 1122340
+      }
+    },
+    "unresponsive": {
+      "A": {
+        "resolved": 1,
+        "recoveries": 0,
+        "requests": 130,
+        "reservations": 131,
+        "tools": 193,
+        "tests": 56,
+        "gradingProcesses": 32,
+        "retainedRegressions": 5,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 0,
+        "duplicateProposalsSuppressed": 0,
+        "scopeSuppressed": 0,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 8,
+        "earlyStops": 0,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 759770
+      },
+      "B": {
+        "resolved": 1,
+        "recoveries": 0,
+        "requests": 346,
+        "reservations": 347,
+        "tools": 255,
+        "tests": 32,
+        "gradingProcesses": 32,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 5,
+        "duplicateProposalsSuppressed": 115,
+        "scopeSuppressed": 24,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 8,
+        "earlyStops": 0,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 6777307
+      },
+      "C": {
+        "resolved": 1,
+        "recoveries": 0,
+        "requests": 146,
+        "reservations": 147,
+        "tools": 155,
+        "tests": 32,
+        "gradingProcesses": 32,
+        "retainedRegressions": 0,
+        "unavailableRegressionGrades": 2,
+        "rollbacks": 5,
+        "duplicateProposalsSuppressed": 15,
+        "scopeSuppressed": 24,
+        "repeatedEditsExecuted": 0,
+        "exhausted": 3,
+        "earlyStops": 5,
+        "gradeOutcomes": {
+          "completed": 10,
+          "failed": 1,
+          "blocked": 2
+        },
+        "promptBytes": 2605340
+      }
+    }
+  },
+  "gate": {
+    "losses": [
+      "intercept-invariant--policy--imperfect",
+      "upper-bound-invariant--policy--imperfect",
+      "zero-price-invariant--policy--imperfect",
+      "misleading-loop--policy--imperfect"
+    ],
+    "savings": [
+      "intercept-invariant--policy--unresponsive",
+      "upper-bound-invariant--policy--unresponsive",
+      "zero-price-invariant--policy--unresponsive",
+      "misleading-loop--policy--unresponsive",
+      "no-valid-domain-point--policy--unresponsive"
+    ],
+    "families": [
+      "affine",
+      "clamp",
+      "discount",
+      "identity"
+    ],
+    "overhead": [
+      {
+        "caseId": "intercept-invariant--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 115,
+        "cMs": 109,
+        "allowedMs": 168.75
+      },
+      {
+        "caseId": "intercept-invariant--policy--unresponsive",
+        "tools": -20,
+        "tests": 0,
+        "bMs": 89,
+        "cMs": 68,
+        "allowedMs": 136.25
+      },
+      {
+        "caseId": "upper-bound-invariant--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 107,
+        "cMs": 108,
+        "allowedMs": 158.75
+      },
+      {
+        "caseId": "upper-bound-invariant--policy--unresponsive",
+        "tools": -20,
+        "tests": 0,
+        "bMs": 82,
+        "cMs": 73,
+        "allowedMs": 127.5
+      },
+      {
+        "caseId": "zero-price-invariant--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 110,
+        "cMs": 112,
+        "allowedMs": 162.5
+      },
+      {
+        "caseId": "zero-price-invariant--policy--unresponsive",
+        "tools": -20,
+        "tests": 0,
+        "bMs": 90,
+        "cMs": 90,
+        "allowedMs": 137.5
+      },
+      {
+        "caseId": "straight-slope--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 70,
+        "cMs": 70,
+        "allowedMs": 112.5
+      },
+      {
+        "caseId": "straight-slope--policy--imperfect",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 76,
+        "cMs": 73,
+        "allowedMs": 120
+      },
+      {
+        "caseId": "straight-slope--policy--unresponsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 69,
+        "cMs": 67,
+        "allowedMs": 111.25
+      },
+      {
+        "caseId": "baseline-red--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 168,
+        "cMs": 146,
+        "allowedMs": 235
+      },
+      {
+        "caseId": "baseline-red--policy--imperfect",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 246,
+        "cMs": 224,
+        "allowedMs": 332.5
+      },
+      {
+        "caseId": "baseline-red--policy--unresponsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 249,
+        "cMs": 278,
+        "allowedMs": 336.25
+      },
+      {
+        "caseId": "misleading-loop--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 146,
+        "cMs": 179,
+        "allowedMs": 207.5
+      },
+      {
+        "caseId": "misleading-loop--policy--unresponsive",
+        "tools": -20,
+        "tests": 0,
+        "bMs": 91,
+        "cMs": 87,
+        "allowedMs": 138.75
+      },
+      {
+        "caseId": "public-green-unresolved--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 72,
+        "cMs": 68,
+        "allowedMs": 115
+      },
+      {
+        "caseId": "public-green-unresolved--policy--imperfect",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 91,
+        "cMs": 74,
+        "allowedMs": 138.75
+      },
+      {
+        "caseId": "public-green-unresolved--policy--unresponsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 73,
+        "cMs": 73,
+        "allowedMs": 116.25
+      },
+      {
+        "caseId": "no-valid-domain-point--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 88,
+        "cMs": 73,
+        "allowedMs": 135
+      },
+      {
+        "caseId": "no-valid-domain-point--policy--imperfect",
+        "tools": -1,
+        "tests": 0,
+        "bMs": 75,
+        "cMs": 70,
+        "allowedMs": 118.75
+      },
+      {
+        "caseId": "no-valid-domain-point--policy--unresponsive",
+        "tools": -20,
+        "tests": 0,
+        "bMs": 100,
+        "cMs": 72,
+        "allowedMs": 150
+      },
+      {
+        "caseId": "test-ceiling--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 270,
+        "cMs": 275,
+        "allowedMs": 362.5
+      },
+      {
+        "caseId": "test-ceiling--policy--imperfect",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 215,
+        "cMs": 227,
+        "allowedMs": 293.75
+      },
+      {
+        "caseId": "test-ceiling--policy--unresponsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 218,
+        "cMs": 254,
+        "allowedMs": 297.5
+      },
+      {
+        "caseId": "verifier-failure--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 75,
+        "cMs": 70,
+        "allowedMs": 118.75
+      },
+      {
+        "caseId": "verifier-failure--policy--imperfect",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 68,
+        "cMs": 70,
+        "allowedMs": 110
+      },
+      {
+        "caseId": "verifier-failure--policy--unresponsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 69,
+        "cMs": 69,
+        "allowedMs": 111.25
+      },
+      {
+        "caseId": "authority-stop--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 35,
+        "cMs": 29,
+        "allowedMs": 68.75
+      },
+      {
+        "caseId": "authority-stop--policy--imperfect",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 32,
+        "cMs": 37,
+        "allowedMs": 65
+      },
+      {
+        "caseId": "authority-stop--policy--unresponsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 44,
+        "cMs": 32,
+        "allowedMs": 80
+      },
+      {
+        "caseId": "uncertain-dispatch--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 35,
+        "cMs": 31,
+        "allowedMs": 68.75
+      },
+      {
+        "caseId": "uncertain-dispatch--policy--imperfect",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 31,
+        "cMs": 31,
+        "allowedMs": 63.75
+      },
+      {
+        "caseId": "uncertain-dispatch--policy--unresponsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 32,
+        "cMs": 29,
+        "allowedMs": 65
+      },
+      {
+        "caseId": "deep-scope--policy--responsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 155,
+        "cMs": 155,
+        "allowedMs": 218.75
+      },
+      {
+        "caseId": "deep-scope--policy--unresponsive",
+        "tools": 0,
+        "tests": 0,
+        "bMs": 108,
+        "cMs": 97,
+        "allowedMs": 160
+      }
+    ],
+    "noAddedRegressions": true,
+    "negativesRejected": true,
+    "accepted": false
+  },
+  "files": {
+    "producer-freeze.json": "b4dbaca9b004533d92d4617eab4273cd207f66524e0b6c3b8cddeea01bb87d4f",
+    "prompt-original.json": "de2e0c1c4bffc1994c5de16c66781e6fcdeff239a40ebaf7880f7e4d5513b88f",
+    "results.json": "c0d1aba9b326ec1285ecd7008214ff0c303610582d9408abd38b614f1e87913f"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "recovery-v3-heldout.log": {
+    "sha256": "87511b67e3f4227fb532dfb7352ba0a720e1959620eaf4337ac78d97872808a7",
+    "bytes": 59972
+  },
+  "recovery-v3-dev-candidate.log": {
+    "sha256": "be7e5facf26395de49c5ff76fd8db170b7fd79f2f8f87ede8c30d3f8bc4aa9ca",
+    "bytes": 4841
+  },
+  "recovery-v3-focused.log": {
+    "sha256": "47f2fc7ba173fee29578712cac7f6d37ab3af262fd8771b7edbdf8b55d53edf4",
+    "bytes": 1974
+  },
+  "recovery-v3-verify.log": {
+    "sha256": "1ffbfb3c95c4a2e3fb72c0aec3f85d55957183eac612247613d09f79683d54ee",
+    "bytes": 160856
+  },
+  "recovery-v3-red.log": {
+    "sha256": "d0581016a3e4b5bde53b5525c5a1a4e8779f35313ead30402a0854342633ef62",
+    "bytes": 977
+  },
+  "recovery-v3-dev-startup-failure.log": {
+    "sha256": "98ffaa9024270ebb37b1e2429adad1e3f07d0bc9af7f36a15e3952ddd4ec5fc2",
+    "bytes": 504
+  },
+  "recovery-v3-red-reproduction.log": {
+    "sha256": "8e8d68bbc95d480acaca84dd0bade16226defc3903133f3e468540e48e9f60a3",
+    "bytes": 1017
+  },
+  "recovery-v3-dev-baseline.log": {
+    "sha256": "42472f2888c4b81a6a3b3c45a4e8fa0741b1d20a94c874bdad4d6698be7b6785",
+    "bytes": 2940
+  }
+}
