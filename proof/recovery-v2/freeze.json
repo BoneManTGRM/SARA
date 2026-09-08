@@ -1,0 +1,14 @@
+{
+  "purpose": "Round two frozen before candidate editing; prior held-out failures are development evidence",
+  "files": {
+    "proof/recovery-v2/model.ts": "7e7d74fbd2a96111c219f9eb4332b021eecc65be8f32bdbd5666c608887c19b1",
+    "proof/recovery-v2/settings.json": "d12b84d849216f29bd1f81d38aba384168ed17dcb2f827b38d6bdf77dd029039",
+    "proof/recovery-v2/current-producer.txt": "3a168cddfb464cae1870ddf31eead17b0b7ea38df77b8fd490a11e041d15411f",
+    "proof/recovery-v2/program.cjs": "4fb87b91d2f2bd300c1f3441f3a55034720e484e0fc672d0f9a90d6282da86bd",
+    "proof/recovery-v2/heldout.json": "720af705007983fc4a81221bfaaf5559cc1815688417ca2f2fa1c285a712b775",
+    "proof/recovery-v2/baseline-producer.txt": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+    "proof/recovery-v2/run.mts": "28293596410f0eb91581233e5511421042e48484793ee764a069331a8770778a",
+    "proof/recovery-v2/development.json": "fb8cd25394feb7c5ec15766d5fc5402b361cb1405c923fa47bf22f84aed08f15",
+    "docs/work-cards/recovery-finish.md": "606ace5c5af6339483b1290fb4b9520a28bd4c3dfbd24be5340b9f1e9f40bdc0"
+  }
+}

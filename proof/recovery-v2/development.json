@@ -1,0 +1,95 @@
+[
+  {
+    "id": "prior-regression-alternative",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 1
+      },
+      {
+        "mode": 2
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        [
+          0,
+          2
+        ]
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ]
+  },
+  {
+    "id": "prior-repeated-regression",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 1
+      },
+      {
+        "mode": 1
+      },
+      {
+        "mode": 2
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        [
+          0,
+          2
+        ]
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ]
+  },
+  {
+    "id": "prior-public-green-hidden-bug",
+    "family": "affine",
+    "initial": {
+      "a": 0,
+      "b": 0
+    },
+    "hypotheses": [
+      {
+        "a": 1,
+        "b": 0
+      },
+      {
+        "a": 1,
+        "b": 1
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        2,
+        3
+      ]
+    ]
+  }
+]

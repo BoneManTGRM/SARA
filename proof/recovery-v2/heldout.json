@@ -1,0 +1,677 @@
+[
+  {
+    "id": "affine-zero-invariant",
+    "family": "affine",
+    "initial": {
+      "a": 0,
+      "b": 0
+    },
+    "hypotheses": [
+      {
+        "a": 1,
+        "b": 1
+      },
+      {
+        "a": 1,
+        "b": 1
+      },
+      {
+        "a": 4,
+        "b": 0
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        2,
+        8
+      ],
+      [
+        -1,
+        -4
+      ]
+    ]
+  },
+  {
+    "id": "clamp-lower-invariant",
+    "family": "clamp",
+    "initial": {
+      "lo": 0,
+      "hi": 10
+    },
+    "hypotheses": [
+      {
+        "lo": 2,
+        "hi": 8
+      },
+      {
+        "lo": 2,
+        "hi": 8
+      },
+      {
+        "lo": 0,
+        "hi": 6
+      }
+    ],
+    "publicCases": [
+      [
+        -1,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        9,
+        6
+      ],
+      [
+        4,
+        4
+      ]
+    ]
+  },
+  {
+    "id": "discount-zero-invariant",
+    "family": "discount",
+    "initial": {
+      "rate": 0,
+      "fee": 0
+    },
+    "hypotheses": [
+      {
+        "rate": 0,
+        "fee": 1
+      },
+      {
+        "rate": 0,
+        "fee": 1
+      },
+      {
+        "rate": 0.25,
+        "fee": 0
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        100,
+        75
+      ],
+      [
+        20,
+        15
+      ]
+    ]
+  },
+  {
+    "id": "direct-affine",
+    "family": "affine",
+    "initial": {
+      "a": 0,
+      "b": 0
+    },
+    "hypotheses": [
+      {
+        "a": 4,
+        "b": 0
+      }
+    ],
+    "publicCases": [
+      [
+        2,
+        8
+      ]
+    ],
+    "gradeCases": [
+      [
+        -2,
+        -8
+      ]
+    ]
+  },
+  {
+    "id": "regression-without-repeat",
+    "family": "clamp",
+    "initial": {
+      "lo": 0,
+      "hi": 10
+    },
+    "hypotheses": [
+      {
+        "lo": 2,
+        "hi": 8
+      },
+      {
+        "lo": 0,
+        "hi": 6
+      }
+    ],
+    "publicCases": [
+      [
+        -1,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        9,
+        6
+      ]
+    ]
+  },
+  {
+    "id": "already-failing-prerequisites",
+    "family": "discount",
+    "initial": {
+      "rate": 0,
+      "fee": 0
+    },
+    "hypotheses": [
+      {
+        "rate": 0.1,
+        "fee": 0
+      },
+      {
+        "rate": 0,
+        "fee": 2
+      },
+      {
+        "rate": 0.1,
+        "fee": 2
+      }
+    ],
+    "publicCases": [
+      [
+        10,
+        11
+      ],
+      [
+        20,
+        20
+      ]
+    ],
+    "gradeCases": [
+      [
+        100,
+        92
+      ]
+    ]
+  },
+  {
+    "id": "public-pass-unresolved",
+    "family": "affine",
+    "initial": {
+      "a": 0,
+      "b": 0
+    },
+    "hypotheses": [
+      {
+        "a": 1,
+        "b": 0
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        2,
+        8
+      ]
+    ],
+    "negative": true
+  },
+  {
+    "id": "misleading-repeat",
+    "family": "discount",
+    "initial": {
+      "rate": 0,
+      "fee": 0
+    },
+    "hypotheses": [
+      {
+        "rate": 0,
+        "fee": 1
+      },
+      {
+        "rate": 0,
+        "fee": 1
+      },
+      {
+        "rate": 0.25,
+        "fee": 0
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        40,
+        30
+      ]
+    ],
+    "misleading": true
+  },
+  {
+    "id": "no-alternative",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 1
+      },
+      {
+        "mode": 1
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        [
+          0,
+          2
+        ]
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ],
+    "negative": true
+  },
+  {
+    "id": "ignores-rejection",
+    "family": "affine",
+    "initial": {
+      "a": 0,
+      "b": 0
+    },
+    "hypotheses": [
+      {
+        "a": 1,
+        "b": 1
+      },
+      {
+        "a": 1,
+        "b": 1
+      },
+      {
+        "a": 4,
+        "b": 0
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        0
+      ]
+    ],
+    "gradeCases": [
+      [
+        2,
+        8
+      ]
+    ],
+    "ignoreRejection": true
+  },
+  {
+    "id": "exhausted-search",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 1
+      },
+      {
+        "mode": 2
+      },
+      {
+        "mode": 3
+      },
+      {
+        "mode": 4
+      },
+      {
+        "mode": 5
+      },
+      {
+        "mode": 6
+      },
+      {
+        "mode": 7
+      },
+      {
+        "mode": 8
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        99
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        99
+      ]
+    ],
+    "negative": true
+  },
+  {
+    "id": "independent-verifier-error",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 2
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        2
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ],
+    "fault": "verifier",
+    "negative": true
+  },
+  {
+    "id": "authority-stops-dispatch",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 2
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        2
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ],
+    "fault": "authority",
+    "negative": true
+  },
+  {
+    "id": "uncertain-call",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 2
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        2
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ],
+    "fault": "accounting",
+    "negative": true
+  },
+  {
+    "id": "scope-escalation-control",
+    "family": "sum",
+    "initial": {
+      "a": 0,
+      "b": 0,
+      "c": 0,
+      "padding": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41
+      ]
+    },
+    "hypotheses": [
+      {
+        "a": 1,
+        "b": 0,
+        "c": 0,
+        "padding": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41
+        ]
+      },
+      {
+        "a": 0,
+        "b": 2,
+        "c": 0,
+        "padding": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41
+        ]
+      },
+      {
+        "a": 1,
+        "b": 2,
+        "c": 6,
+        "padding": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30,
+          31,
+          32,
+          33,
+          34,
+          35,
+          36,
+          37,
+          38,
+          39,
+          40,
+          41
+        ]
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        9
+      ]
+    ],
+    "gradeCases": [
+      [
+        3,
+        9
+      ]
+    ],
+    "wholeFile": true
+  }
+]
