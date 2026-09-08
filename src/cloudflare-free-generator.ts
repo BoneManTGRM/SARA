@@ -19,7 +19,8 @@ export function boundedCandidateFailureFeedback(error: unknown): string {
       [diagnostic.code, diagnostic.line, diagnostic.column].every(value => Number.isSafeInteger(value) && value > 0)
     ).slice(0, 8).map(diagnostic =>
       `TS${diagnostic.code} at skill.ts:${diagnostic.line}:${diagnostic.column}` +
-      (diagnostic.code === 18046 ? ": A value of type unknown must be narrowed before use." : "")
+      (diagnostic.code === 18046 ? ": A value of type unknown must be narrowed before use." :
+        diagnostic.code === 18048 ? ": A value may be undefined; narrow it before accessing its fields." : "")
     );
     return [`Generated skill failed TypeScript verification with ${error.diagnostics.length} error(s).`,
       ...locations].join("\n").slice(0, 8_192);
@@ -118,6 +119,7 @@ function proposalPrompt(
       "",
       "The previous proposal was rejected. Do not assume source, TypeScript, or behavioral checks passed; use the recorded verifier evidence below.",
       "Repair the source and/or exact expected values, return the complete replacement proposal, and do not omit any required field.",
+      "A compiler fix alone does not satisfy the objective. Validate every stated input restriction at runtime; type assertions are not runtime validation. Recheck every stated output rule and cover the relevant public boundary cases in your tests. For a source/compiler failure, change the source to address the evidence; returning the same source is not a repair. Do not change correct expected results merely to match broken code.",
       `Bounded independent verifier feedback: ${repairFeedback || "Candidate was rejected; detailed verifier evidence is unavailable."}`,
       `Previous rejected proposal: ${JSON.stringify(repairProposal)}`,
     );
