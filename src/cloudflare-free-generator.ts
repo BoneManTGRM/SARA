@@ -16,8 +16,10 @@ export function boundedCandidateFailureFeedback(error: unknown): string {
   const source = /^Generated skill is not a pure isolated candidate: (imports and module loading are prohibited|computed property access is prohibited|the any type is prohibited|identifier (?:Bun|Date|Deno|EventSource|Function|Object|Proxy|Reflect|WebAssembly|WebSocket|XMLHttpRequest|eval|fetch|global|globalThis|module|navigator|performance|process|require|setImmediate|setInterval|setTimeout) is prohibited|property (?:__proto__|constructor|prototype) is prohibited)\.$/u;
   if (source.test(message) || message === "Generated skill contains invalid TypeScript syntax.") return message;
   if (/^Generated skill failed TypeScript verification with [0-9]+ error\(s\)\.$/u.test(message)) return message;
-  const behavioral = message.match(/Behavioral verification mismatches: [^\n\r]*/u);
-  return (behavioral?.[0] ?? "Candidate verification failed; no earlier gate is asserted to have passed.").slice(0, 8_192);
+  // Node prints the throwing source line before the actual runtime Error line.
+  // Only the latter contains observed mismatches; the source template is not evidence.
+  const behavioral = message.match(/^(?:Error: )?(Behavioral verification mismatches: \[[^\n\r]*)/mu);
+  return (behavioral?.[1] ?? "Candidate verification failed; no earlier gate is asserted to have passed.").slice(0, 8_192);
 }
 
 type Fetcher = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
