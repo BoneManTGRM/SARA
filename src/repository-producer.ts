@@ -151,6 +151,7 @@ export async function runRepositoryProducer(input: {
   const result: RepositoryProducerResult = { patch: "", status: "exhausted", reason: "limits", events: [], modelRequests: 0, toolSteps: 0, publicTests: 0, inputTokens: 0, outputTokens: 0, accountedCostUsd: 0, elapsedMilliseconds: 0, officialBenchmarkResult: false, unreconciledModelRequests: 0, accountingComplete: true };
   let outputBytes = 0, champion = "", championPassed = false, recurrence = 0, strategy: "surgical" | "deep" = "surgical";
   const failedTactics = new Set<string>(), pendingTactics = new Set<string>(), changedPaths = new Set<string>();
+  const failedTransitions = new Set<string>(), pendingTransitions = new Set<string>();
   let changedLines = 0;
   const event = (kind: string, detail: unknown) => result.events.push({ kind, digest: sha256(canonicalJson(detail)), detail });
   async function dispatch<T>(kind: "model" | "tool" | "freeze" | "restore", action: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -211,7 +212,15 @@ export async function runRepositoryProducer(input: {
       if (action.action === "test") {
         await freeze(); const passed = await test();
         if (task.arm === "reparodynamic") {
-          if (!passed) { recurrence++; for (const tactic of pendingTactics) failedTactics.add(tactic); }
+          if (!passed) {
+            recurrence++;
+            for (const tactic of pendingTactics) failedTactics.add(tactic);
+            for (const transition of pendingTransitions) failedTransitions.add(transition);
+            event("failure_memory", { candidateDigest: sha256(result.patch),
+              testEvidenceDigest: result.events.at(-1)!.digest, baselinePassed: championPassed,
+              contextBoundTactics: [...pendingTactics].slice(-8), omittedTactics: Math.max(0, pendingTactics.size - 8),
+              contextBoundTransitions: [...pendingTransitions].slice(-8), omittedTransitions: Math.max(0, pendingTransitions.size - 8) });
+          }
           if (!passed && championPassed) {
             await dispatch("restore", () => input.sandbox.restore(champion));
             result.patch = champion;
@@ -222,20 +231,40 @@ export async function runRepositoryProducer(input: {
           strategy = recurrence >= 2 ? "deep" : "surgical";
           event("strategy", { strategy, recurrence, repairYield: repairYieldPerEnergy({ verificationGain: passed ? 1 : 0, costUsd: result.accountedCostUsd, changedLines, verificationMilliseconds: Date.now() - started }) });
         }
-        pendingTactics.clear(); changedPaths.clear(); changedLines = 0;
+        pendingTactics.clear(); pendingTransitions.clear(); changedPaths.clear(); changedLines = 0;
         continue;
       }
       if (action.action === "edit") {
-        const tactic = sha256(canonicalJson(action));
+        // A failed edit is evidence about one starting candidate. A prerequisite
+        // changed elsewhere may make the same edit useful; it still needs fresh
+        // tests and independent final verification. Keep conventional unchanged.
+        const tactic = sha256(canonicalJson(task.arm === "reparodynamic"
+          ? { action, startingPatchDigest: sha256(result.patch) } : action));
         if (task.arm === "reparodynamic" && failedTactics.has(tactic)) { event("decision", { action: "suppress_duplicate", tactic }); continue; }
         const lines = action.oldText.split("\n").length + action.newText.split("\n").length;
         const nextPaths = new Set([...changedPaths, action.path]);
         if (task.arm === "reparodynamic" && (nextPaths.size > (strategy === "surgical" ? 2 : 6) || changedLines + lines > (strategy === "surgical" ? 80 : 240))) {
           event("decision", { action: "suppress_scope", strategy, tactic }); continue;
         }
+        const startingPatch = result.patch;
         const output = await dispatch("tool", () => input.sandbox.execute(action));
         event("tool", { ...output, output: observation(output.output) });
-        if (output.exitCode === 0) { pendingTactics.add(tactic); changedPaths.add(action.path); changedLines += lines; await freeze(); }
+        if (output.exitCode === 0) {
+          await freeze();
+          const transition = sha256(canonicalJson({ startingPatchDigest: sha256(startingPatch), resultingPatchDigest: sha256(result.patch) }));
+          if (task.arm === "reparodynamic" && failedTransitions.has(transition)) {
+            // Different anchors can produce the identical failed state transition.
+            // Reject that result, without guessing equivalence from whitespace or
+            // forbidding a repair reached from a genuinely different context.
+            await dispatch("restore", () => input.sandbox.restore(startingPatch));
+            await freeze();
+            if (result.patch !== startingPatch) throw new Error("PRODUCER_ROLLBACK_MISMATCH");
+            event("decision", { action: "suppress_equivalent", transition });
+          } else {
+            pendingTactics.add(tactic); pendingTransitions.add(transition);
+            changedPaths.add(action.path); changedLines += lines;
+          }
+        }
       } else {
         const output = await dispatch("tool", () => input.sandbox.execute(action)); event("tool", { ...output, output: observation(output.output) });
       }

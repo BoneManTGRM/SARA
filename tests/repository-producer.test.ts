@@ -129,3 +129,47 @@ test("an untyped error with the same text cannot erase unknown dispatch exposure
   } });
   assert.equal(result.status, "failed"); assert.equal(result.accountingComplete, false); assert.equal(result.unreconciledModelRequests, 1);
 });
+
+test("a prerequisite change permits a formerly failed edit, with candidate-bound failure evidence", async () => {
+  const initial = "left=0;right=0"; let content = initial;
+  const patch = () => content === initial ? "" : `diff --git a/src/file.ts b/src/file.ts\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1 +1 @@\n-${initial}\n+${content}\n`;
+  const actions = [
+    { action: "edit", path: "src/file.ts", oldText: "left=0", newText: "left=1" }, { action: "test" },
+    { action: "edit", path: "src/file.ts", oldText: "left=1", newText: "left=0" },
+    { action: "edit", path: "src/file.ts", oldText: "right=0", newText: "right=1" }, { action: "test" },
+    { action: "edit", path: "src/file.ts", oldText: "left=0", newText: "left=1" }, { action: "test" }, { action: "finish" },
+  ];
+  const result = await runRepositoryProducer({ task: { ...task, arm: "reparodynamic" }, environment, limits,
+    model: model(actions), beforeAction() {}, sandbox: {
+      async execute(a) {
+        if (a.action === "test") return { exitCode: content === "left=1;right=1" ? 0 : 1, output: "both prerequisites required" };
+        if (a.action === "edit") content = content.replace(a.oldText, a.newText);
+        return { exitCode: 0, output: content };
+      }, async freezePatch() { return patch(); }, async restore() { assert.fail("baseline already failing"); }, async close() {},
+    } });
+  assert.match(result.patch, /\+left=1;right=1/);
+  assert.equal(result.events.filter(e => e.kind === "decision" && (e.detail as { action: string }).action === "suppress_duplicate").length, 0);
+  const failures = result.events.filter(e => e.kind === "failure_memory"); assert.equal(failures.length, 2);
+  for (const event of failures) {
+    const memory = event.detail as { candidateDigest: string; testEvidenceDigest: string; baselinePassed: boolean };
+    const evidence = result.events.find(e => e.digest === memory.testEvidenceDigest)!;
+    assert.equal(evidence.kind, "public_test");
+    assert.equal((evidence.detail as { patchDigest: string }).patchDigest, memory.candidateDigest);
+    assert.equal(memory.baselinePassed, false);
+  }
+});
+
+test("expanded anchors producing the same failed transition are restored and never retain the bad candidate", async () => {
+  const initial = "original suffix"; let content = initial, restores = 0;
+  const patch = () => content === initial ? "" : `diff --git a/src/file.ts b/src/file.ts\n--- a/src/file.ts\n+++ b/src/file.ts\n@@ -1 +1 @@\n-${initial}\n+${content}\n`;
+  const result = await runRepositoryProducer({ task: { ...task, arm: "reparodynamic" }, environment, limits,
+    model: model([{ action: "edit", path: "src/file.ts", oldText: "original", newText: "bad" }, { action: "test" },
+      { action: "edit", path: "src/file.ts", oldText: initial, newText: "bad suffix" }, { action: "finish" }]), beforeAction() {},
+    sandbox: { async execute(a) {
+      if (a.action === "test") return { exitCode: content.startsWith("bad") ? 1 : 0, output: "public result" };
+      if (a.action === "edit") content = content.replace(a.oldText, a.newText);
+      return { exitCode: 0, output: content };
+    }, async freezePatch() { return patch(); }, async restore() { restores++; content = initial; }, async close() {} } });
+  assert.equal(restores, 2); assert.equal(result.patch, "");
+  assert.ok(result.events.some(e => e.kind === "decision" && (e.detail as { action: string }).action === "suppress_equivalent"));
+});

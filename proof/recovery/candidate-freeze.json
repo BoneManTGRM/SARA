@@ -1,0 +1,6 @@
+{
+  "producerSha256": "3a168cddfb464cae1870ddf31eead17b0b7ea38df77b8fd490a11e041d15411f",
+  "frozenBeforeHeldout": true,
+  "developmentResults": "Both targeted regressions fail original, pass candidate. dev-affine C resolves; dev-repeat remains unresolved.",
+  "changes": "Context-bound edit and exact resulting-state failure memory; no model, fixture, evaluator or budget changes"
+}
