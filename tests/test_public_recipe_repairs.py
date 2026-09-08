@@ -120,6 +120,7 @@ exports.Server=class {
  constructor(config,done){this.config=config;this.done=done;}
  start(){
   if(process.env.BABEL_NO_MODULES!=='true'||process.env.COVERAGE!=='true')throw Error('UPSTREAM_ENV');
+  if(process.env.NODE_OPTIONS!=='--max-old-space-size=768'||process.env.GOGC!=='25')throw Error('MEMORY_ENVELOPE');
   fs.writeFileSync('captured-config.json',JSON.stringify(this.config));
   console.log(process.env.TEST_KARMA_MESSAGE);this.done(Number(process.env.TEST_KARMA_EXIT));
  }

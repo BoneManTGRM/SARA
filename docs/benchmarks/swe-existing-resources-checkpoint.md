@@ -40,6 +40,25 @@ Diagnostics cannot grant a pass, replace official grading, change the ten tasks,
 raise resource limits, or authorize spending. The follow-up selects index 9 only
 to avoid duplicating the other repairs underway.
 
+The diagnostic [Docker run 34178174489](https://github.com/BoneManTGRM/SARA/actions/runs/34178174489)
+confirmed the mechanism: memory started at 455,024,640 bytes, peaked at
+2,147,487,744 bytes against a 2,147,483,648-byte ceiling, and `oom_kill` rose
+from 0 to 1. Process-limit events stayed at zero. Its failed artifact digest is
+`cbb9b28eb81a584b671e5aa2e56287f9404b35007971b5392a016faa416a4206`.
+
+The next candidate bounds Node's old-space heap to 768 MiB and lowers Go's GC
+target to 25 for esbuild. The outer 2 GiB cap, all test files, compiler-error
+rejection, browser alias, and official grading remain unchanged. This is a
+memory-use correction requiring a new real Docker result, not a qualified pass.
+
+Local verification of the diagnostic candidate: after providing the unchanged
+qualified native checker and an isolated TMPDIR, `npm run verify` exited 0 with
+1,070 main tests, 14 HTTP tests, typecheck and every proof. The earlier completed
+run passed 1,069/1,070 and failed on another concurrent run changing global
+temporary-directory entries. That failure is retained. The memory-settings
+candidate separately passed all six public-recipe checks; integrated and Docker
+verification follow on its own revision.
+
 ## Existing-resource execution boundary
 
 The local read-only preflight found no Docker daemon, persistent benchmark mount,
