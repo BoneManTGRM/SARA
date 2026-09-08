@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "baselineSource": "31752fe68dfaa6ce8c33d145390b576db0693a28",
+  "baselineProducerSha256": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+  "limits": {
+    "maximumModelRequests": 50,
+    "maximumToolSteps": 200,
+    "maximumPublicTests": 6,
+    "maximumOutputBytes": 2097152,
+    "maximumWallMilliseconds": 1800000
+  },
+  "repetitions": 3,
+  "randomness": "none; deterministic hypotheses and response policy; wall-clock timing is nondeterministic",
+  "acceptance": {
+    "minimumAdditionalResolvedVersusB": 2,
+    "minimumDistinctFamilies": 2,
+    "allowedLostBResolved": 0,
+    "allowedAddedRegressions": 0,
+    "maximumAddedToolsOrTestsOnEqualOutcomes": 2,
+    "medianRuntimeFactor": 1.25,
+    "medianRuntimeSlackMs": 25
+  }
+}

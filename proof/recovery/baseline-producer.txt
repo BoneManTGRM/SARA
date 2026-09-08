@@ -1,0 +1,256 @@
+import { canonicalJson, sha256 } from "./canonical.ts";
+import { repairYieldPerEnergy } from "./coding-repair-policy.ts";
+import { RepositorySession, repositoryBinding, validateRepositoryPatch, type RepositoryEnvironment, type RepositoryTask } from "./repository-executor.ts";
+
+export type RepositoryAction = { action: "list"; path: string } | { action: "read"; path: string }
+  | { action: "search"; path: string; text: string }
+  | { action: "edit"; path: string; oldText: string; newText: string }
+  | { action: "test" } | { action: "finish" };
+export interface RepositoryProducerLimits {
+  maximumModelRequests: number; maximumToolSteps: number; maximumPublicTests: number;
+  maximumOutputBytes: number; maximumWallMilliseconds: number;
+}
+export interface RepositoryProducerSandbox {
+  execute(action: Exclude<RepositoryAction, { action: "finish" }>): Promise<{ exitCode: number; output: string }>;
+  freezePatch(): Promise<string>;
+  restore(patch: string): Promise<void>;
+  close(): Promise<void>;
+}
+export interface RepositoryProducerModel {
+  request(input: { prompt: string; signal: AbortSignal; deadline: number }): Promise<{
+    outputText: string; inputTokens: number; outputTokens: number; accountedCostUsd: number;
+  }>;
+}
+/** Trusted adapter attestation: a bounded request was rejected before any
+ * generation dispatch. Never use this for an uncertain or charged response. */
+export class RepositoryProducerModelLimit extends Error {
+  readonly code = "PRODUCER_MODEL_LIMIT";
+  constructor() { super("PRODUCER_MODEL_LIMIT"); this.name = "RepositoryProducerModelLimit"; }
+}
+export interface RepositoryProducerEvent { kind: string; digest: string; detail: unknown }
+export interface RepositoryProducerResult {
+  patch: string; status: "finished" | "exhausted" | "failed";
+  reason: string; events: RepositoryProducerEvent[];
+  modelRequests: number; toolSteps: number; publicTests: number;
+  inputTokens: number; outputTokens: number; accountedCostUsd: number;
+  elapsedMilliseconds: number; officialBenchmarkResult: false;
+  /** Known completed usage only; an unresolved request forbids a zero-cost claim. */
+  unreconciledModelRequests: number; accountingComplete: boolean;
+}
+function safePath(path: unknown): asserts path is string {
+  if (typeof path !== "string" || path.length > 240 || !path || path.includes("\\") || path.includes("\0")
+    || path.split("/").some(p => !p || p === ".." || p === "." || p.toLowerCase() === ".git")) throw new Error("PRODUCER_PATH");
+}
+export function parseRepositoryAction(text: string): RepositoryAction {
+  if (Buffer.byteLength(text) > 65536) throw new Error("PRODUCER_ACTION_SIZE");
+  const a = JSON.parse(text) as Record<string, unknown>;
+  if (!a || typeof a !== "object" || Array.isArray(a)) throw new Error("PRODUCER_ACTION");
+  const fields: Record<string, string> = { list: "action,path", read: "action,path", search: "action,path,text", edit: "action,newText,oldText,path", test: "action", finish: "action" };
+  if (typeof a.action !== "string" || !Object.hasOwn(fields, a.action) || Object.keys(a).sort().join(",") !== fields[a.action]) throw new Error("PRODUCER_ACTION_FIELDS");
+  if ("path" in a) { if (!(a.action === "list" && a.path === "")) safePath(a.path); }
+  if (a.action === "search" && (typeof a.text !== "string" || !a.text || a.text.length > 512)) throw new Error("PRODUCER_SEARCH");
+  if (a.action === "edit" && (typeof a.oldText !== "string" || !a.oldText || typeof a.newText !== "string" || a.oldText === a.newText
+    || Buffer.byteLength(a.oldText) + Buffer.byteLength(a.newText) > 32768)) throw new Error("PRODUCER_EDIT");
+  return a as RepositoryAction;
+}
+
+// Fixed script, JSON data on stdin. No model-supplied program or shell. Reject
+// every symlink component; list/search never descend directories or follow links.
+const FILE_TOOL = String.raw`
+const fs = require('fs'); const path = require('path');
+const a = JSON.parse(fs.readFileSync(0, 'utf8'));
+let p = '/work';
+for (const part of a.path.split('/').filter(Boolean)) {
+ if (!part || part === '.' || part === '..' || part.toLowerCase() === '.git' || part.includes('\\')) throw Error('PATH');
+ p = path.join(p, part); if (fs.lstatSync(p).isSymbolicLink()) throw Error('SYMLINK');
+}
+if (a.action === 'list') {
+ if (!fs.statSync(p).isDirectory()) throw Error('DIRECTORY');
+ console.log(JSON.stringify(fs.readdirSync(p, {withFileTypes:true}).filter(e => e.name.toLowerCase() !== '.git' && !e.isSymbolicLink()).slice(0, 2000).map(e => ({name:e.name,directory:e.isDirectory()}))));
+} else {
+ if (!fs.statSync(p).isFile() || fs.statSync(p).size > 262144) throw Error('FILE_SIZE');
+ const text = fs.readFileSync(p, 'utf8'); if (text.includes('\0')) throw Error('BINARY');
+ if (a.action === 'read') process.stdout.write(text);
+ else if (a.action === 'search') console.log(text.split('\n').flatMap((line,i) => line.includes(a.text) ? [{line:i+1,text:line}] : []).slice(0,200));
+ else if (a.action === 'edit') {
+   const at = text.indexOf(a.oldText); if (at < 0 || text.indexOf(a.oldText,at+1) >= 0) throw Error('ANCHOR_NOT_UNIQUE');
+   const next = text.slice(0,at)+a.newText+text.slice(at+a.oldText.length);
+   if (Buffer.byteLength(next)>262144) throw Error('FILE_SIZE'); fs.writeFileSync(p,next); console.log('edited');
+ } else throw Error('ACTION');
+}`;
+type ProducerSession = Pick<RepositorySession, "run" | "mustRun" | "freezePatch" | "close">;
+export async function createRepositoryProducerSandbox(environment: RepositoryEnvironment,
+  startSession: (environment: RepositoryEnvironment) => Promise<ProducerSession> = RepositorySession.start,
+): Promise<RepositoryProducerSandbox> {
+  const env = structuredClone(environment);
+  let session = await startSession(env);
+  let closed = false, closing: Promise<void> | undefined;
+  const active = new Set<Promise<unknown>>();
+  const cleanupFailures: unknown[] = [];
+  function operation<T>(fn: () => Promise<T>): Promise<T> {
+    if (closed) return Promise.reject(new Error("PRODUCER_CLOSED"));
+    const pending = Promise.resolve().then(() => { if (closed) throw new Error("PRODUCER_CLOSED"); return fn(); });
+    active.add(pending);
+    void pending.then(() => active.delete(pending), () => active.delete(pending));
+    return pending;
+  }
+  return {
+    execute(action) { return operation(async () => {
+      const checked = parseRepositoryAction(JSON.stringify(action));
+      if (checked.action === "finish") throw new Error("PRODUCER_ACTION");
+      return session.run(checked.action === "test" ? env.publicTestCommand : ["node", "-e", FILE_TOOL], checked.action === "test" ? undefined : JSON.stringify(checked));
+    }); },
+    freezePatch() { return operation(() => session.freezePatch()); },
+    restore(patch) { return operation(async () => {
+      validateRepositoryPatch(patch);
+      await session.close();
+      if (closed) throw new Error("PRODUCER_CLOSED");
+      const replacement = await startSession(env);
+      if (closed) {
+        try { await replacement.close(); } catch (error) { cleanupFailures.push(error); }
+        throw new Error("PRODUCER_CLOSED");
+      }
+      session = replacement;
+      if (patch) await session.mustRun(["git", "apply", "--whitespace=nowarn", "-"], patch);
+    }); },
+    close() {
+      if (closing) return closing;
+      closed = true;
+      closing = (async () => {
+        const errors = cleanupFailures;
+        try { await session.close(); } catch (error) { errors.push(error); }
+        // A restore may still be starting a replacement. It sees closed and
+        // destroys that replacement before its tracked operation settles.
+        await Promise.allSettled([...active]);
+        try { await session.close(); } catch (error) { errors.push(error); }
+        if (errors.length) throw new AggregateError(errors, "PRODUCER_CLEANUP_FAILED");
+      })();
+      return closing;
+    },
+  };
+}
+
+export async function runRepositoryProducer(input: {
+  task: RepositoryTask; environment: RepositoryEnvironment; limits: RepositoryProducerLimits;
+  model: RepositoryProducerModel; sandbox: RepositoryProducerSandbox;
+  beforeAction: (kind: "model" | "tool" | "freeze" | "restore") => void | Promise<void>;
+}): Promise<RepositoryProducerResult> {
+  let task: RepositoryTask, env: RepositoryEnvironment, limits: RepositoryProducerLimits;
+  try {
+    task = structuredClone(input.task); env = structuredClone(input.environment); limits = structuredClone(input.limits);
+  repositoryBinding(env, task);
+  const fields = ["maximumModelRequests", "maximumToolSteps", "maximumPublicTests", "maximumOutputBytes", "maximumWallMilliseconds"];
+  if (Object.keys(limits).sort().join(",") !== fields.sort().join(",") || Object.values(limits).some(n => !Number.isSafeInteger(n) || n < 1)
+    || limits.maximumModelRequests > 1000 || limits.maximumToolSteps > 10000 || limits.maximumPublicTests > 1000
+    || limits.maximumOutputBytes > 16 * 1024 * 1024 || limits.maximumWallMilliseconds > 24 * 3600_000) throw new Error("PRODUCER_LIMITS");
+  } catch (error) {
+    try { await input.sandbox.close(); } catch (cleanupError) { throw new AggregateError([error, cleanupError], "PRODUCER_VALIDATION_AND_CLEANUP_FAILED"); }
+    throw error;
+  }
+  const started = Date.now(), deadline = started + limits.maximumWallMilliseconds;
+  const result: RepositoryProducerResult = { patch: "", status: "exhausted", reason: "limits", events: [], modelRequests: 0, toolSteps: 0, publicTests: 0, inputTokens: 0, outputTokens: 0, accountedCostUsd: 0, elapsedMilliseconds: 0, officialBenchmarkResult: false, unreconciledModelRequests: 0, accountingComplete: true };
+  let outputBytes = 0, champion = "", championPassed = false, recurrence = 0, strategy: "surgical" | "deep" = "surgical";
+  const failedTactics = new Set<string>(), pendingTactics = new Set<string>(), changedPaths = new Set<string>();
+  let changedLines = 0;
+  const event = (kind: string, detail: unknown) => result.events.push({ kind, digest: sha256(canonicalJson(detail)), detail });
+  async function dispatch<T>(kind: "model" | "tool" | "freeze" | "restore", action: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (Date.now() >= deadline) throw new Error("PRODUCER_WALL_LIMIT");
+    if (kind !== "model") { if (result.toolSteps >= limits.maximumToolSteps) throw new Error("PRODUCER_TOOL_LIMIT"); result.toolSteps++; }
+    await input.beforeAction(kind);
+    if (Date.now() >= deadline) throw new Error("PRODUCER_WALL_LIMIT");
+    const controller = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([action(controller.signal), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => { reject(new Error("PRODUCER_WALL_LIMIT")); controller.abort(); }, deadline - Date.now());
+      })]);
+    } finally { if (timer) clearTimeout(timer); }
+  }
+  function observation(output: string): string {
+    const bytes = Buffer.byteLength(output); outputBytes += bytes;
+    if (outputBytes > limits.maximumOutputBytes) { event("output_limit", { bytes, digest: sha256(output) }); throw new Error("PRODUCER_OUTPUT_LIMIT"); }
+    return output;
+  }
+  async function freeze() {
+    const patch = await dispatch("freeze", () => input.sandbox.freezePatch()); validateRepositoryPatch(patch); result.patch = patch;
+    event("candidate", { patchDigest: sha256(patch), patch: observation(patch) });
+  }
+  async function test() {
+    if (result.publicTests >= limits.maximumPublicTests) throw new Error("PRODUCER_TEST_LIMIT");
+    result.publicTests++;
+    const output = await dispatch("tool", () => input.sandbox.execute({ action: "test" }));
+    event("public_test", { ...output, output: observation(output.output), patchDigest: sha256(result.patch) });
+    return output.exitCode === 0;
+  }
+  try {
+    championPassed = await test(); // Public green never terminates the issue-driven initial request.
+    while (result.modelRequests < limits.maximumModelRequests) {
+      const prompt = canonicalJson({ instruction: "Solve the public issue using repository tools. Return exactly one JSON action. Public tests are feedback, never proof of resolution. Actions: list(path, empty string for root), read(path), search(path,text literal in one file), edit(path,oldText unique nonempty anchor,newText), test(), finish(). No other fields. Inspect before editing. You must attempt the issue even when public tests pass.",
+        issue: task.problemStatement, repository: env.repository, baseCommit: env.baseCommit,
+        strategy, limits, observations: result.events });
+      result.modelRequests++;
+      let modelInvoked = false;
+      const response = await dispatch("model", signal => {
+        modelInvoked = true;
+        result.unreconciledModelRequests++; result.accountingComplete = false;
+        return input.model.request({ prompt, signal, deadline });
+      }).catch(error => {
+        if (modelInvoked && error instanceof RepositoryProducerModelLimit) {
+          result.unreconciledModelRequests--;
+          result.accountingComplete = result.unreconciledModelRequests === 0;
+        }
+        throw error;
+      });
+      if (![response.inputTokens, response.outputTokens].every(n => Number.isSafeInteger(n) && n >= 0) || !Number.isFinite(response.accountedCostUsd) || response.accountedCostUsd < 0) throw new Error("PRODUCER_USAGE_INVALID");
+      result.unreconciledModelRequests--; result.accountingComplete = result.unreconciledModelRequests === 0;
+      result.inputTokens += response.inputTokens; result.outputTokens += response.outputTokens; result.accountedCostUsd += response.accountedCostUsd;
+      event("model", { output: observation(response.outputText), inputTokens: response.inputTokens, outputTokens: response.outputTokens, accountedCostUsd: response.accountedCostUsd });
+      let action: RepositoryAction;
+      try { action = parseRepositoryAction(response.outputText); } catch (error) { event("invalid_action", { error: String(error) }); continue; }
+      event("action", action);
+      if (action.action === "finish") { result.status = "finished"; result.reason = "model_finish"; break; }
+      if (action.action === "test") {
+        await freeze(); const passed = await test();
+        if (task.arm === "reparodynamic") {
+          if (!passed) { recurrence++; for (const tactic of pendingTactics) failedTactics.add(tactic); }
+          if (!passed && championPassed) {
+            await dispatch("restore", () => input.sandbox.restore(champion));
+            result.patch = champion;
+            await freeze();
+            if (result.patch !== champion) throw new Error("PRODUCER_ROLLBACK_MISMATCH");
+            event("decision", { action: "rollback", reason: "new_public_failure", championDigest: sha256(champion) });
+          } else if (passed) { champion = result.patch; championPassed = true; event("decision", { action: "champion", patchDigest: sha256(champion) }); }
+          strategy = recurrence >= 2 ? "deep" : "surgical";
+          event("strategy", { strategy, recurrence, repairYield: repairYieldPerEnergy({ verificationGain: passed ? 1 : 0, costUsd: result.accountedCostUsd, changedLines, verificationMilliseconds: Date.now() - started }) });
+        }
+        pendingTactics.clear(); changedPaths.clear(); changedLines = 0;
+        continue;
+      }
+      if (action.action === "edit") {
+        const tactic = sha256(canonicalJson(action));
+        if (task.arm === "reparodynamic" && failedTactics.has(tactic)) { event("decision", { action: "suppress_duplicate", tactic }); continue; }
+        const lines = action.oldText.split("\n").length + action.newText.split("\n").length;
+        const nextPaths = new Set([...changedPaths, action.path]);
+        if (task.arm === "reparodynamic" && (nextPaths.size > (strategy === "surgical" ? 2 : 6) || changedLines + lines > (strategy === "surgical" ? 80 : 240))) {
+          event("decision", { action: "suppress_scope", strategy, tactic }); continue;
+        }
+        const output = await dispatch("tool", () => input.sandbox.execute(action));
+        event("tool", { ...output, output: observation(output.output) });
+        if (output.exitCode === 0) { pendingTactics.add(tactic); changedPaths.add(action.path); changedLines += lines; await freeze(); }
+      } else {
+        const output = await dispatch("tool", () => input.sandbox.execute(action)); event("tool", { ...output, output: observation(output.output) });
+      }
+    }
+  } catch (error) {
+    result.reason = error instanceof Error ? error.message : String(error);
+    result.status = error instanceof RepositoryProducerModelLimit || /^PRODUCER_(WALL|TOOL|TEST|OUTPUT)_LIMIT$/.test(result.reason) ? "exhausted" : "failed";
+    event("stopped", { reason: result.reason });
+  }
+  // Never return while a timed-out repository action can create a new session.
+  // close() is cleanup, deliberately permitted even after authority revocation.
+  try { await input.sandbox.close(); } catch (error) {
+    result.status = "failed"; result.reason = "PRODUCER_CLEANUP_FAILED";
+    event("cleanup_failed", { error: String(error) });
+  }
+  result.elapsedMilliseconds = Date.now() - started;
+  return result;
+}

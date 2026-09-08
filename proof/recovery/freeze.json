@@ -1,0 +1,13 @@
+{
+  "purpose": "Frozen before candidate editing or held-out execution",
+  "files": {
+    "proof/recovery/development.json": "c99ed399b169547e64e0116c9715ddbb05352d3e7b6e27ebeab74114765dd1bb",
+    "proof/recovery/heldout.json": "df5e94389911de5d4c83fb47c3a1e8406ccdcc25127f742b949a32a7c2350f39",
+    "proof/recovery/settings.json": "ee56e4ef95eba59e9e3f008c8c39dac7aa3fe7627549d4fc38cb433c84396289",
+    "proof/recovery/baseline-producer.txt": "ebd51c94a5a48571ad61233e12d02a2ccffe97d568f8640b79c01ad72e5b6e21",
+    "proof/recovery/model.ts": "d973aaa8016f82803f32d51960e0987dd88300409307516a105a4d0ecc2048dc",
+    "proof/recovery/program.cjs": "4fb87b91d2f2bd300c1f3441f3a55034720e484e0fc672d0f9a90d6282da86bd",
+    "proof/recovery/run.mts": "918f94f318d7cdad31b9960cf41fc4cc317e99bb2f53555401a7e8c6f6953922",
+    "docs/work-cards/recovery-context.md": "a28b6816de2ab3086de43d2cc212132a1bc7f17db67ef8dd7fdf1b3e24e5e907"
+  }
+}

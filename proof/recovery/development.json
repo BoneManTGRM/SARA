@@ -1,0 +1,107 @@
+[
+  {
+    "id": "dev-affine",
+    "family": "affine",
+    "initial": {
+      "a": 0,
+      "b": 0
+    },
+    "hypotheses": [
+      {
+        "a": 1,
+        "b": 0
+      },
+      {
+        "a": 0,
+        "b": 1
+      },
+      {
+        "a": 1,
+        "b": 1
+      }
+    ],
+    "publicCases": [
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        3
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        1
+      ],
+      [
+        4,
+        5
+      ]
+    ]
+  },
+  {
+    "id": "dev-regression",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 1
+      },
+      {
+        "mode": 2
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        [
+          0,
+          2
+        ]
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ]
+  },
+  {
+    "id": "dev-repeat",
+    "family": "identity",
+    "initial": {
+      "mode": 0
+    },
+    "hypotheses": [
+      {
+        "mode": 1
+      },
+      {
+        "mode": 1
+      },
+      {
+        "mode": 2
+      }
+    ],
+    "publicCases": [
+      [
+        0,
+        [
+          0,
+          2
+        ]
+      ]
+    ],
+    "gradeCases": [
+      [
+        0,
+        2
+      ]
+    ]
+  }
+]
