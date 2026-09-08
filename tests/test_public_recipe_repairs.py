@@ -17,6 +17,13 @@ RECIPES = json.loads((ROOT / 'docs/benchmarks/swe-repository-recipes.json').read
 
 
 class RecipeTests(unittest.TestCase):
+    def test_public_commands_fit_executor_argument_bounds(self):
+        for recipe in RECIPES:
+            command = recipe['publicTestCommand']
+            self.assertLessEqual(len(command), 32)
+            for argument in command:
+                self.assertLessEqual(len(argument), 4096)
+
     def test_pinned_donor_overlays_only_node_npm_headers_and_keeps_nonroot_install(self):
         recipe = dict(repository='preactjs/preact', baseCommit='a' * 40,
                       runtimeImage='node@sha256:' + 'b' * 64,
@@ -98,7 +105,7 @@ const options={stdin:{contents:'import server from "preact/compat/server"; conso
             result = subprocess.run(['node', '-e', code, directory], cwd=ROOT, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_karma_browser_alias_preserves_config_and_rejects_compile_failure(self):
+    def test_karma_batches_preserve_full_inventory_support_config_and_all_failures(self):
         import os
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -106,52 +113,80 @@ const options={stdin:{contents:'import server from "preact/compat/server"; conso
             (root / 'compat/server.browser.js').write_text('export default {};')
             package = {'exports': {'./compat/server': {'browser': './compat/server.browser.js', 'import': './compat/server.mjs', 'require': './compat/server.js'}}}
             (root / 'package.json').write_text(json.dumps(package))
-            # Shape from the frozen root Karma config: preserve tests, helper,
-            # preprocessors, plugin and launchers; override one resolution only.
-            config = {'files': [{'pattern': 'test/polyfills.js', 'watched': False}, {'pattern': '{debug,devtools,hooks,compat,test-utils,jsx-runtime,}/test/{browser,shared}/**/*.test.js', 'watched': False, 'type': 'js'}],
+            # Frozen Karma shape plus an asset to verify support-file retention.
+            config = {'files': [{'pattern': 'test/polyfills.js', 'watched': False}, {'pattern': '{debug,devtools,hooks,compat,test-utils,jsx-runtime,}/test/{browser,shared}/**/*.test.js', 'watched': False, 'type': 'js'}, {'pattern': 'test/asset.json', 'served': True, 'included': False}],
                       'preprocessors': {'{debug,devtools,hooks,compat,test-utils,jsx-runtime,}/test/**/*': ['esbuild']},
                       'esbuild': {'singleBundle': False, 'target': 'es2015', 'plugins': [{'name': 'custom'}]},
                       'browsers': ['ChromeNoSandboxHeadless']}
             (root / 'karma.conf.js').write_text('module.exports=' + json.dumps(config))
+            tests = [str(root / ('test/browser/' + str(i) + '.test.js')) for i in range(5)]
             glob = root / 'node_modules/glob'
             glob.mkdir(parents=True)
-            (glob / 'index.js').write_text("exports.sync=(pattern)=>pattern.includes('polyfills')?['/work/test/polyfills.js']:['/work/test/browser/a.test.js','/work/compat/test/browser/b.test.js'];")
+            (glob / 'index.js').write_text("const path=require('path');exports.sync=(pattern)=>pattern.includes('*')?" + json.dumps(tests) + ":[path.resolve(pattern)];")
             fake = root / 'node_modules/karma'
             fake.mkdir(parents=True)
             fake.joinpath('index.js').write_text("""
-const fs=require('fs');
+const fs=require('fs'),stdoutWrite=process.stdout.write;
 exports.config={parseConfig:async (file,options,flags)=>{
  if(!options.singleRun||!flags.promiseConfig||!flags.throwErrors)throw Error('PARSE_OPTIONS');
+ // Match root config's stdout interception; the coordinator must restore its
+ // writer before forwarding complete child log chunks.
+ const original=process.stdout.write;
+ process.stdout.write=function(chunk,...args){if(String(chunk).includes('BATCH_LOG_SENTINEL'))return true;return original.call(this,chunk,...args);};
  return {...require(file),...options};
 }};
 exports.Server=class {
  constructor(config,done){this.config=config;this.done=done;}
  start(){
   if(process.env.BABEL_NO_MODULES!=='true'||process.env.COVERAGE!=='true')throw Error('UPSTREAM_ENV');
-  fs.writeFileSync('captured-config.json',JSON.stringify(this.config));
-  console.log(process.env.TEST_KARMA_MESSAGE);if(process.env.TEST_KARMA_MESSAGE==='child-killed')process.kill(process.pid,'SIGKILL');this.done(Number(process.env.TEST_KARMA_EXIT));
+  fs.appendFileSync('captured-config.jsonl',JSON.stringify({config:this.config,pid:process.pid})+'\\n');
+  stdoutWrite.call(process.stdout,'BATCH_LOG_SENTINEL\\n');
+  console.log(process.env.TEST_KARMA_MESSAGE);
+  if(process.env.TEST_KARMA_MESSAGE==='child-killed')process.kill(process.pid,'SIGKILL');
+  const first=this.config.files.some(f=>f.pattern.endsWith('/0.test.js'));
+  this.done(process.env.TEST_KARMA_MESSAGE==='first-batch-fails'?(first?1:0):Number(process.env.TEST_KARMA_EXIT));
  }
 };
 """)
-            for message, exitcode, expected in [('465 tests completed', 0, 0), ('ERROR [esbuild]: The service was stopped', 0, 1), ('tests failed', 1, 1), ('child-killed', 0, 1)]:
+            for message, exitcode, expected in [('all assertions passed', 0, 0), ('ERROR [esbuild]: The service was stopped', 0, 1), ('tests failed', 1, 1), ('child-killed', 0, 1), ('first-batch-fails', 0, 1)]:
+                captured_path = root / 'captured-config.jsonl'
+                if captured_path.exists():
+                    captured_path.unlink()
                 env = dict(os.environ, TEST_KARMA_MESSAGE=message, TEST_KARMA_EXIT=str(exitcode))
                 result = subprocess.run(RECIPES[9]['publicTestCommand'], cwd=root, env=env, capture_output=True, text=True)
                 self.assertEqual(result.returncode, expected, result.stderr)
-                self.assertIn(message, result.stdout)
-                captured = json.loads((root / 'captured-config.json').read_text())
-                self.assertEqual(captured.pop('singleRun'), True)
-                self.assertEqual(captured['esbuild']['singleBundle'], True)
-                captured['esbuild']['singleBundle'] = False
-                inventory = next(json.loads(line) for line in result.stdout.splitlines() if line.startswith('{') and json.loads(line).get('event') == 'public_test_inventory')
-                self.assertEqual(inventory['files'], ['/work/compat/test/browser/b.test.js', '/work/test/browser/a.test.js', '/work/test/polyfills.js'])
-                diagnostic = next(json.loads(line) for line in result.stdout.splitlines() if line.startswith('{') and json.loads(line).get('event') == 'public_test_process')
-                self.assertEqual(diagnostic['status'], None if message == 'child-killed' else exitcode)
-                self.assertEqual(diagnostic['signal'], 'SIGKILL' if message == 'child-killed' else None)
-                self.assertIn('memoryEventsBefore', diagnostic)
-                self.assertIn('memoryEventsAfter', diagnostic)
-                aliases = captured['esbuild'].pop('alias')
-                self.assertEqual(aliases, {'preact/compat/server': str(root / 'compat/server.browser.js')})
-                self.assertEqual(captured, config)
+                records = [json.loads(line) for line in captured_path.read_text().splitlines()]
+                self.assertEqual(len(records), 2)
+                self.assertEqual(len({record['pid'] for record in records}), 2)
+                scheduled = []
+                for record in records:
+                    captured = record['config']
+                    self.assertEqual(captured.pop('singleRun'), True)
+                    batchfiles = captured.pop('files')
+                    scheduled.extend(f['pattern'] for f in batchfiles if f['pattern'].endswith('.test.js'))
+                    self.assertIn(config['files'][0], batchfiles)
+                    self.assertIn(config['files'][2], batchfiles)
+                    for f in batchfiles:
+                        if f['pattern'].endswith('.test.js'):
+                            self.assertEqual({k:v for k,v in f.items() if k!='pattern'}, {'watched': False, 'type': 'js'})
+                    self.assertEqual(captured['esbuild'].pop('alias'), {'preact/compat/server': str(root / 'compat/server.browser.js')})
+                    self.assertEqual(captured, {k:v for k,v in config.items() if k!='files'})
+                self.assertEqual(scheduled, tests)
+                jsonlines = [json.loads(line) for line in result.stdout.splitlines() if line.startswith('{')]
+                diagnostics = [line for line in jsonlines if line.get('event') == 'public_test_process']
+                self.assertEqual(len(diagnostics), 2)
+                self.assertEqual([file for d in diagnostics for file in d['files']], tests)
+                self.assertEqual(result.stdout.count('BATCH_LOG_SENTINEL'), 2)
+                self.assertEqual(result.stdout.count(message), 2)
+                for index, diagnostic in enumerate(diagnostics):
+                    expected_status = None if message=='child-killed' else ((1 if index==0 else 0) if message=='first-batch-fails' else exitcode)
+                    self.assertEqual(diagnostic['status'], expected_status)
+                    self.assertEqual(diagnostic['signal'], 'SIGKILL' if message=='child-killed' else None)
+                    self.assertIn('memoryEventsBefore', diagnostic)
+                    self.assertIn('memoryEventsAfter', diagnostic)
+                summary = next(line for line in jsonlines if line.get('event')=='public_test_summary')
+                self.assertEqual(summary['scheduledTests'], len(tests))
+                self.assertEqual(summary['failed'], bool(expected))
             package['exports']['./compat/server']['browser'] = './compat/server.js'
             (root / 'package.json').write_text(json.dumps(package))
             result = subprocess.run(RECIPES[9]['publicTestCommand'], cwd=root, capture_output=True, text=True)
