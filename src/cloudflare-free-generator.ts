@@ -30,8 +30,16 @@ type CloudflareGeneratorOptions = {
   workersPlan: string;
   repairProposal?: SkillCandidateProposal;
   repairFeedback?: string;
+  reasoningEffort?: "low";
   fetcher?: Fetcher;
 };
+
+/** One explicit qualification variable; omitted/current preserves the existing request. */
+export function cloudflareQualificationReasoningEffort(value: unknown): "low" | undefined {
+  if (value === undefined || value === "current") return undefined;
+  if (value === "low") return "low";
+  throw new Error("Cloudflare qualification reasoning effort must be current or low.");
+}
 
 function requireCredentials(options: CloudflareGeneratorOptions): void {
   if (options.workersPlan !== "free") {
@@ -217,6 +225,7 @@ export function createCloudflareFreeCandidateGenerator(
   options: CloudflareGeneratorOptions,
 ): CandidateGenerator {
   requireCredentials(options);
+  const reasoningEffort = cloudflareQualificationReasoningEffort(options.reasoningEffort);
   const fetcher = options.fetcher ?? fetch;
   const endpoint = `https://api.cloudflare.com/client/v4/accounts/${options.accountId}/ai/v1/chat/completions`;
   return {
@@ -245,6 +254,7 @@ export function createCloudflareFreeCandidateGenerator(
           temperature: 0,
           max_completion_tokens: 8_192,
           seed: 1,
+          ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
         }),
       });
       const declaredLength = Number(response.headers.get("content-length") ?? "0");
