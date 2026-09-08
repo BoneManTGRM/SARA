@@ -458,6 +458,7 @@ export class SaraKernel {
   readonly #buildQueue = new KernelBuildQueue();
   readonly #repositoryEnvironments = new Map<string, RepositoryEnvironment>();
   readonly #repositoryJudges = new Map<string, RepositoryJudgeConfiguration>();
+  #repositoryExecutionHost?: import("./repository-cloud-broker.ts").RepositoryCloudBroker;
   #repositoryBenchmarkAuthorization?: RepositoryBenchmarkAuthorization;
   readonly #repositoryBenchmarkPermits = new WeakMap<RepositoryBenchmarkPermit, {
     jobId: string; taskDigest: string; environmentDigest: string; attemptId: string; epoch: string | null;
@@ -506,6 +507,8 @@ export class SaraKernel {
     repositoryJudges?: readonly RepositoryJudgeConfiguration[];
     /** Absent by default. Runtime callback must validate a fresh source-bound owner grant. */
     repositoryBenchmarkAuthorization?: RepositoryBenchmarkAuthorization;
+    /** Trusted cloud transport only; never obtained from a producer or HTTP body. */
+    repositoryExecutionHost?: import("./repository-cloud-broker.ts").RepositoryCloudBroker;
     now?: () => Date;
   }): Promise<SaraKernel> {
     if (![0, 1, 2].includes(options.selfBuildVerificationWorkers ?? 0)) throw new Error("KERNEL_VERIFICATION_WORKERS_INVALID");
@@ -538,6 +541,7 @@ export class SaraKernel {
         loaded.digest,
         ownerTokenSha256,
       );
+      kernel.#repositoryExecutionHost = options.repositoryExecutionHost;
       for (const environment of structuredClone(options.repositoryEnvironments ?? [])) {
         validateRepositoryEnvironment(environment);
         kernel.#repositoryEnvironments.set(sha256(canonicalJson(environment)), environment);
@@ -1927,7 +1931,8 @@ export class SaraKernel {
       const proposal = structuredClone(await generate({ task: structuredClone(task), environment: structuredClone(environment), ...binding, beforeAction }));
       const receipt = await this.#buildQueue.run(async () => {
         await this.serializeMutation(reauthorize);
-        return verifyRepositoryPatch(this.#store.stateDirectory, environment, task, proposal);
+        return verifyRepositoryPatch(this.#store.stateDirectory, environment, task, proposal,
+          this.#repositoryExecutionHost?.startSession);
       });
       return await this.serializeMutation(async () => {
         await reauthorize();
@@ -1980,7 +1985,8 @@ export class SaraKernel {
           if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("REPOSITORY_JUDGE_JOB_NOT_RUNNING");
           if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== handoff.epoch) throw new Error("REPOSITORY_JUDGE_AUTHORITY_CHANGED");
         });
-        return runOfficialRepositoryJudge(this.#store.stateDirectory, handoff.receipt, handoff.config);
+        return runOfficialRepositoryJudge(this.#store.stateDirectory, handoff.receipt, handoff.config,
+          this.#repositoryExecutionHost?.dispatchJudge);
       });
       return await this.serializeMutation(async () => {
         await this.authorize(principal, { action: "sandbox_development", targetId: `repository:${jobId}:judge-acceptance`, external: false });

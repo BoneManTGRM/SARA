@@ -42,7 +42,7 @@ export interface OfficialRepositoryResult {
 
 /** Concrete trusted judge dispatch. Callers cannot inject a grading callback. */
 export async function runOfficialRepositoryJudge(stateDirectory: string, receipt: RepositoryVerification,
-  config: RepositoryJudgeConfiguration) {
+  config: RepositoryJudgeConfiguration, dispatch: RepositoryJudgeDispatch = dispatchLocalRepositoryJudge) {
   receipt = structuredClone(receipt); config = structuredClone(config);
   validateRepositoryJudgeConfiguration(config);
   await verifyRepositoryArtifact(stateDirectory, receipt);
@@ -58,6 +58,31 @@ export async function runOfficialRepositoryJudge(stateDirectory: string, receipt
   const file = await open(requestPath, "wx", 0o600);
   try { await file.writeFile(canonicalJson(request)); await file.sync(); } finally { await file.close(); }
   const output = join(root, "official-judge");
+  await dispatch(requestPath, config, output);
+  const { dispatchError } = JSON.parse(await readFile(join(root, "judge-dispatch.json"), "utf8")) as { dispatchError: string | null };
+  const result = JSON.parse(await readFile(join(output, "judge-receipt.json"), "utf8")) as OfficialRepositoryResult;
+  for (const key of ["instanceId", "arm", "runId", "patchDigest", "environmentDigest", "taskDigest", "image", "fixtureProxyImage", "repository", "baseCommit"] as const) {
+    if (result[key] !== request[key]) throw new Error("REPOSITORY_JUDGE_RECEIPT_BINDING");
+  }
+  if (dispatchError || !result.gradeCompleted) result.resolved = false;
+  if (result.gradeCompleted) {
+    const expectedPath = `logs/evaluation/${request.runId}/sara-frozen-${request.arm}/${request.instanceId}/report.json`;
+    if (result.reportRelativePath !== expectedPath) throw new Error("REPOSITORY_JUDGE_REPORT_PATH");
+    const report = await readFile(join(output, expectedPath), "utf8");
+    if (sha256(report) !== result.reportDigest || JSON.parse(report)[request.instanceId]?.resolved !== result.resolved) {
+      throw new Error("REPOSITORY_JUDGE_REPORT_BINDING");
+    }
+  }
+  return { result, judgeReceiptDigest: sha256(await readFile(join(output, "judge-receipt.json"))),
+    artifactRelativePath: `${receipt.artifactRelativePath}/official-judge`, candidateDigest: receipt.candidateDigest,
+    productionAuthority: false as const, ...(dispatchError ? { dispatchError } : {}) };
+}
+
+/** Only the trusted host executes the fixed judge script; no submitted command. */
+export type RepositoryJudgeDispatch = (requestPath: string, config: RepositoryJudgeConfiguration, output: string) => Promise<void>;
+export const dispatchLocalRepositoryJudge: RepositoryJudgeDispatch = async (requestPath, config, output) => {
+  const request = JSON.parse(await readFile(requestPath, "utf8")) as { runId: string };
+  if (!/^sara-judge-[a-f0-9-]{36}$/.test(request.runId)) throw new Error("REPOSITORY_JUDGE_RUN_ID");
   let dispatchError: string | undefined;
   try {
     await promisify(execFile)("python3", [fileURLToPath(new URL("../scripts/swe-bench-judge.py", import.meta.url)),
@@ -80,24 +105,8 @@ export async function runOfficialRepositoryJudge(stateDirectory: string, receipt
       if (networkIds.some(id => !/^[a-f0-9]{12,64}$/.test(id)) || networkIds.length > 2) throw new Error("JUDGE_NETWORK_CLEANUP_IDENTITY");
       if (networkIds.length) await promisify(execFile)("docker", ["network", "rm", ...networkIds], options);
     } catch (error) { dispatchError = `JUDGE_CLEANUP_FAILED: ${String(error).slice(0, 500)}; ${dispatchError ?? ""}`; }
-    const file = await open(join(root, "judge-dispatch.json"), "wx", 0o600);
+    const file = await open(join(output, "..", "judge-dispatch.json"), "wx", 0o600);
     try { await file.writeFile(canonicalJson({ runId: request.runId, dispatchError: dispatchError ?? null })); await file.sync(); }
     finally { await file.close(); }
   }
-  const result = JSON.parse(await readFile(join(output, "judge-receipt.json"), "utf8")) as OfficialRepositoryResult;
-  for (const key of ["instanceId", "arm", "runId", "patchDigest", "environmentDigest", "taskDigest", "image", "fixtureProxyImage", "repository", "baseCommit"] as const) {
-    if (result[key] !== request[key]) throw new Error("REPOSITORY_JUDGE_RECEIPT_BINDING");
-  }
-  if (dispatchError || !result.gradeCompleted) result.resolved = false;
-  if (result.gradeCompleted) {
-    const expectedPath = `logs/evaluation/${request.runId}/sara-frozen-${request.arm}/${request.instanceId}/report.json`;
-    if (result.reportRelativePath !== expectedPath) throw new Error("REPOSITORY_JUDGE_REPORT_PATH");
-    const report = await readFile(join(output, expectedPath), "utf8");
-    if (sha256(report) !== result.reportDigest || JSON.parse(report)[request.instanceId]?.resolved !== result.resolved) {
-      throw new Error("REPOSITORY_JUDGE_REPORT_BINDING");
-    }
-  }
-  return { result, judgeReceiptDigest: sha256(await readFile(join(output, "judge-receipt.json"))),
-    artifactRelativePath: `${receipt.artifactRelativePath}/official-judge`, candidateDigest: receipt.candidateDigest,
-    productionAuthority: false as const, ...(dispatchError ? { dispatchError } : {}) };
-}
+};

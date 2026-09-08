@@ -35,6 +35,8 @@ import { createAdaptiveCodingRepairModel, persistRepairFormatDecision } from "./
 import { verifyGenomeLabProgramCandidate } from "./genome-lab-verifier.ts";
 import { codingTypecheckHost } from "./fresh-typecheck-host.ts";
 import { persistCodingRepairReceipt, persistCodingRepairRun } from "./coding-repair-receipt-store.ts";
+import type { RepositoryCloudRuntime } from "./repository-cloud-runtime.ts";
+import { CLOUD_MAX_BYTES, CLOUD_WORKER_ROUTE } from "./repository-cloud-protocol.ts";
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -44,6 +46,7 @@ export type SaraRuntimeStatus = {
 };
 
 export type ServerOptions = {
+  repositoryCloud?: RepositoryCloudRuntime;
   ownerTokenSha256: string;
   readOnlyBridgeTokenSha256?: string;
   telegramBridgeTokenSha256?: string;
@@ -87,13 +90,13 @@ function authenticatedToken(request: IncomingMessage, expectedHex: string): stri
   return received.length === expected.length && timingSafeEqual(received, expected) ? token : null;
 }
 
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(request: IncomingMessage, maximumBytes = MAX_BODY_BYTES): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.length;
-    if (size > MAX_BODY_BYTES) throw new Error("Request body exceeds 64 KiB.");
+    if (size > maximumBytes) throw new Error(`Request body exceeds ${maximumBytes / 1024} KiB.`);
     chunks.push(buffer);
   }
   if (chunks.length === 0) return {};
@@ -1194,6 +1197,17 @@ async function routeSaraRequest(
     return;
   }
 
+  if (url.pathname === CLOUD_WORKER_ROUTE) {
+    // Dedicated OIDC boundary. A worker token is never converted into an owner
+    // token and this path cannot launch a run or call any provider endpoint.
+    if (!options.repositoryCloud || request.method !== "POST" || url.search || !request.headers.authorization?.startsWith("Bearer ")) {
+      json(response, 403, { error: "Repository worker unavailable or unauthorized." }); return;
+    }
+    try {
+      json(response, 200, await options.repositoryCloud.worker(request.headers.authorization.slice(7), await readJson(request, CLOUD_MAX_BYTES)));
+    } catch { json(response, 403, { error: "Repository worker unavailable or unauthorized." }); }
+    return;
+  }
   let token = authenticatedToken(request, options.ownerTokenSha256);
   let launcher: CodingBenchmarkRelayIdentity | null = null;
   // This explicitly configured delegation is restricted to the existing benchmark
@@ -1210,6 +1224,16 @@ async function routeSaraRequest(
   }
   if (!token) {
     unauthorized(response);
+    return;
+  }
+  if (url.pathname.startsWith("/api/repository-benchmark/")) {
+    const owner = kernel.authenticateOwnerToken(token);
+    if (!options.repositoryCloud) { json(response, 423, { ready: false, blockers: ["CLOUD_PACKAGE_NOT_CONFIGURED"], modelCalls: 0 }); return; }
+    if (url.search) { json(response, 400, { error: "Query parameters are not accepted." }); return; }
+    if (request.method === "GET" && url.pathname === "/api/repository-benchmark/readiness") json(response, 200, await options.repositoryCloud.readiness());
+    else if (request.method === "GET" && url.pathname === "/api/repository-benchmark/result") json(response, 200, await options.repositoryCloud.result());
+    else if (request.method === "POST" && url.pathname === "/api/repository-benchmark/run") json(response, 202, await options.repositoryCloud.launch(owner, await readJson(request)));
+    else json(response, 405, { error: "Method not allowed." });
     return;
   }
   if (url.pathname === "/api/coding-benchmark/readiness" || url.pathname === "/api/coding-benchmark/run") {

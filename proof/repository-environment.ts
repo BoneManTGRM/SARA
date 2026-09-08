@@ -34,6 +34,9 @@ try {
   resourcesBefore = await recordResources("before");
   const result = await session.run(environment.publicTestCommand);
   await writeFile(join(output, "public-tests.log"), result.output);
+  // Retain a bounded, readable test-count tail in Actions logs as well as the
+  // artifact, so a zero exit can be inspected without trusting a status badge.
+  console.log(`PUBLIC_TEST_OUTPUT_TAIL\n${result.output.slice(-6000)}`);
   receipt.exitCode = result.exitCode;
   receipt.publicTestsPassed = result.exitCode === 0;
 } catch (error) { receipt.error = error instanceof Error ? error.message : "PREPARATION_FAILED"; }

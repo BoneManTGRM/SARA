@@ -1,0 +1,47 @@
+name: Freeze qualified public images on existing GitHub resources
+on:
+  push:
+    branches: [fix/swe-existing-resource-qualification]
+    paths:
+      - .github/workflows/repository-cloud-images.yml
+      - scripts/freeze-repository-image.py
+permissions:
+  contents: read
+jobs:
+  public-image:
+    if: github.repository == 'BoneManTGRM/SARA' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Build and qualify only the public base and public tests
+        run: python3 scripts/qualify-repository-environment.py --index '${{ matrix.index }}' --output "$RUNNER_TEMP/public-environment"
+      - name: Authenticate the existing container registry
+        env:
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: echo "$REGISTRY_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish and verify the immutable image identity
+        run: python3 scripts/freeze-repository-image.py --input "$RUNNER_TEMP/public-environment"
+      - if: always()
+        run: docker logout ghcr.io
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: cloud-public-image-${{ matrix.index }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/public-environment
+          if-no-files-found: error
+          retention-days: 14

@@ -8,6 +8,7 @@ import { sha256 } from "../src/canonical.ts";
 import { createRepositoryProducerSandbox, runRepositoryProducer } from "../src/repository-producer.ts";
 import { RepositorySession, repositoryBinding, verifyRepositoryArtifact,
   type RepositoryEnvironment, type RepositoryTask } from "../src/repository-executor.ts";
+import { repositoryCloudProofHarness } from "./repository-cloud-harness.ts";
 
 // Actual Docker controls, never mocked. An unavailable daemon fails this proof.
 const scratch = await mkdtemp(join(tmpdir(), "sara-repository-proof-"));
@@ -17,6 +18,7 @@ const run = (command: string, args: string[], cwd = scratch) => execFileSync(com
   cwd, encoding: "utf8", timeout: 180000, maxBuffer: 2 * 1024 * 1024,
 });
 let kernel: SaraKernel | undefined;
+let cloud: Awaited<ReturnType<typeof repositoryCloudProofHarness>> | undefined;
 try {
   run("docker", ["info"]);
   // Resolve a qualification runtime to immutable ID before building/running.
@@ -33,17 +35,21 @@ try {
   run("docker", ["build", "--iidfile", join(scratch, "image-id"), scratch]);
   const environment: RepositoryEnvironment = { schemaVersion: 1, repository: "qualification/public-fixture", baseCommit,
     image: (await readFile(join(scratch, "image-id"), "utf8")).trim(), publicTestCommand: ["node", "test.cjs"], timeoutSeconds: 10 };
-  kernel = await SaraKernel.boot({ stateDirectory: output, ownerTokenSha256: sha256("qualification-only-owner-token"), repositoryEnvironments: [environment] });
+  if (process.env.SARA_REPOSITORY_PROOF_TRANSPORT === "cloud") cloud = await repositoryCloudProofHarness(output);
+  const startSession = cloud?.broker.startSession ?? RepositorySession.start;
+  kernel = await SaraKernel.boot({ stateDirectory: output, ownerTokenSha256: sha256("qualification-only-owner-token"), repositoryEnvironments: [environment],
+    ...(cloud ? { repositoryExecutionHost: cloud.broker } : {}) });
   const receipts = [];
   for (const control of ["base-fails", "patch-passes", "workspace-poison-fails"] as const) {
     const task: RepositoryTask = { instanceId: control, problemStatement: "Return two.", arm: "conventional", runId: "docker-qualification" };
     const binding = repositoryBinding(environment, task);
+    await cloud?.start(environment, task);
     const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, { objective: `Qualify ${control}`, expectedOwnerValue: 1,
       requiredCapabilities: ["repository-executor"], acceptanceCriteria: ["Fresh public fixture test"], maximumBudgetUsd: 0 });
     const receipt = await kernel.runRepositoryBuildCycle(SARA_PRINCIPAL, job.id, binding.environmentDigest, task, {
       id: "zero-cost-docker-control", external: false, maximumCostUsd: 0,
       async generate() {
-        const session = await RepositorySession.start(environment);
+        const session = await startSession(environment);
         try {
           if (control === "patch-passes") await session.mustRun(["node", "-e", "require('fs').writeFileSync('value.cjs','module.exports = 2;\\n')"]);
           const patch = await session.freezePatch();
@@ -54,12 +60,14 @@ try {
       },
     });
     assert.equal(receipt.exitCode === 0, control === "patch-passes", control);
+    await cloud?.finish();
     await verifyRepositoryArtifact(output, receipt);
     receipts.push({ control, receipt });
   }
   for (const arm of ["conventional", "reparodynamic"] as const) {
     const task: RepositoryTask = { instanceId: "scripted-producer", problemStatement: "Return two from value.cjs.", arm, runId: "docker-producer-qualification" };
     const binding = repositoryBinding(environment, task);
+    await cloud?.start(environment, task);
     const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, { objective: `Qualify ${arm} repository producer`, expectedOwnerValue: 1,
       requiredCapabilities: ["repository-producer"], acceptanceCriteria: ["Kernel dispatch checks and fresh verification"], maximumBudgetUsd: 0 });
     const actions = [{ action: "read", path: "value.cjs" }, { action: "edit", path: "value.cjs", oldText: "module.exports = 1;", newText: "module.exports = 2;" }, { action: "test" }, { action: "finish" }];
@@ -67,7 +75,7 @@ try {
       id: "scripted-repository-producer", external: false, maximumCostUsd: 0,
       async generate(input) {
         await input.beforeAction();
-        const sandbox = await createRepositoryProducerSandbox(input.environment);
+        const sandbox = await createRepositoryProducerSandbox(input.environment, startSession);
         let index = 0;
         try {
           const result = await runRepositoryProducer({ task: input.task, environment: input.environment, sandbox,
@@ -83,6 +91,7 @@ try {
       },
     });
     assert.equal(receipt.exitCode, 0);
+    await cloud?.finish();
     await verifyRepositoryArtifact(output, receipt);
   }
   const events = await kernel.inspectAudit();
@@ -94,10 +103,11 @@ try {
   await assert.rejects(verifyRepositoryArtifact(output, positive), /ARTIFACT_MISMATCH/);
   await writeFile(join(output, positive.artifactRelativePath, "patch.diff"), originalPatch);
   await verifyRepositoryArtifact(output, positive);
-  await writeFile(join(output, "qualification.json"), JSON.stringify({ runtime, environment, receipts,
+  await writeFile(join(output, "qualification.json"), JSON.stringify({ runtime, environment, receipts, transport: cloud ? "cloud_protocol_over_loopback_http" : "local",
     tamperRejected: true, modelCalls: 0, benchmarkAttempts: 0, officialBenchmarkScore: null }, null, 2));
   console.log("PASS: real Docker base failure, repaired patch, fresh-state poison rejection, artifact tamper rejection; no model calls.");
 } finally {
+  await cloud?.close();
   await kernel?.closeVerificationWorkers();
   // Evidence lives outside temporary build context when invoked by CI.
   if (process.env.SARA_REPOSITORY_PROOF_OUTPUT) await rm(scratch, { recursive: true, force: true });

@@ -8,6 +8,8 @@ import { repositoryBinding } from "./repository-executor.ts";
 import { createRepositoryProducerSandbox, runRepositoryProducer, type RepositoryProducerResult } from "./repository-producer.ts";
 import { createRepositoryLunaModel } from "./repository-luna-model.ts";
 import { prepareRepositoryComparisonPlan, runRepositoryComparison, RepositoryComparisonStop, type RepositoryComparisonPublicTask } from "./repository-comparison.ts";
+import type { RepositoryCloudBroker } from "./repository-cloud-broker.ts";
+import type { RepositoryJudgeConfiguration } from "./repository-official-judge.ts";
 
 /** A host-runner integration, never a production route or standalone grant.
  * Boot must configure the fresh source-bound registration and durable runtime
@@ -17,16 +19,20 @@ export async function runRepositoryBenchmark(input: {
   approval: { registrationDigest: string; authorityDigest: string };
   runId: string; tasks: RepositoryComparisonPublicTask[];
   apiKey: string;
+  cloud?: { broker: RepositoryCloudBroker; judges: readonly RepositoryJudgeConfiguration[] };
 }) {
   const registration = structuredClone(input.registration), tasks = structuredClone(input.tasks);
   const approval = structuredClone(input.approval);
   const { kernel, owner, runId, apiKey } = input;
+  const cloud = input.cloud;
+  const judges = structuredClone(cloud?.judges ?? []);
   if (sha256(canonicalJson(registration)) !== approval.registrationDigest) throw new Error("REPOSITORY_RUNNER_REGISTRATION_MISMATCH");
   const plan = prepareRepositoryComparisonPlan({ runId, tasks, limits: registration.producerLimits });
   const requested = plan.requests.map(r => canonicalJson({ task: r.task,
     environmentDigest: repositoryBinding(r.environment, r.task).environmentDigest })).sort();
   const registered = registration.attempts.map(a => canonicalJson({ task: a.task, environmentDigest: a.environmentDigest })).sort();
   if (canonicalJson(requested) !== canonicalJson(registered)) throw new Error("REPOSITORY_RUNNER_PLAN_MISMATCH");
+  if (cloud && registration.attempts.some(a => !judges.some(j => j.environmentDigest === a.environmentDigest))) throw new Error("REPOSITORY_RUNNER_JUDGE_MISSING");
   return kernel.withRepositoryBenchmarkExecution(owner, approval, async execution => {
     const auditDirectory = execution.evidenceDirectory;
     let currentAuthority: (() => Promise<void>) | null = null;
@@ -49,6 +55,7 @@ export async function runRepositoryBenchmark(input: {
       maximumGenerationRequestsPerAttempt: registration.model.maximumRequestsPerAttempt,
     });
     try {
+      await cloud?.broker.begin(auditDirectory);
       const comparison = await runRepositoryComparison({ runId, tasks, limits: registration.producerLimits,
         async runAttempt(request) {
           if (budget.snapshot().closed) throw new RepositoryComparisonStop("spend_uncertainty");
@@ -72,12 +79,15 @@ export async function runRepositoryBenchmark(input: {
               request.task, { id: "matched-repository-luna", external: true,
                 maximumCostUsd: registration.spend.attemptMicros / 1e6,
                 async generate(context) {
-                  currentAuthority = context.beforeAction;
+                  const beforeAction = async () => { await context.beforeAction(); await cloud?.broker.assertActive(); };
+                  currentAuthority = beforeAction;
                   await currentAuthority();
-                  const sandbox = await createRepositoryProducerSandbox(context.environment);
+                  await cloud?.broker.openAssignment({ phase: "producer", attemptId: registered.attemptId,
+                    task: context.task, environment: context.environment });
+                  const sandbox = await createRepositoryProducerSandbox(context.environment, cloud?.broker.startSession);
                   try {
                     producer = await runRepositoryProducer({ task: context.task, environment: context.environment,
-                      limits: request.limits, beforeAction: context.beforeAction, sandbox,
+                      limits: request.limits, beforeAction, sandbox,
                       model: createRepositoryLunaModel({ apiKey, budget, attemptId: registered.attemptId,
                         maximumOutputTokens: registration.model.maximumOutputTokens }) });
                     await writeBenchmarkAudit(auditDirectory, `${prefix}-producer.json`, producer);
@@ -88,6 +98,7 @@ export async function runRepositoryBenchmark(input: {
             if (!producer) throw new Error("REPOSITORY_PRODUCER_MISSING");
             await writeBenchmarkAudit(auditDirectory, `${prefix}-kernel.json`, { jobId: job.id, receipt });
             jobs.set(binding.taskDigest, { jobId: job.id, candidateDigest: receipt.candidateDigest, patchDigest: receipt.patchDigest });
+            await cloud?.broker.finishAssignment();
             return { producer, candidateDigest: receipt.candidateDigest };
           } catch (error) {
             currentAuthority = null;
@@ -100,19 +111,30 @@ export async function runRepositoryBenchmark(input: {
         },
         async freezeProducers(rows, digest) {
           await writeBenchmarkAudit(auditDirectory, "producer-freeze.json", { rows, digest });
+          await cloud?.broker.producersFrozen();
         },
         async grade({ task, candidateDigest, patchDigest }) {
           const job = jobs.get(sha256(canonicalJson(task)));
           if (!job || job.candidateDigest !== candidateDigest || job.patchDigest !== patchDigest) throw new RepositoryComparisonStop("authority");
-          const grade = await kernel.runRepositoryOfficialAcceptance(SARA_PRINCIPAL, job.jobId);
-          if (!grade.result.gradeCompleted) throw new Error("OFFICIAL_GRADE_INCOMPLETE");
-          return { resolved: grade.result.resolved, receiptDigest: grade.judgeReceiptDigest };
+          if (cloud) {
+            const attempt = registration.attempts.find(a => canonicalJson(a.task) === canonicalJson(task))!;
+            const environment = tasks.find(t => t.instanceId === task.instanceId)!.environment;
+            const judge = judges.find(j => j.environmentDigest === attempt.environmentDigest)!;
+            await cloud.broker.openAssignment({ phase: "judge", attemptId: attempt.attemptId, task, environment,
+              judge: { image: judge.image, ...(judge.fixtureProxyImage ? { fixtureProxyImage: judge.fixtureProxyImage } : {}) } });
+          }
+          try {
+            const grade = await kernel.runRepositoryOfficialAcceptance(SARA_PRINCIPAL, job.jobId);
+            if (!grade.result.gradeCompleted) throw new Error("OFFICIAL_GRADE_INCOMPLETE");
+            return { resolved: grade.result.resolved, receiptDigest: grade.judgeReceiptDigest };
+          } finally { await cloud?.broker.finishAssignment(); }
         },
       });
       await writeBenchmarkAudit(auditDirectory, "comparison-result.json", comparison);
       return comparison;
     } finally {
       currentAuthority = null;
+      cloud?.broker.end();
       await writeBenchmarkAudit(auditDirectory, "budget-final.json", { ...budget.snapshot(), replayAllowed: false });
     }
   });

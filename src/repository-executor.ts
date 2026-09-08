@@ -92,7 +92,11 @@ export function validateRepositoryPatch(patch: string): void {
   if (!patch.startsWith("diff --git ") || files < 1 || files > 256) throw new Error("REPOSITORY_PATCH_FORMAT");
 }
 
-type CommandResult = { exitCode: number; output: string };
+export type RepositoryCommandResult = { exitCode: number; output: string };
+type CommandResult = RepositoryCommandResult;
+/** Trusted host seam. Request bodies and producer proposals never select it. */
+export type RepositorySessionHandle = Pick<RepositorySession, "run" | "mustRun" | "freezePatch" | "close">;
+export type RepositorySessionFactory = (environment: RepositoryEnvironment) => Promise<RepositorySessionHandle>;
 function docker(args: string[], timeoutSeconds: number, input?: string): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     // No shell, provider keys, Git credentials, Docker context overrides or host mounts.
@@ -169,7 +173,8 @@ async function writeDurable(path: string, content: string): Promise<void> {
 
 /** Kernel calls this concrete verifier; producer callbacks cannot supply PASS. */
 export async function verifyRepositoryPatch(stateDirectory: string, environment: RepositoryEnvironment,
-  task: RepositoryTask, proposal: RepositoryPatch): Promise<RepositoryVerification> {
+  task: RepositoryTask, proposal: RepositoryPatch,
+  startSession: RepositorySessionFactory = RepositorySession.start): Promise<RepositoryVerification> {
   environment = structuredClone(environment); task = structuredClone(task); proposal = structuredClone(proposal);
   const binding = repositoryBinding(environment, task);
   if (proposal.environmentDigest !== binding.environmentDigest || proposal.taskDigest !== binding.taskDigest) throw new Error("REPOSITORY_BINDING_MISMATCH");
@@ -181,10 +186,10 @@ export async function verifyRepositoryPatch(stateDirectory: string, environment:
   await writeDurable(join(directory, "patch.diff"), proposal.patch);
   await writeDurable(join(directory, "input.json"), canonicalJson({ environment, task, proposal }));
   const started = performance.now();
-  let session: RepositorySession | undefined;
+  let session: RepositorySessionHandle | undefined;
   let result: CommandResult;
   try {
-    session = await RepositorySession.start(environment);
+    session = await startSession(environment);
     if (proposal.patch) {
       await session.mustRun(["git", "apply", "--check", "--whitespace=nowarn", "-"], proposal.patch);
       await session.mustRun(["git", "apply", "--whitespace=nowarn", "-"], proposal.patch);

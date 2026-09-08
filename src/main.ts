@@ -16,6 +16,7 @@ import { compileCommercialTerms, compilePreviousCommercialTermsDigest } from "./
 import { NicoOperatorClient } from "./nico-operator.ts";
 import { activateApprovedAutonomousPaidMandate } from "./autonomous-paid-mandate-bootstrap.ts";
 import { parseReparodynamicCodingMode } from "./reparodynamic-candidate-generator.ts";
+import { prepareRepositoryCloudRuntime } from "./repository-cloud-runtime.ts";
 
 const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? ".sara-state");
 const host = process.env.SARA_HOST ?? "127.0.0.1";
@@ -104,12 +105,15 @@ if (
 
 const kernelWorkerSetting = process.env.SARA_KERNEL_VERIFICATION_WORKERS ?? "0";
 if (!["0", "1", "2"].includes(kernelWorkerSetting)) throw new Error("Invalid SARA_KERNEL_VERIFICATION_WORKERS");
+const repositoryCloud = await prepareRepositoryCloudRuntime({ stateDirectory, environment: process.env });
 const kernel = await SaraKernel.boot({
   stateDirectory,
   ownerTokenSha256,
   bootstrapRevenueCapabilities: true,
   selfBuildVerificationWorkers: Number(kernelWorkerSetting) as 0 | 1 | 2,
+  ...repositoryCloud?.kernelOptions,
 });
+repositoryCloud?.bindKernel(kernel);
 await activateApprovedAutonomousPaidMandate({
   kernel,
   ...(ownerToken ? { ownerToken } : {}),
@@ -162,6 +166,7 @@ console.log(`SARA coding loop checker: ${nativeVerifier ? "native-7.0.2-with-leg
 // Host-bound publishing and notification adapters must be configured before CANARY activation.
 const websiteMaintenance=new WebsiteMaintenanceOperator(kernel,stateDirectory,null);
 const server = createSaraServer(kernel, {
+  ...(repositoryCloud ? { repositoryCloud } : {}),
   ownerTokenSha256,
   stateDirectory,
   ...(publicBaseUrl ? { publicBaseUrl } : {}),

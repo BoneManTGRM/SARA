@@ -1,0 +1,39 @@
+name: Repository cloud transport qualification (no model calls)
+on:
+  push:
+    branches: [fix/swe-existing-resource-qualification]
+    paths:
+      - src/repository-cloud-*.ts
+      - src/repository-executor.ts
+      - src/repository-official-judge.ts
+      - src/kernel.ts
+      - proof/repository-cloud-harness.ts
+      - proof/repository-executor.ts
+      - .github/workflows/repository-cloud-qualification.yml
+permissions:
+  contents: read
+jobs:
+  docker-transport:
+    if: github.repository == 'BoneManTGRM/SARA' && github.event.repository.private == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Real Docker controls through the cloud protocol over HTTP
+        run: node --import tsx proof/repository-executor.ts
+        env:
+          SARA_REPOSITORY_PROOF_TRANSPORT: cloud
+          SARA_REPOSITORY_PROOF_OUTPUT: ${{ runner.temp }}/cloud-qualification
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: cloud-transport-${{ github.run_id }}
+          path: ${{ runner.temp }}/cloud-qualification
+          if-no-files-found: error
+          retention-days: 14
