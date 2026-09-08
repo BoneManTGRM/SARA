@@ -10,6 +10,17 @@ const MAX_RESPONSE_BYTES = 128 * 1024;
 const MAX_PROPOSAL_BYTES = 64 * 1024;
 const MAX_OBJECTIVE_LENGTH = 1_000;
 
+/** Fixed validator messages safe for repair and bounded autonomous follow-up. */
+export function isCandidateMetadataFailureFeedback(message: string): boolean {
+  return new Set([
+    "Skill candidate schema version is unsupported.",
+    "Skill name must be 2–64 safe display characters.",
+    "Skill candidate summary must be 1–500 characters.",
+    "Skill limitations must contain at most 16 non-empty entries of 300 characters or fewer.",
+    "Behavioral test names must be unique and 1–120 characters.",
+  ]).has(message);
+}
+
 /** Keep known verifier facts; never forward arbitrary provider or environment errors. */
 export function boundedCandidateFailureFeedback(error: unknown): string {
   if (error instanceof GenomeLabTypecheckError && error.candidateKind === "skill") {
@@ -26,16 +37,7 @@ export function boundedCandidateFailureFeedback(error: unknown): string {
       ...locations].join("\n").slice(0, 8_192);
   }
   const message = error instanceof Error ? error.message : String(error);
-  // Exact, fixed validator wording only: never include candidate metadata or
-  // arbitrary exception details in the repair request or durable lesson.
-  const metadataFailures = new Set([
-    "Skill candidate schema version is unsupported.",
-    "Skill name must be 2–64 safe display characters.",
-    "Skill candidate summary must be 1–500 characters.",
-    "Skill limitations must contain at most 16 non-empty entries of 300 characters or fewer.",
-    "Behavioral test names must be unique and 1–120 characters.",
-  ]);
-  if (metadataFailures.has(message)) return message;
+  if (isCandidateMetadataFailureFeedback(message)) return message;
   if (/^Cloudflare candidate proposal was not valid JSON or was ambiguous\. complete_objects=\d{1,5}\. finish_reason=(?:stop|length|content_filter|tool_calls|function_call|unknown); prompt_tokens=(?:\d{1,7}|unknown); completion_tokens=(?:\d{1,7}|unknown)\.$/u.test(message)) return message;
   const source = /^Generated skill is not a pure isolated candidate: (imports and module loading are prohibited|computed property access is prohibited|the any type is prohibited|identifier (?:Bun|Date|Deno|EventSource|Function|Object|Proxy|Reflect|WebAssembly|WebSocket|XMLHttpRequest|eval|fetch|global|globalThis|module|navigator|performance|process|require|setImmediate|setInterval|setTimeout) is prohibited|property (?:__proto__|constructor|prototype) is prohibited)\.$/u;
   if (source.test(message) || message === "Generated skill contains invalid TypeScript syntax.") return message;

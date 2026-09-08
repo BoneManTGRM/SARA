@@ -1,6 +1,6 @@
 import { maintenanceJobs, maintenanceRequestDigest, validateMaintenanceRequest, type MaintenanceRequest, type MaintenanceJob } from "./website-maintenance.ts";
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
-import { boundedCandidateFailureFeedback } from "./cloudflare-free-generator.ts";
+import { boundedCandidateFailureFeedback, isCandidateMetadataFailureFeedback } from "./cloudflare-free-generator.ts";
 import { performance } from "node:perf_hooks";
 import { KernelVerificationPool } from "./kernel-verification-pool.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -2093,7 +2093,7 @@ export class SaraKernel {
       if (!parent || parent.status !== "failed" || parent.learningParentJobId || parent.workCard.expectedOwnerValue <= 0 ||
         state.jobs.some(job => job.learningParentJobId === jobId)) return;
       const feedback = boundedCandidateFailureFeedback(error);
-      if (!/^(?:Generated skill is not a pure isolated candidate:|Generated skill contains invalid TypeScript syntax\.|Generated skill failed TypeScript verification with |Behavioral verification mismatches:)/u.test(feedback)) return;
+      if (!isCandidateMetadataFailureFeedback(feedback) && !/^(?:Generated skill is not a pure isolated candidate:|Generated skill contains invalid TypeScript syntax\.|Generated skill failed TypeScript verification with |Behavioral verification mismatches:)/u.test(feedback)) return;
       const failure = state.memories.find(memory => memory.id === `learning-failure-${jobId}`);
       if (!failure?.dependencies.some(value => value.startsWith("candidate:"))) return;
       const now = new Date().toISOString();
