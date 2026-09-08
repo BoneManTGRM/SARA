@@ -60,6 +60,36 @@ test("known compiler and behavioral evidence is preserved while arbitrary errors
   }
 });
 
+test("real behavioral feedback selects the runtime error rather than Node's source excerpt", async () => {
+  const stateDirectory = await mkdtemp(join(tmpdir(), "sara-runtime-feedback-"));
+  try {
+    const kernel = await SaraKernel.boot({ stateDirectory });
+    const job = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
+      objective: "Return the provided value.", expectedOwnerValue: 0,
+      requiredCapabilities: ["identity"], acceptanceCriteria: ["Return input unchanged."], maximumBudgetUsd: 0,
+    });
+    await assert.rejects(() => kernel.runSelfBuildCycle(SARA_PRINCIPAL, job.id, {
+      id: "runtime-feedback-fixture", external: false, maximumCostUsd: 0,
+      async generate() { return {
+        schemaVersion: 1 as const, skillName: "Identity fixture", summary: "Deliberately inconsistent producer test.",
+        source: "export function runSkill(input: unknown): unknown { return input; }",
+        tests: [{ name: "inconsistent expectation", input: 4, expected: 7 }], limitations: ["Test fixture."],
+      }; },
+    }), (error: unknown) => {
+      assert.equal(boundedCandidateFailureFeedback(error),
+        'Behavioral verification mismatches: [{"name":"inconsistent expectation","expected":"7","actual":"4"}]');
+      return true;
+    });
+    assert.equal((await kernel.getStatus()).mutations.length, 0);
+  } finally { await rm(stateDirectory, {recursive:true,force:true}); }
+});
+
+test("a verifier source excerpt alone is not observed behavioral evidence", () => {
+  const excerpt = 'if (failures.length) throw new Error(`Behavioral verification mismatches: ${JSON.stringify(failures)}`);';
+  assert.equal(boundedCandidateFailureFeedback(new Error(excerpt)),
+    "Candidate verification failed; no earlier gate is asserted to have passed.");
+});
+
 test("missing model content retains only allowlisted finish and bounded token metadata", async () => {
   for (const [payload, expected] of [
     [{choices:[{finish_reason:"length",message:{content:null,reasoning_content:"PRIVATE"}}],usage:{prompt_tokens:123,completion_tokens:8192}}, /finish_reason=length; prompt_tokens=123; completion_tokens=8192/],
