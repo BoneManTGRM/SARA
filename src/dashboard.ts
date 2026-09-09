@@ -793,6 +793,9 @@ export const DASHBOARD_HTML = `<!doctype html>
                   <label>Maximum spend (USD)
                     <input id="directive-budget" type="number" min="0" step="0.01" value="0" required>
                   </label>
+                  <label class="wide">Required capabilities — comma separated
+                    <input id="directive-capabilities" type="text" maxlength="500" placeholder="Example: catalog-sku-duplicates">
+                  </label>
                   <label class="wide">Acceptance criteria — one per line
                     <textarea id="directive-criteria" maxlength="2000" required placeholder="Produces a reviewable artifact.&#10;Passes deterministic verification.&#10;Does not alter production without approval."></textarea>
                   </label>
@@ -802,6 +805,22 @@ export const DASHBOARD_HTML = `<!doctype html>
                   </div>
                 </fieldset>
               </form>
+            </div>
+          </article>
+
+          <article class="card span-12 directive-card">
+            <div class="card-pad">
+              <div class="card-label">Bounded skill learning</div>
+              <p class="card-copy">Review a private learning contract and its request allowance before approving it. SARA chooses from authorized capability gaps. Qualified candidates remain SHADOW until exact operational approval.</p>
+              <fieldset id="learning-fields" disabled>
+                <label for="learning-contract">Private campaign JSON</label>
+                <textarea id="learning-contract" maxlength="64000" rows="5" placeholder="Paste the prepared private campaign JSON."></textarea>
+                <p id="learning-status" role="status">Owner authentication required.</p>
+                <p id="learning-review" role="status"></p>
+                <button class="button" id="learning-preview" type="button">Review campaign</button>
+                <button class="button primary" id="learning-approve" type="button" disabled>Approve exact campaign</button>
+                <button class="button" id="learning-mandate" type="button" disabled>Activate 30-day internal learning mandate</button>
+              </fieldset>
             </div>
           </article>
 
@@ -856,6 +875,8 @@ export const DASHBOARD_HTML = `<!doctype html>
     const dialogError = document.querySelector('#dialog-error');
     const directiveForm = document.querySelector('#directive-form');
     const directiveFields = document.querySelector('#directive-fields');
+    let reviewedLearning = null;
+    let ownerMandate = null;
     const auth = () => ({ Authorization: 'Bearer ' + (sessionStorage.getItem('sara-owner-token') || '') });
     const money = (value) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
 
@@ -869,6 +890,14 @@ export const DASHBOARD_HTML = `<!doctype html>
       connectButton.textContent = connected ? 'Disconnect' : 'Owner access';
       document.querySelector('#connection-state').textContent = connected ? 'Owner link verified' : 'Owner state locked';
       directiveFields.disabled = !connected;
+      document.querySelector('#learning-fields').disabled = !connected;
+      if (!connected) {
+        reviewedLearning = null; ownerMandate = null;
+        document.querySelector('#learning-contract').value = '';
+        document.querySelector('#learning-review').textContent = '';
+        document.querySelector('#learning-status').textContent = 'Owner authentication required.';
+        document.querySelector('#learning-approve').disabled = true;
+      }
     }
 
     function renderMutations(mutations) {
@@ -1008,7 +1037,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       title.textContent = active ? 'Standing mandate active' : 'Standing mandate inactive';
       const detail = document.createElement('small');
       detail.textContent = active
-        ? 'Expires ' + mandate.expiresAt + ' · max 10 actions/day · concurrency 1 · $0/action · exceptions ' + (state.autonomyExceptions || []).length
+        ? 'Expires ' + mandate.expiresAt + ' · max ' + mandate.maximumDailyActions + ' actions/day · concurrency ' + mandate.maximumConcurrentActions + ' · ' + money(mandate.maximumCostPerActionUsd) + '/action · exceptions ' + (state.autonomyExceptions || []).length
         : 'No routine external action may proceed automatically. Protected actions always remain owner-only.';
       const actions = document.createElement('div');
       actions.className = 'commerce-actions';
@@ -1038,6 +1067,62 @@ export const DASHBOARD_HTML = `<!doctype html>
       container.append(boundary);
     }
 
+    async function refreshLearning() {
+      const response = await fetch('/api/learning/campaign', {headers: auth()});
+      if (!response.ok) throw new Error('Learning status could not be loaded.');
+      const status = await response.json();
+      document.querySelector('#learning-status').textContent = (status.configured
+        ? status.campaign.id + ': ' + status.campaign.reserved + '/' + status.campaign.maximumRequests + ' requests reserved; ' + status.campaign.remaining + ' remain.'
+        : 'No campaign configured.') + ' Worker: ' + (status.runtime.enabled ? 'enabled' : 'disabled')
+        + '. Free provider: ' + (status.runtime.providerConfigured ? 'configured' : 'missing configuration') + '.';
+      const active = ownerMandate && !ownerMandate.revokedAt && Date.parse(ownerMandate.expiresAt) > Date.now();
+      const compatible = active && ownerMandate.allowedActions.includes('business_candidate_development')
+        && ownerMandate.allowedChannels.includes('internal') && ownerMandate.allowedServiceIds.includes('skill-learning');
+      const button = document.querySelector('#learning-mandate');
+      button.disabled = !status.configured || Boolean(active);
+      button.textContent = compatible ? 'Current mandate covers internal learning'
+        : active ? 'Reconcile the active mandate before learning activation' : 'Activate 30-day internal learning mandate';
+    }
+    document.querySelector('#learning-contract').addEventListener('input', () => {
+      reviewedLearning = null;
+      document.querySelector('#learning-approve').disabled = true;
+      document.querySelector('#learning-review').textContent = '';
+    });
+    document.querySelector('#learning-preview').addEventListener('click', async () => {
+      reviewedLearning = null;
+      document.querySelector('#learning-approve').disabled = true;
+      try {
+        const parsed = JSON.parse(document.querySelector('#learning-contract').value);
+        const campaign = parsed.campaign || parsed;
+        const response = await fetch('/api/learning/campaign', {method:'POST', headers:Object.assign({},auth(),{'content-type':'application/json'}), body:JSON.stringify({campaign})});
+        const result = await response.json();
+        if (response.status !== 409 || !result.campaignDigest) throw new Error(result.error || 'Campaign review failed.');
+        reviewedLearning = {campaign, approvedDigest:result.campaignDigest};
+        document.querySelector('#learning-review').textContent = 'Approve ' + campaign.id + ', maximum ' + campaign.maximumRequests
+          + ' free requests, two per UTC day and two per root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')
+          + '. Exact digest: ' + result.campaignDigest + '. No operational promotion is granted.';
+        document.querySelector('#learning-approve').disabled = false;
+      } catch(error) { setMessage(error.message,true); }
+    });
+    document.querySelector('#learning-approve').addEventListener('click', async () => {
+      if (!reviewedLearning) return;
+      const approved = reviewedLearning;
+      reviewedLearning = null;
+      document.querySelector('#learning-approve').disabled = true;
+      try {
+        await ownerPost('/api/learning/campaign',approved);
+        document.querySelector('#learning-contract').value = '';
+        document.querySelector('#learning-review').textContent = 'Exact campaign retained. Request accounting cannot be reset by submitting it again.';
+        await refreshLearning();
+      } catch(error) { setMessage(error.message,true); }
+    });
+    document.querySelector('#learning-mandate').addEventListener('click', async () => {
+      try {
+        await ownerPost('/api/autonomy/learning-mandate',ownerMandate ? {expectedCurrentMandateDigest:ownerMandate.digest} : {});
+        await loadPrivateState();
+      } catch(error) { setMessage(error.message,true); }
+    });
+
     async function loadPrivateState() {
       const response = await fetch('/api/status', { headers: auth() });
       if (!response.ok) {
@@ -1065,6 +1150,8 @@ export const DASHBOARD_HTML = `<!doctype html>
       renderMutations(state.mutations);
       renderCommerce(state);
       renderAutonomy(state);
+      ownerMandate = state.standingMandate;
+      await refreshLearning();
       const stop = document.querySelector('#stop');
       stop.disabled = false;
       stop.textContent = state.emergencyStopped ? 'Release stop' : 'Engage stop';
@@ -1134,7 +1221,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       event.preventDefault();
       const objective = document.querySelector('#directive-objective').value.trim();
       const acceptanceCriteria = document.querySelector('#directive-criteria').value
-        .split(/\n+/)
+        .split(/\\n+/)
         .map((line) => line.trim())
         .filter(Boolean);
       if (!objective || !acceptanceCriteria.length) {
@@ -1151,7 +1238,7 @@ export const DASHBOARD_HTML = `<!doctype html>
           body: JSON.stringify({
             objective,
             expectedOwnerValue: Number(document.querySelector('#directive-value').value),
-            requiredCapabilities: [],
+            requiredCapabilities: document.querySelector('#directive-capabilities').value.split(',').map((id) => id.trim()).filter(Boolean),
             acceptanceCriteria,
             maximumBudgetUsd: Number(document.querySelector('#directive-budget').value)
           })
