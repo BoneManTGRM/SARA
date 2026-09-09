@@ -89,7 +89,7 @@ describe("SARA owner dashboard HTTP boundary", () => {
     const html = await home.text();
     assert.match(html, /SARA/);
     assert.match(html, /SARA compound reserve/);
-    assert.match(html, /Intelligence[\s\S]*with <em>roots\.<\/em>/);
+    assert.match(html, /Intelligence[\s\S]*<em>with roots\.<\/em>/);
     assert.match(html, /\$0 bootstrap target/);
     assert.match(html, /data-owner="locked"/);
     assert.match(html, /Owner state locked/);
@@ -97,7 +97,9 @@ describe("SARA owner dashboard HTTP boundary", () => {
     assert.match(html, /id="directive-fields" disabled/);
     assert.match(html, /prefers-reduced-motion: reduce/);
     assert.match(html, /@media \(max-width: 720px\)/);
-    assert.match(html, /No deployment, live banking, or general autonomous coder implied/);
+    assert.match(html, /scan-rail/);
+    assert.match(html, /SARA \/\/ OWNER NODE/);
+    assert.match(html, /Security boundaries and owner gates unchanged/);
     assert.doesNotMatch(html, /(?:src|href)="https?:\/\//i);
     assert.doesNotMatch(html, new RegExp(token));
     assert.doesNotMatch(html, new RegExp(mutationId));
