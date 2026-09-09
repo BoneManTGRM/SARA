@@ -11,7 +11,7 @@ export class AutonomousLearningWorker {
   async tick() {
     if (this.running) return {status:"blocked" as const};
     this.running = true;
-    try { return await this.kernel.runNextAutonomousLearningCycle(this.generator); }
+    try { return await this.kernel.runLearningWorkerTick(this.generator); }
     finally { this.running = false; }
   }
   start() {

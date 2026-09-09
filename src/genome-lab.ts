@@ -201,6 +201,17 @@ function assertPureSkillSource(source: string): void {
       violation = `identifier ${node.text} is prohibited`;
       return;
     }
+    if (ts.isBindingElement(node)) {
+      const key = node.propertyName ?? node.name;
+      if ((ts.isIdentifier(key) || ts.isStringLiteral(key)) && BLOCKED_PROPERTIES.has(key.text)) {
+        violation = `property ${key.text} is prohibited`;
+        return;
+      }
+    }
+    if (ts.isComputedPropertyName(node)) {
+      violation = "computed property access is prohibited";
+      return;
+    }
     if (ts.isPropertyAccessExpression(node) && BLOCKED_PROPERTIES.has(node.name.text)) {
       violation = `property ${node.name.text} is prohibited`;
       return;
@@ -587,7 +598,7 @@ export async function buildVerifiedSkillCandidate(
     ]);
     const { stdout, stderr } = await execFileAsync(
       process.execPath,
-      ["--permission", `--allow-fs-read=${runtimeDirectory}`, "--max-old-space-size=64", runtimeVerificationPath],
+      ["--permission", "--disallow-code-generation-from-strings", `--allow-fs-read=${runtimeDirectory}`, "--max-old-space-size=64", runtimeVerificationPath],
       {
         cwd: runtimeDirectory,
         env: { NODE_NO_WARNINGS: "1" },

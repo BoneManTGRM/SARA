@@ -56,7 +56,7 @@ it("passes the new identity through the unchanged CLI and preserves equal ceilin
   assert.equal(spec.environment.SARA_CODING_BENCHMARK_ADDITIONAL_GRANT_SHA256, POST_FIX_CODING_BENCHMARK_GRANT.activationSha256);
 });
 
-it("retains PR111 pins and permits only the recorded compiler-diagnostic delta in its verifier", async () => {
+it("retains PR111 pins and permits only recorded diagnostics and pure-skill isolation deltas", async () => {
   const pinned = {
   "src/genome-lab.ts": "ab1427a29742c1f657df3544e36197fa6dfa7a0103c472faa4618e18fe0692da",
   "src/genome-lab-verifier.ts": "6c3618bd6ffac193265dd7f687388543a41d059b625ad1cdc800dc5f115721c9",
@@ -72,10 +72,30 @@ it("retains PR111 pins and permits only the recorded compiler-diagnostic delta i
   for (const [path, expected] of Object.entries(pinned)) {
     let source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
     if (path === "src/genome-lab.ts") {
-      // Keep the historical digest. Reversing only the reviewed error-metadata
-      // changes must recover its exact bytes; compiler/policy/test edits still fail.
+      // Keep the historical digest. Reverse only these exact diagnostics and
+      // pure-skill isolation repairs. All other compiler/policy/test edits fail.
       // This does not authorize the changed verifier for a historical live run.
       assert.notEqual(sha256(source), expected);
+      const pureIsolation = [
+        '    if (ts.isBindingElement(node)) {',
+        '      const key = node.propertyName ?? node.name;',
+        '      if ((ts.isIdentifier(key) || ts.isStringLiteral(key)) && BLOCKED_PROPERTIES.has(key.text)) {',
+        '        violation = `property ${key.text} is prohibited`;',
+        '        return;',
+        '      }',
+        '    }',
+        '    if (ts.isComputedPropertyName(node)) {',
+        '      violation = "computed property access is prohibited";',
+        '      return;',
+        '    }',
+        '',
+      ].join("\n");
+      assert.ok(source.includes(pureIsolation));
+      assert.ok(source.includes('["--permission", "--disallow-code-generation-from-strings", `--allow-fs-read=${runtimeDirectory}`'));
+      source = source.replace(pureIsolation, "").replace(
+        '["--permission", "--disallow-code-generation-from-strings", `--allow-fs-read=${runtimeDirectory}`',
+        '["--permission", `--allow-fs-read=${runtimeDirectory}`',
+      );
       source = source.replace(
         'constructor(diagnostics: readonly ts.Diagnostic[], projectDirectory: string,\n    readonly candidateKind: "program" | "skill" = "program") {\n    super(`Generated ${candidateKind} failed TypeScript verification with ${diagnostics.length} error(s).`);',
         'constructor(diagnostics: readonly ts.Diagnostic[], projectDirectory: string) {\n    super(`Generated program failed TypeScript verification with ${diagnostics.length} error(s).`);',

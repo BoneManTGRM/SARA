@@ -1,3 +1,5 @@
+import { compileLearningCampaign, currentLearningCampaign, campaignAccounting, learningContractDigest, selectLearningGap, type LearningCampaignInput } from "./learning-campaign.ts";
+import { qualifyLearningArtifact, executeLearningArtifact, qualificationEnvironmentDigest } from "./learning-qualification.ts";
 import { maintenanceJobs, maintenanceRequestDigest, validateMaintenanceRequest, type MaintenanceRequest, type MaintenanceJob } from "./website-maintenance.ts";
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
 import { boundedCandidateFailureFeedback, isCandidateMetadataFailureFeedback } from "./cloudflare-free-generator.ts";
@@ -632,6 +634,10 @@ export class SaraKernel {
         const capability = event.data as Capability;
         capabilityMap.set(capability.id, capability);
       }
+      if (event.type === "learning_gap_selected") {
+        const job = (event.data as {job:Job}).job;
+        jobMap.set(job.id, { ...job, workCard: { ...job.workCard } });
+      }
       if (event.type === "job_created") {
         const job = event.data as Job;
         jobMap.set(job.id, { ...job, workCard: { ...job.workCard } });
@@ -682,6 +688,23 @@ export class SaraKernel {
       }
     }
 
+    const learningCampaign=currentLearningCampaign(events);
+    if (learningCampaign) {
+      const environmentDigest=await qualificationEnvironmentDigest();
+      for (const contract of learningCampaign.contracts) {
+        const qualified=events.filter(e=>e.type==="learning_qualification_passed" &&
+          (e.data as {capabilityId:string}).capabilityId===contract.capabilityId).at(-1)?.data as
+          {mutationId:string;candidateDigest:string;contractDigest:string;receipt:{environmentDigest:string;evidenceDigest:string}} | undefined;
+        const mutation=qualified ? mutationMap.get(qualified.mutationId) : undefined;
+        const available=Boolean(qualified && mutation && ["CANARY","LIMITED_PRODUCTION","BROADER_PRODUCTION"].includes(mutation.stage) &&
+          qualified.candidateDigest===mutation.candidateDigest && qualified.contractDigest===learningContractDigest(contract) &&
+          qualified.receipt.environmentDigest===environmentDigest && !events.some(e=>e.type==="learning_skill_reuse_failed" &&
+            (e.data as {mutationId:string}).mutationId===mutation.id));
+        if (qualified) capabilityMap.set(contract.capabilityId,{id:contract.capabilityId,name:contract.objective,
+          status:available ? "available" : "limited", evidence:[qualified.receipt.evidenceDigest],
+          limitations:["Pure bounded input/output only. Operational use requires current independent qualification and exact owner promotion. No revenue demonstrated."]});
+      }
+    }
     return {
       emergencyStopped,
       memories,
@@ -1819,6 +1842,10 @@ export class SaraKernel {
       const job = state.jobs.find((candidate) => candidate.id === jobId);
       if (!job) throw new Error(`Job ${jobId} does not exist.`);
       if (job.status !== "authorized") throw new Error(`Job ${jobId} is not authorized for a new self-build cycle.`);
+      if (job.learningCampaignId && !state.events.some(e => e.type === "autonomous_learning_reserved" &&
+          (e.data as {jobId:string;campaignId:string}).jobId === job.id && (e.data as {campaignId:string}).campaignId === job.learningCampaignId)) {
+        throw new Error("LEARNING_RESERVATION_REQUIRED");
+      }
       if (generator.maximumCostUsd > job.workCard.maximumBudgetUsd) {
         throw new RangeError(
           `Candidate generator cost exceeds the job's $${job.workCard.maximumBudgetUsd.toFixed(2)} maximum budget.`,
@@ -1839,6 +1866,9 @@ export class SaraKernel {
         contextDigest: recalled.contextDigest,
         memories: [...recalled.anchors, ...recalled.relevant].slice(0, 12),
       };
+      const previous = job.learningParentJobId ? state.events.find(e => e.type === "learning_candidate_observed" &&
+        (e.data as {jobId:string}).jobId === job.learningParentJobId)?.data as {proposal:import("./types.ts").SkillCandidateProposal;sourceDigest:string} | undefined : undefined;
+      const previousFailure = state.memories.find(m => m.id === `learning-failure-${job.learningParentJobId}`);
       await this.#store.append("job_status_changed", principal, {
         jobId,
         from: job.status,
@@ -1848,7 +1878,11 @@ export class SaraKernel {
         memoryContextDigest: memoryContext.contextDigest,
         memoryIds: memoryContext.memories.map((memory) => memory.id),
       });
-      return { ...compiled, memoryContext, admissionStopEpoch: state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null };
+      return { ...compiled, memoryContext,
+        previousAttempt: previous && previousFailure ? {...previous, feedback:previousFailure.statement.slice(0,1500)} : undefined,
+        learning: job.workCard.requiredCapabilities.includes("autonomous-learning"),
+        admissionMandateEpoch: state.events.filter(e => e.type === "standing_mandate_snapshot").at(-1)?.hash ?? null,
+        admissionStopEpoch: state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null };
     });
 
     let previewTask: Promise<Awaited<ReturnType<typeof buildVerifiedSkillCandidate>>> | undefined;
@@ -1862,6 +1896,7 @@ export class SaraKernel {
       if (state.jobs.find(j => j.id === jobId)?.status !== "running") throw new Error("SELF_BUILD_JOB_NOT_RUNNING");
       authorityEpoch = state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null;
       if (authorityEpoch !== handoff.admissionStopEpoch) throw new Error("SELF_BUILD_AUTHORITY_CHANGED_DURING_GENERATION");
+      if (handoff.learning && (state.events.filter(e=>e.type==="standing_mandate_snapshot").at(-1)?.hash ?? null) !== handoff.admissionMandateEpoch) throw new Error("LEARNING_AUTHORITY_CHANGED");
     });
     const discardPreview = async () => {
       if (!previewTask) return;
@@ -1878,6 +1913,7 @@ export class SaraKernel {
         missingCapabilities: [...handoff.missingCapabilities],
         constitutionDigest: handoff.constitutionDigest,
         memoryContext: structuredClone(handoff.memoryContext),
+        ...(handoff.previousAttempt ? {previousAttempt:structuredClone(handoff.previousAttempt)} : {}),
       };
       // Detach both preview and final result before any authority or disk await.
       const proposal = structuredClone(await (generator.generateWithPreview
@@ -1892,6 +1928,11 @@ export class SaraKernel {
         : generator.generate(generationInput)));
       generationOpen = false;
       proposedDigest = sha256(canonicalJson(proposal));
+      if (handoff.learning && proposal.candidateKind !== "typescript_program" && Buffer.byteLength(canonicalJson(proposal)) <= 64 * 1024) {
+        await this.serializeMutation(() => this.#store.append("learning_candidate_observed", principal, {
+          jobId, proposal, proposedDigest, sourceDigest:sha256(proposal.source),
+          unchangedSource:handoff.previousAttempt ? sha256(proposal.source) === handoff.previousAttempt.sourceDigest : false }));
+      }
       generationMilliseconds = performance.now() - generationStarted;
       const matchedPreview = Boolean(previewTask && previewDigest === sha256(canonicalJson(proposal)));
       const pooled = matchedPreview || Boolean(this.#verificationPool && proposal.candidateKind === "typescript_program");
@@ -1927,6 +1968,7 @@ export class SaraKernel {
         if ((state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null) !== authorityEpoch) {
           throw new Error("SELF_BUILD_AUTHORITY_CHANGED_DURING_VERIFICATION");
         }
+        if (handoff.learning && (state.events.filter(e=>e.type==="standing_mandate_snapshot").at(-1)?.hash ?? null) !== handoff.admissionMandateEpoch) throw new Error("LEARNING_AUTHORITY_CHANGED");
         const artifact = prepared;
         await verifyGenomeLabArtifact(this.#store.stateDirectory, artifact.artifactRelativePath, artifact.candidateDigest);
         const programCandidate = proposal.candidateKind === "typescript_program";
@@ -2030,10 +2072,240 @@ export class SaraKernel {
             dependencies: proposedDigest ? [`candidate:${proposedDigest}`] : [],
           };
           await this.#store.append("memory_recorded", principal, memory);
+          if (runningJob.learningCampaignId) {
+            const feedbackDigest=sha256(boundedCandidateFailureFeedback(error));
+            const prior=state.events.find(e=>e.type==="learning_attempt_failed" && (e.data as {jobId:string}).jobId===runningJob.learningParentJobId);
+            await this.#store.append("learning_attempt_failed",principal,{jobId,feedbackDigest,
+              repeatedFeedback:Boolean(prior && (prior.data as {feedbackDigest:string}).feedbackDigest===feedbackDigest),
+              candidateDigest:proposedDigest ?? null});
+          }
         }
       });
       throw error;
     }
+  }
+
+  /** Exact owner approval freezes the hidden oracle and campaign budget once. */
+  configureLearningCampaign(principal: Principal, input: LearningCampaignInput, approvedDigest: string) {
+    return this.serializeMutation(async () => {
+      const campaign = compileLearningCampaign(input);
+      if (!this.isVerifiedOwner(principal) || approvedDigest !== campaign.digest) throw new Error("EXACT_LEARNING_CAMPAIGN_APPROVAL_REQUIRED");
+      await this.authorize(principal, { action: "required_owner_approval_change", targetId: `learning-campaign:${campaign.digest}`, external: false,
+        approval: { approvalId: randomUUID(), action: "required_owner_approval_change", targetId: `learning-campaign:${campaign.digest}`,
+          ownerId: principal.id, approvedAt: new Date().toISOString() } });
+      const existing = currentLearningCampaign((await this.state()).events);
+      if (existing && existing.digest !== campaign.digest) throw new Error("Learning campaign is immutable; counters and frozen contracts cannot be replaced.");
+      if (!existing) await this.#store.append("learning_campaign_configured", principal, campaign);
+      return { id: campaign.id, digest: campaign.digest, maximumRequests: campaign.maximumRequests };
+    });
+  }
+
+  async learningCampaignStatus() {
+    const state = await this.state();
+    const campaign = currentLearningCampaign(state.events);
+    return { configured: Boolean(campaign), campaign: campaign ? { id: campaign.id, digest: campaign.digest,
+      maximumRequests: campaign.maximumRequests, ...campaignAccounting(campaign, state.events),
+      contracts: campaign.contracts.map(c => ({ capabilityId: c.capabilityId, contractDigest: learningContractDigest(c) })) } : null,
+      selections: state.events.filter(e => e.type === "learning_gap_selected").map(e => e.data),
+      qualifications: state.events.filter(e => e.type === "learning_qualification_passed" || e.type === "learning_qualification_failed").map(e => ({ type: e.type, ...e.data as object })),
+      reuses: state.events.filter(e => e.type === "learning_skill_reused").map(e => e.data),
+      emergencyStopped: state.emergencyStopped };
+  }
+
+  private async learningAuthority(targetId: string) {
+    const state = await this.state();
+    const request: RoutineActionRequest = { id: `learning-control:${targetId}`, kind: "business_candidate_development", targetId,
+      channel: "internal", serviceId: "skill-learning", estimatedCostUsd: 0, external: false,
+      requestedAt: new Date().toISOString(), platform: "owner_site" };
+    if (evaluateRoutineAction({ mandate: state.standingMandate, request, emergencyStopped: state.emergencyStopped }).outcome !== "automatic") {
+      throw new Error("ACTIVE_LEARNING_MANDATE_REQUIRED");
+    }
+    return { state, mandateDigest: state.standingMandate!.digest,
+      mandateEpoch: state.events.filter(e => e.type === "standing_mandate_snapshot").at(-1)?.hash ?? null,
+      stopEpoch: state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null };
+  }
+
+  /** Chooses a frozen learning contract for an actual unmet authorized task. */
+  selectNextLearningObjective() {
+    return this.serializeMutation(async () => {
+      const { state } = await this.learningAuthority("select");
+      const campaign = currentLearningCampaign(state.events);
+      if (!campaign || campaignAccounting(campaign, state.events).remaining === 0) return null;
+      // Resolve existing selected work before choosing another curriculum entry.
+      if (state.jobs.some(j => j.learningCampaignId === campaign.id && ["authorized", "running"].includes(j.status))) return null;
+      const choice = selectLearningGap(campaign, state.jobs, state.events);
+      if (!choice) return null;
+      await this.authorize(SARA_PRINCIPAL, { action: "sandbox_development", targetId: choice.sourceJob.id, external: false });
+      const contractDigest = learningContractDigest(choice.contract);
+      const job: Job = { id: randomUUID(), kind: "self_development", status: "authorized",
+        learningCampaignId: campaign.id, learningCapabilityId: choice.contract.capabilityId,
+        learningContractDigest: contractDigest, learningSourceJobId: choice.sourceJob.id,
+        workCard: compileWorkCard({ objective: choice.contract.objective, expectedOwnerValue: choice.sourceJob.workCard.expectedOwnerValue,
+          requiredCapabilities: ["autonomous-learning", choice.contract.capabilityId], acceptanceCriteria: choice.contract.publicCriteria,
+          maximumBudgetUsd: 0, availableCapabilities: state.capabilities, prohibitedActions: [...this.#constitution.protectedActions] }) };
+      // One atomic event carries the job and selection, eliminating a crash gap.
+      await this.#store.append("learning_gap_selected", SARA_PRINCIPAL, { campaignId: campaign.id, capabilityId: choice.contract.capabilityId,
+        contractDigest, sourceJobId: choice.sourceJob.id, score: choice.score,
+        reason: "Unmet authorized capability; ranked by declared owner value divided by estimated effort. Value is not measured profit.", job });
+      return job;
+    });
+  }
+
+  async qualifyLearningJob(jobId: string) {
+    const independentFailure = "Independent acceptance failed; hidden answers withheld.";
+    const prepared = await this.serializeMutation(async () => {
+      const auth = await this.learningAuthority(jobId);
+      const { state } = auth;
+      const job = state.jobs.find(j => j.id === jobId);
+      const campaign = currentLearningCampaign(state.events);
+      const contract = campaign?.contracts.find(c => c.capabilityId === job?.learningCapabilityId);
+      const mutation = state.mutations.find(m => m.jobId === jobId && ["SHADOW", "CANARY", "LIMITED_PRODUCTION", "BROADER_PRODUCTION"].includes(m.stage));
+      if (!job || job.status !== "verified" || !contract || job.learningCampaignId !== campaign?.id ||
+          learningContractDigest(contract) !== job.learningContractDigest || !mutation?.artifactRelativePath) throw new Error("ELIGIBLE_LEARNING_ARTIFACT_REQUIRED");
+      const environmentDigest = await qualificationEnvironmentDigest();
+      const contractDigest = learningContractDigest(contract);
+      const previous = state.events.filter(e => {
+        if (!["learning_qualification_passed", "learning_qualification_failed"].includes(e.type)) return false;
+        const data = e.data as { mutationId: string; candidateDigest: string; contractDigest: string; environmentDigest?: string; receipt?: { environmentDigest: string } };
+        return data.mutationId === mutation.id && data.candidateDigest === mutation.candidateDigest && data.contractDigest === contractDigest &&
+          (data.environmentDigest ?? data.receipt?.environmentDigest) === environmentDigest;
+      }).at(-1);
+      return { ...auth, job, contract, contractDigest, mutation, environmentDigest, previous };
+    });
+    if (prepared.previous) {
+      if (prepared.previous.type === "learning_qualification_failed") {
+        // Recover a crash between the durable rejection and its bounded follow-up.
+        await this.queueLearningFollowup(jobId, prepared.mandateDigest, new Error(independentFailure));
+      }
+      return { status: prepared.previous.type === "learning_qualification_passed" ? "qualified" : "rejected" };
+    }
+    let receipt: Awaited<ReturnType<typeof qualifyLearningArtifact>> | undefined;
+    try {
+      receipt = await qualifyLearningArtifact({ artifactDirectory: join(this.#store.stateDirectory, prepared.mutation.artifactRelativePath!),
+        candidateDigest: prepared.mutation.candidateDigest, contractDigest: prepared.contractDigest, tests: prepared.contract.acceptanceTests });
+    } catch { /* Keep hidden acceptance answers and arbitrary child errors private. */ }
+    const result = await this.serializeMutation(async () => {
+      const current = await this.learningAuthority(jobId);
+      if (current.mandateDigest !== prepared.mandateDigest || current.mandateEpoch !== prepared.mandateEpoch || current.stopEpoch !== prepared.stopEpoch) throw new Error("LEARNING_AUTHORITY_CHANGED");
+      if (await qualificationEnvironmentDigest() !== prepared.environmentDigest || (receipt && receipt.environmentDigest !== prepared.environmentDigest)) {
+        throw new Error("LEARNING_ENVIRONMENT_CHANGED");
+      }
+      const previous = current.state.events.filter(e => {
+        if (!["learning_qualification_passed", "learning_qualification_failed"].includes(e.type)) return false;
+        const data = e.data as { mutationId: string; candidateDigest: string; contractDigest: string; environmentDigest?: string; receipt?: { environmentDigest: string } };
+        return data.mutationId === prepared.mutation.id && data.candidateDigest === prepared.mutation.candidateDigest &&
+          data.contractDigest === prepared.contractDigest && (data.environmentDigest ?? data.receipt?.environmentDigest) === prepared.environmentDigest;
+      }).at(-1);
+      if (previous) return { status: previous.type === "learning_qualification_passed" ? "qualified" : "rejected" };
+      if (!receipt && !current.state.memories.some(memory => memory.id === `learning-failure-${jobId}`)) {
+        await this.authorize(SARA_PRINCIPAL, { action: "record_memory", targetId: "global", external: false });
+        const now = new Date().toISOString();
+        const memory: MemoryRecord = {
+          id: `learning-failure-${jobId}`, category: "failure", scope: "global",
+          source: `sara://learning-failure/${sha256(prepared.job.workCard.objective)}/${jobId}`,
+          statement: `${prepared.job.workCard.objective.slice(0, 300)}: ${independentFailure} Recheck the frozen public requirements; producer test success did not establish independent acceptance.`,
+          confidence: 1, verification: "measured", observedAt: now, lastValidatedAt: now,
+          tags: ["learning-failure", "independent-acceptance"], status: "active",
+          dependencies: [`candidate:${prepared.mutation.candidateDigest}`, `contract:${prepared.contractDigest}`, `environment:${prepared.environmentDigest}`],
+        };
+        // Memory precedes the rejection event, so a retained rejection always has its lesson.
+        await this.#store.append("memory_recorded", SARA_PRINCIPAL, memory);
+      }
+      await this.#store.append(receipt ? "learning_qualification_passed" : "learning_qualification_failed", SARA_PRINCIPAL,
+        { mutationId: prepared.mutation.id, jobId, capabilityId: prepared.contract.capabilityId,
+          candidateDigest: prepared.mutation.candidateDigest, contractDigest: prepared.contractDigest, environmentDigest: prepared.environmentDigest,
+          ...(receipt ? {receipt} : {reason: independentFailure}) });
+      return { status: receipt ? "qualified" : "rejected" };
+    });
+    if (result.status === "rejected") await this.queueLearningFollowup(jobId, prepared.mandateDigest, new Error(independentFailure));
+    return result;
+  }
+
+  /** Scheduler entrypoint: recovery/qualification precedes new generation. */
+  async runLearningWorkerTick(generator: CandidateGenerator) {
+    const state = await this.state();
+    const campaign = currentLearningCampaign(state.events);
+    if (!campaign) return this.runNextAutonomousLearningCycle(generator);
+    try { await this.learningAuthority("worker"); } catch { return {status:"blocked" as const}; }
+    const environmentDigest = await qualificationEnvironmentDigest();
+    const pending = state.jobs.find(job => {
+      if (job.learningCampaignId !== campaign.id || job.status !== "verified") return false;
+      const mutation = state.mutations.find(m => m.jobId === job.id && ["SHADOW", "CANARY", "LIMITED_PRODUCTION", "BROADER_PRODUCTION"].includes(m.stage));
+      const contract = campaign.contracts.find(c => c.capabilityId === job.learningCapabilityId);
+      if (!mutation || !contract) return false;
+      const previous = state.events.filter(event => {
+        if (!["learning_qualification_passed", "learning_qualification_failed"].includes(event.type)) return false;
+        const data = event.data as { mutationId: string; candidateDigest: string; contractDigest: string; environmentDigest?: string; receipt?: { environmentDigest: string } };
+        return data.mutationId === mutation.id && data.candidateDigest === mutation.candidateDigest &&
+          data.contractDigest === learningContractDigest(contract) && (data.environmentDigest ?? data.receipt?.environmentDigest) === environmentDigest;
+      }).at(-1);
+      return !previous || (previous.type === "learning_qualification_failed" && !job.learningParentJobId &&
+        job.workCard.expectedOwnerValue > 0 && !state.jobs.some(child => child.learningParentJobId === job.id));
+    });
+    if (pending) return this.qualifyLearningJob(pending.id);
+    await this.selectNextLearningObjective();
+    const result = await this.runNextAutonomousLearningCycle(generator);
+    if (result.status === "verified_shadow" && result.jobId) return this.qualifyLearningJob(result.jobId);
+    return result;
+  }
+
+  /** Route a task's single pure capability without asking its caller to select an implementation. */
+  async executeTaskWithLearnedSkill(principal: Principal, jobId: string, input: unknown) {
+    const state = await this.state();
+    await this.authorize(principal,{action:"sandbox_development",targetId:`task:${jobId}`,external:false});
+    const job = state.jobs.find(j=>j.id===jobId);
+    if (!job || job.learningCampaignId || job.status !== "authorized" || job.workCard.requiredCapabilities.length !== 1) {
+      throw new Error("AUTHORIZED_SINGLE_CAPABILITY_TASK_REQUIRED");
+    }
+    const capabilityId=job.workCard.requiredCapabilities[0]!;
+    const result=await this.invokeLearnedSkill(principal,capabilityId,input);
+    await this.serializeMutation(()=>this.#store.append("learning_task_routed",principal,{
+      jobId,capabilityId,mutationId:result.mutationId,candidateDigest:result.candidateDigest,
+      outputDigest:sha256(canonicalJson(result.output)),taskAcceptanceEstablished:false}));
+    return result;
+  }
+
+  /** Exact-capability routing only selects independently qualified, owner-promoted code. */
+  async invokeLearnedSkill(principal: Principal, capabilityId: string, input: unknown) {
+    input = structuredClone(input);
+    const prepared = await this.serializeMutation(async () => {
+      await this.authorize(principal, {action:"sandbox_development",targetId:`learning-invoke:${capabilityId}`,external:false});
+      const auth = await this.learningAuthority(capabilityId);
+      const environmentDigest = await qualificationEnvironmentDigest();
+      const campaign = currentLearningCampaign(auth.state.events);
+      const contract = campaign?.contracts.find(c => c.capabilityId === capabilityId);
+      const event = auth.state.events.filter(e => e.type === "learning_qualification_passed" &&
+        (e.data as {capabilityId:string}).capabilityId === capabilityId).at(-1);
+      const qualification = event?.data as {mutationId:string;candidateDigest:string;contractDigest:string;receipt:{environmentDigest:string}} | undefined;
+      const mutation = auth.state.mutations.find(m => m.id === qualification?.mutationId);
+      if (!contract || !qualification || qualification.contractDigest !== learningContractDigest(contract) ||
+          qualification.receipt.environmentDigest !== environmentDigest || !mutation?.artifactRelativePath ||
+          mutation.candidateDigest !== qualification.candidateDigest || !["CANARY","LIMITED_PRODUCTION","BROADER_PRODUCTION"].includes(mutation.stage)) {
+        throw new Error("QUALIFIED_APPROVED_CURRENT_SKILL_REQUIRED");
+      }
+      if (auth.state.events.some(e=>e.type==="learning_skill_reuse_failed" &&
+          (e.data as {mutationId:string}).mutationId===mutation.id)) throw new Error("LEARNED_SKILL_MAINTENANCE_REQUIRED");
+      return {...auth, mutation, environmentDigest};
+    });
+    let result: Awaited<ReturnType<typeof executeLearningArtifact>>;
+    try {
+      result = await executeLearningArtifact({ artifactDirectory: join(this.#store.stateDirectory,prepared.mutation.artifactRelativePath!),
+        candidateDigest: prepared.mutation.candidateDigest, input });
+    } catch (error) {
+      await this.serializeMutation(() => this.#store.append("learning_skill_reuse_failed", principal, {
+        capabilityId, mutationId: prepared.mutation.id, candidateDigest: prepared.mutation.candidateDigest,
+        environmentDigest: prepared.environmentDigest, reason: "Isolated execution failed; maintenance review required." }));
+      throw error;
+    }
+    return this.serializeMutation(async () => {
+      const current = await this.learningAuthority(capabilityId);
+      if (current.mandateDigest !== prepared.mandateDigest || current.mandateEpoch !== prepared.mandateEpoch || current.stopEpoch !== prepared.stopEpoch ||
+          result.environmentDigest !== prepared.environmentDigest) throw new Error("LEARNING_AUTHORITY_OR_ENVIRONMENT_CHANGED");
+      await this.#store.append("learning_skill_reused", principal, {capabilityId, mutationId:prepared.mutation.id,
+        candidateDigest:prepared.mutation.candidateDigest, environmentDigest:result.environmentDigest,
+        inputDigest:sha256(canonicalJson(input)), outputDigest:sha256(canonicalJson(result.output))});
+      return {output:result.output,mutationId:prepared.mutation.id,candidateDigest:prepared.mutation.candidateDigest};
+    });
   }
 
   /** Consume one delegated backlog entry; reservations survive failure/restart. */
@@ -2046,12 +2318,15 @@ export class SaraKernel {
       if (state.emergencyStopped) return null;
       const now = new Date().toISOString();
       const reservations = state.events.filter(event => event.type === "autonomous_learning_reserved");
+      const campaign = currentLearningCampaign(state.events);
+      if (campaign && campaignAccounting(campaign, state.events).remaining === 0) return null;
       const reservedIds = new Set(reservations.map(event => (event.data as {jobId:string}).jobId));
       // A lost process leaves its reservation consumed and stops dispatch until reconciled.
       if (state.jobs.some(job => job.kind === "self_development" &&
         (job.status === "running" || (reservedIds.has(job.id) && job.status === "authorized")))) return null;
       if (reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length >= 2) return null;
       const job = state.jobs.filter(job => job.kind === "self_development" && job.status === "authorized" &&
+        (campaign ? job.learningCampaignId === campaign.id : !job.learningCampaignId) &&
         job.workCard.maximumBudgetUsd === 0 && job.workCard.requiredCapabilities.includes("autonomous-learning") && !reservedIds.has(job.id))
         .sort((a,b) => b.workCard.expectedOwnerValue - a.workCard.expectedOwnerValue || a.id.localeCompare(b.id))[0];
       if (!job) return undefined;
@@ -2060,8 +2335,10 @@ export class SaraKernel {
       if (evaluateRoutineAction({mandate:state.standingMandate,request,emergencyStopped:state.emergencyStopped}).outcome !== "automatic") return null;
       const decision = await this.authorizeAutonomousRoutine(SARA_PRINCIPAL,state,request,false);
       if (decision.outcome !== "automatic") return null;
-      await this.#store.append("autonomous_learning_reserved",SARA_PRINCIPAL,{jobId:job.id,mandateDigest:state.standingMandate!.digest});
-      return {jobId:job.id,mandateDigest:state.standingMandate!.digest,request};
+      await this.#store.append("autonomous_learning_reserved",SARA_PRINCIPAL,{jobId:job.id,mandateDigest:state.standingMandate!.digest,...(campaign ? {campaignId:campaign.id,contractDigest:job.learningContractDigest} : {})});
+      return {jobId:job.id,mandateDigest:state.standingMandate!.digest,request,
+        mandateEpoch:state.events.filter(e=>e.type==="standing_mandate_snapshot").at(-1)?.hash ?? null,
+        stopEpoch:state.events.filter(e=>e.type==="emergency_stop_changed").at(-1)?.hash ?? null};
     });
     if (!reservation) return {status:reservation === undefined ? "idle" : "blocked"};
     try {
@@ -2071,7 +2348,9 @@ export class SaraKernel {
           const checkMandate = () => this.serializeMutation(async () => {
             const state = await this.state();
             const decision = evaluateRoutineAction({mandate:state.standingMandate,request:{...reservation.request,requestedAt:new Date().toISOString()},emergencyStopped:state.emergencyStopped});
-            if (decision.outcome !== "automatic" || state.standingMandate?.digest !== reservation.mandateDigest) throw new Error("Learning mandate changed before dispatch.");
+            if (decision.outcome !== "automatic" || state.standingMandate?.digest !== reservation.mandateDigest ||
+                (state.events.filter(e=>e.type==="standing_mandate_snapshot").at(-1)?.hash ?? null) !== reservation.mandateEpoch ||
+                (state.events.filter(e=>e.type==="emergency_stop_changed").at(-1)?.hash ?? null) !== reservation.stopEpoch) throw new Error("Learning mandate changed before dispatch.");
           });
           await checkMandate();
           const proposal = await generator.generate(input);
@@ -2090,10 +2369,11 @@ export class SaraKernel {
     return this.serializeMutation(async () => {
       const state = await this.state();
       const parent = state.jobs.find(job => job.id === jobId);
-      if (!parent || parent.status !== "failed" || parent.learningParentJobId || parent.workCard.expectedOwnerValue <= 0 ||
+      const independentFailure = error instanceof Error && error.message === "Independent acceptance failed; hidden answers withheld.";
+      if (!parent || !(parent.status === "failed" || (parent.status === "verified" && independentFailure)) || parent.learningParentJobId || parent.workCard.expectedOwnerValue <= 0 ||
         state.jobs.some(job => job.learningParentJobId === jobId)) return;
       const feedback = boundedCandidateFailureFeedback(error);
-      if (!isCandidateMetadataFailureFeedback(feedback) && !/^(?:Generated skill is not a pure isolated candidate:|Generated skill contains invalid TypeScript syntax\.|Generated skill failed TypeScript verification with |Behavioral verification mismatches:)/u.test(feedback)) return;
+      if (!independentFailure && !isCandidateMetadataFailureFeedback(feedback) && !/^(?:Generated skill is not a pure isolated candidate:|Generated skill contains invalid TypeScript syntax\.|Generated skill failed TypeScript verification with |Behavioral verification mismatches:)/u.test(feedback)) return;
       const failure = state.memories.find(memory => memory.id === `learning-failure-${jobId}`);
       if (!failure?.dependencies.some(value => value.startsWith("candidate:"))) return;
       const now = new Date().toISOString();
@@ -2103,7 +2383,9 @@ export class SaraKernel {
       await this.authorize(SARA_PRINCIPAL,{action:"sandbox_development",targetId:jobId,external:false});
       const workCard = compileWorkCard({...parent.workCard,availableCapabilities:state.capabilities});
       const child: Job = {id:randomUUID(),kind:"self_development",status:"authorized",workCard,
-        learningParentJobId:jobId,learningRootJobId:parent.learningRootJobId ?? jobId};
+        learningParentJobId:jobId,learningRootJobId:parent.learningRootJobId ?? jobId,
+        ...(parent.learningCampaignId ? {learningCampaignId:parent.learningCampaignId,learningCapabilityId:parent.learningCapabilityId,
+          learningContractDigest:parent.learningContractDigest,learningSourceJobId:parent.learningSourceJobId} : {})};
       await this.#store.append("job_created",SARA_PRINCIPAL,child);
     });
   }
@@ -2164,6 +2446,17 @@ export class SaraKernel {
       }
 
       const production = STAGES.indexOf(nextStage) >= STAGES.indexOf("CANARY");
+      const learningJob = state.jobs.find(job => job.id === mutation.jobId);
+      if (production && learningJob?.learningCampaignId) {
+        const environmentDigest = await qualificationEnvironmentDigest();
+        if (!state.events.some(e => e.type === "learning_qualification_passed" &&
+            (e.data as {mutationId:string;candidateDigest:string;receipt:{environmentDigest:string}}).mutationId === mutation.id &&
+            (e.data as {candidateDigest:string}).candidateDigest === mutation.candidateDigest &&
+            (e.data as {receipt:{environmentDigest:string}}).receipt.environmentDigest === environmentDigest)) {
+          throw new Error("INDEPENDENT_LEARNING_QUALIFICATION_REQUIRED");
+        }
+      }
+
       const independentlyVerified = mutation.evidence.some(
         (evidence) =>
           evidence.exitCode === 0 &&

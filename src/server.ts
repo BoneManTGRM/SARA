@@ -1,3 +1,4 @@
+import { compileLearningCampaign, type LearningCampaignInput } from "./learning-campaign.ts";
 import { maintenanceRequestDigest, type MaintenanceRequest } from "./website-maintenance.ts";
 import { handleTelegramNicoProductionRequest } from "./telegram-nico-production.ts";
 import type { NativeCodingVerifier } from "./native-coding-verifier.ts";
@@ -44,6 +45,7 @@ export type SaraRuntimeStatus = {
 };
 
 export type ServerOptions = {
+  learningRuntimeStatus?: () => { enabled: boolean; providerConfigured: boolean };
   ownerTokenSha256: string;
   readOnlyBridgeTokenSha256?: string;
   telegramBridgeTokenSha256?: string;
@@ -720,6 +722,23 @@ async function handleOwnerRevenueWrite(
   owner: OwnerSession,
   options: ServerOptions,
 ): Promise<boolean> {
+  if (url.pathname === "/api/learning/campaign" && request.method === "GET") {
+    json(response, 200, {...await kernel.learningCampaignStatus(), runtime: options.learningRuntimeStatus?.() ?? {enabled:false,providerConfigured:false}}); return true;
+  }
+  if (url.pathname === "/api/learning/campaign" && request.method === "POST") {
+    const body = await readJson(request);
+    const input = body.campaign as LearningCampaignInput;
+    const compiled = compileLearningCampaign(input);
+    if (body.approvedDigest !== compiled.digest) {
+      json(response, 409, {error:"Review the frozen campaign and approve its exact digest.",campaignDigest:compiled.digest}); return true;
+    }
+    json(response, 201, await kernel.configureLearningCampaign(owner, input, compiled.digest)); return true;
+  }
+  if (url.pathname === "/api/learning/invoke" && request.method === "POST") {
+    const body = await readJson(request);
+    const capabilityId = boundedText(body.capabilityId,3,80,"capabilityId");
+    json(response, 200, await kernel.invokeLearnedSkill(owner,capabilityId,body.input)); return true;
+  }
   if (request.method === "POST" && url.pathname === "/api/objectives") {
     await handleObjectives(request, response, kernel, owner);
     return true;
@@ -744,6 +763,12 @@ async function handleOwnerRevenueWrite(
     return true;
   }
   if (request.method === "POST" && url.pathname === "/api/autonomy/learning-mandate") {
+    const body=await readJson(request);
+    const current=(await kernel.getStatus()).standingMandate;
+    if (current && body.expectedCurrentMandateDigest !== current.digest) {
+      json(response,409,{error:"Explicitly reconcile the existing mandate before replacing it with internal-only learning authority.",currentMandateDigest:current.digest});
+      return true;
+    }
     const now=new Date();
     const id=`internal-learning-${now.toISOString().slice(0,10)}`;
     json(response,201,await kernel.activateStandingMandate(owner,{
@@ -884,6 +909,12 @@ async function handleOwnerDevelopmentRequest(
   options: ServerOptions,
 ): Promise<boolean> {
   const handoffMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/handoff$/);
+  const taskExecuteMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/execute$/);
+  if (request.method === "POST" && taskExecuteMatch) {
+    const body=await readJson(request);
+    json(response,200,await kernel.executeTaskWithLearnedSkill(owner,decodeURIComponent(taskExecuteMatch[1]!),body.input));
+    return true;
+  }
   if (request.method === "GET" && handoffMatch) {
     await handleJobHandoff(response, kernel, decodeURIComponent(handoffMatch[1]));
     return true;
