@@ -41,11 +41,27 @@ export async function activateApprovedAutonomousPaidMandate(input: {
   if (compiled.digest !== approvedDigest) {
     throw new Error("The approved autonomous paid mandate digest does not match the exact bounded mandate.");
   }
+  const now = (input.now ?? new Date()).getTime();
   const existing = (await input.kernel.getStatus()).standingMandate;
+  const existingIsActive = Boolean(
+    existing
+    && !existing.revokedAt
+    && now >= Date.parse(existing.startsAt)
+    && now < Date.parse(existing.expiresAt),
+  );
+  // A deployment bootstrap must never displace an owner-selected active mandate.
+  // In particular, an internal-learning mandate may legitimately replace the
+  // paid-readiness mandate while the old deployment digest remains configured.
+  if (existingIsActive && existing?.id !== compiled.id) return null;
   if (existing?.id === compiled.id && existing.revokedAt) {
     throw new Error("The autonomous paid mandate was revoked and cannot be reactivated by a deployment restart.");
   }
-  const now = (input.now ?? new Date()).getTime();
+  if (existingIsActive && existing?.id === compiled.id) {
+    if (existing.digest !== compiled.digest) {
+      throw new Error("The active autonomous paid mandate does not match the approved deployment digest.");
+    }
+    return existing;
+  }
   if (now < Date.parse(compiled.startsAt)) throw new Error("The approved autonomous paid mandate is not active yet.");
   if (now >= Date.parse(compiled.expiresAt)) return null;
   return input.kernel.activateStandingMandate(owner, mandateInput, {
