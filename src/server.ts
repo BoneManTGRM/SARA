@@ -15,6 +15,7 @@ import { PolicyDeniedError } from "./policy.ts";
 import type { RevenuePilotInput } from "./revenue-pilot.ts";
 import { normalizePublicGitHubRepository } from "./founding-pilot.ts";
 import type { CommercialTerms } from "./commercial-terms.ts";
+import { compilePublicPilotPreflight } from "./public-pilot-preflight.ts";
 import { paymentClientSecretDigest, publicPaymentIntent } from "./revenue-payment.ts";
 import { deliverySecretDigest } from "./revenue-delivery.ts";
 import { verifyBaseUsdcPayment } from "./usdc-payment.ts";
@@ -171,8 +172,13 @@ function consumePublicCommerceAttempt(request: IncomingMessage, now = Date.now()
     publicCommerceAttempts.set(key, { count: 1, resetAt: now + PUBLIC_COMMERCE_WINDOW_MS });
     return;
   }
-  if (current.count >= PUBLIC_COMMERCE_MAX_ATTEMPTS) throw new Error("Too many payment-intent attempts; try again later.");
+  if (current.count >= PUBLIC_COMMERCE_MAX_ATTEMPTS) throw new Error("Too many public commerce attempts; try again later.");
   current.count += 1;
+}
+
+function requiredBoolean(body: Record<string, unknown>, field: string): boolean {
+  if (typeof body[field] !== "boolean") throw new Error(`${field} must be explicit true or false.`);
+  return body[field];
 }
 
 async function verifiedPublicRepository(
@@ -238,6 +244,32 @@ async function handlePublicCommerce(
     return true;
   }
   const fetchImpl = options.commerce.fetchImpl ?? fetch;
+  if (request.method === "POST" && url.pathname === "/api/public/revenue-pilot/preflight") {
+    const body = await readJson(request);
+    const repositoryOwnerPermissionConfirmed = requiredBoolean(body, "repositoryOwnerPermissionConfirmed");
+    const requiresPrivateAccess = requiredBoolean(body, "requiresPrivateAccess");
+    const containsRegulatedOrPrivateData = requiredBoolean(body, "containsRegulatedOrPrivateData");
+    const requestsProductionChanges = requiredBoolean(body, "requestsProductionChanges");
+    const requestsExploitValidation = requiredBoolean(body, "requestsExploitValidation");
+    const primaryGoal = String(body.primaryGoal ?? "") as RevenuePilotInput["primaryGoal"];
+    if (!new Set(["security_baseline", "release_readiness", "dependency_health"]).has(primaryGoal)) {
+      throw new Error("Select one supported readiness goal.");
+    }
+    consumePublicCommerceAttempt(request);
+    const repository = await verifiedPublicRepository(String(body.repoUrl ?? ""), fetchImpl);
+    json(response, 200, compilePublicPilotPreflight({
+      repoUrl: repository.repository,
+      repositoryIsPublic: true,
+      repositoryOwnerPermissionConfirmed,
+      requiresPrivateAccess,
+      containsRegulatedOrPrivateData,
+      requestsProductionChanges,
+      requestsExploitValidation,
+      primaryGoal,
+      recentCommitDays: repository.recentCommitDays,
+    }));
+    return true;
+  }
   if (request.method === "POST" && url.pathname === "/api/public/revenue-pilot/intents") {
     consumePublicCommerceAttempt(request);
     const body = await readJson(request);

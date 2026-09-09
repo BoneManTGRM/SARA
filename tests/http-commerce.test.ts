@@ -25,17 +25,20 @@ describe("public USDC checkout HTTP boundary", () => {
   let directory: string;
   let baseUrl: string;
   let server: ReturnType<typeof createSaraServer>;
+  let kernel: SaraKernel;
   let intent: { id: string; jobId: string; clientSecret: string };
+  let githubReads = 0;
 
   before(async () => {
     directory = await mkdtemp(join(tmpdir(), "sara-http-commerce-"));
-    const kernel = await SaraKernel.boot({
+    kernel = await SaraKernel.boot({
       stateDirectory: directory,
       ownerTokenSha256: ownerTokenHash,
       bootstrapRevenueCapabilities: true,
     });
     const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
       if (String(url).startsWith("https://api.github.com/")) {
+        githubReads += 1;
         return Response.json({
           private: false,
           archived: false,
@@ -102,6 +105,69 @@ describe("public USDC checkout HTTP boundary", () => {
     assert.equal((await fetch(`${baseUrl}/api/public/revenue-pilot/offer`, {
       headers: { origin: "https://attacker.example" },
     })).status, 403);
+  });
+
+  it("preflights an eligible public repository without creating a job or payment intent", async () => {
+    const before = await kernel.getStatus();
+    const readsBefore = githubReads;
+    const response = await fetch(`${baseUrl}/api/public/revenue-pilot/preflight`, {
+      method: "POST",
+      headers: {
+        origin: "https://saraseed.app",
+        "content-type": "application/json",
+        "x-forwarded-for": "198.51.100.10",
+      },
+      body: JSON.stringify({
+        repoUrl: "https://github.com/example/project",
+        primaryGoal: "release_readiness",
+        repositoryOwnerPermissionConfirmed: true,
+        requiresPrivateAccess: false,
+        containsRegulatedOrPrivateData: false,
+        requestsProductionChanges: false,
+        requestsExploitValidation: false,
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const result = await response.json() as {
+      status: string;
+      repository: string;
+      mayCreatePaymentIntent: boolean;
+      mayBeginWork: boolean;
+      [key: string]: unknown;
+    };
+    assert.equal(result.status, "eligible");
+    assert.equal(result.repository, "https://github.com/example/project");
+    assert.equal(result.mayCreatePaymentIntent, false);
+    assert.equal(result.mayBeginWork, false);
+    assert.equal(Object.hasOwn(result, "clientSecret"), false);
+    assert.equal(Object.hasOwn(result, "jobId"), false);
+    assert.equal(Object.hasOwn(result, "customerReference"), false);
+    assert.equal(githubReads, readsBefore + 1);
+    const after = await kernel.getStatus();
+    assert.deepEqual(after.revenuePilotJobs, before.revenuePilotJobs);
+    assert.deepEqual(after.revenuePaymentIntents, before.revenuePaymentIntents);
+  });
+
+  it("requires every safety answer before public repository preflight", async () => {
+    const readsBefore = githubReads;
+    const response = await fetch(`${baseUrl}/api/public/revenue-pilot/preflight`, {
+      method: "POST",
+      headers: {
+        origin: "https://saraseed.app",
+        "content-type": "application/json",
+        "x-forwarded-for": "198.51.100.11",
+      },
+      body: JSON.stringify({
+        repoUrl: "https://github.com/example/project",
+        primaryGoal: "release_readiness",
+        repositoryOwnerPermissionConfirmed: true,
+      }),
+    });
+
+    assert.equal(response.status, 400);
+    assert.match((await response.json() as { error: string }).error, /explicit true or false/i);
+    assert.equal(githubReads, readsBefore);
   });
 
   it("creates one exact terms-bound payment intent without recording revenue", async () => {
