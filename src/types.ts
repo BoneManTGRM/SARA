@@ -151,6 +151,10 @@ export type WorkCard = {
 
 export type Job = {
   id: string;
+  learningCampaignId?: string;
+  learningCapabilityId?: string;
+  learningContractDigest?: string;
+  learningSourceJobId?: string;
   learningParentJobId?: string;
   learningRootJobId?: string;
   kind: "self_development";
@@ -215,6 +219,7 @@ export type CandidateGenerationInput = {
   missingCapabilities: string[];
   constitutionDigest: string;
   memoryContext: CandidateMemoryContext;
+  previousAttempt?: { proposal: SkillCandidateProposal; feedback: string; sourceDigest: string };
 };
 
 export type CandidateGenerator = {

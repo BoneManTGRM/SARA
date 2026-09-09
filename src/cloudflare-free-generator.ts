@@ -56,6 +56,7 @@ type CloudflareGeneratorOptions = {
   workersPlan: string;
   repairProposal?: SkillCandidateProposal;
   repairFeedback?: string;
+  repairArrangement?: "feedback-first" | "candidate-first";
   reasoningEffort?: "low";
   thinkingMode?: "disabled";
   fetcher?: Fetcher;
@@ -91,10 +92,11 @@ function requireCredentials(options: CloudflareGeneratorOptions): void {
   }
 }
 
-function proposalPrompt(
+export function proposalPrompt(
   input: Parameters<CandidateGenerator["generate"]>[0],
   repairProposal?: SkillCandidateProposal,
   repairFeedback?: string,
+  repairArrangement: "feedback-first" | "candidate-first" = "feedback-first",
 ): string {
   if (!input.objective.trim() || input.objective.length > MAX_OBJECTIVE_LENGTH) {
     throw new Error("Owner objective must contain 1–1,000 characters.");
@@ -132,9 +134,10 @@ function proposalPrompt(
       "The previous proposal was rejected. Do not assume source, TypeScript, or behavioral checks passed; use the recorded verifier evidence below.",
       "Repair the source and/or exact expected values, return the complete replacement proposal, and do not omit any required field.",
       "A compiler fix alone does not satisfy the objective. Validate every stated input restriction at runtime; type assertions are not runtime validation. Recheck every stated output rule and cover the relevant public boundary cases in your tests. For a source/compiler failure, change the source to address the evidence; returning the same source is not a repair. Do not change correct expected results merely to match broken code.",
-      `Bounded independent verifier feedback: ${repairFeedback || "Candidate was rejected; detailed verifier evidence is unavailable."}`,
-      `Previous rejected proposal: ${JSON.stringify(repairProposal)}`,
     );
+    const feedback = `Bounded independent verifier feedback: ${repairFeedback || "Candidate was rejected; detailed verifier evidence is unavailable."}`;
+    const candidate = `Previous rejected proposal: ${JSON.stringify(repairProposal)}`;
+    prompt.push(...(repairArrangement === "candidate-first" ? [candidate, feedback] : [feedback, candidate]));
   }
   return prompt.join("\n");
 }
@@ -283,7 +286,9 @@ export function createCloudflareFreeCandidateGenerator(
               role: "system",
               content: "You generate untrusted pure TypeScript candidates for independent verification. Return JSON only.",
             },
-            { role: "user", content: proposalPrompt(input, options.repairProposal, options.repairFeedback) },
+            { role: "user", content: proposalPrompt(input, options.repairProposal ?? input.previousAttempt?.proposal,
+              options.repairFeedback ?? input.previousAttempt?.feedback,
+              options.repairArrangement ?? (input.previousAttempt ? "candidate-first" : "feedback-first")) },
           ],
           response_format: { type: "json_object" },
           stream: false,

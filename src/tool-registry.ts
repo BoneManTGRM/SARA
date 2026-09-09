@@ -102,7 +102,7 @@ export function listSaraTools(options: { lunaConfigured: boolean; ownerAssistant
       name: "Operational Skill Router",
       status: "available",
       mode: "read_only",
-      purpose: "Select only relevant, immutable-source, license-cleared, execution-checked skills for bounded context.",
+      purpose: "Select relevant approved skills for bounded context; independently qualified pure learning skills also support exact-capability invocation at POST /api/learning/invoke.",
       invocationBoundary: "SHADOW candidates remain catalog-only; loading requires owner-promoted CANARY or later evidence.",
       requiredApproval: "owner promotion bound to the exact verified candidate",
     }),

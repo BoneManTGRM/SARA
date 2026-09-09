@@ -170,6 +170,7 @@ console.log(`SARA coding loop checker: ${nativeVerifier ? "native-7.0.2-with-leg
 // Host-bound publishing and notification adapters must be configured before CANARY activation.
 const websiteMaintenance=new WebsiteMaintenanceOperator(kernel,stateDirectory,null);
 const server = createSaraServer(kernel, {
+  learningRuntimeStatus: () => ({enabled: learningWorker !== null, providerConfigured: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.SARA_WORKERS_PLAN === "free")}),
   ownerTokenSha256,
   stateDirectory,
   ...(publicBaseUrl ? { publicBaseUrl } : {}),
