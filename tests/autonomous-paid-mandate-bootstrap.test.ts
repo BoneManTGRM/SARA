@@ -95,4 +95,37 @@ describe("exact autonomous paid mandate bootstrap", () => {
     );
     assert.ok((await kernel.getStatus()).standingMandate?.revokedAt);
   });
+
+  it("does not displace a different active owner-selected mandate during deployment bootstrap", async () => {
+    const { kernel, ownerToken } = await fixture();
+    const owner = kernel.authenticateOwnerToken(ownerToken);
+    const learningMandate = await kernel.activateStandingMandate(owner, {
+      id: "internal-learning-test",
+      allowedActions: ["business_candidate_development"],
+      allowedChannels: ["internal"],
+      allowedServiceIds: ["skill-learning"],
+      maximumCostPerActionUsd: 0,
+      maximumDailyActions: 2,
+      maximumConcurrentActions: 1,
+      startsAt: "2026-09-04T00:30:00.000Z",
+      expiresAt: "2026-10-03T00:30:00.000Z",
+      ownerId: owner.id,
+    }, {
+      approvalId: "owner-learning-mandate-test",
+      action: "required_owner_approval_change",
+      targetId: "standing-mandate:internal-learning-test",
+      approvedAt: "2026-09-04T00:30:00.000Z",
+      ownerId: owner.id,
+    });
+
+    const result = await activateApprovedAutonomousPaidMandate({
+      kernel,
+      ownerToken,
+      approvedDigest: autonomousPaidMandateDigest(),
+      now: new Date("2026-09-04T01:00:00.000Z"),
+    });
+
+    assert.equal(result, null);
+    assert.equal((await kernel.getStatus()).standingMandate?.digest, learningMandate.digest);
+  });
 });
