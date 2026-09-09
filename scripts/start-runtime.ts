@@ -15,7 +15,7 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
   });
   process.exit(exitCode);
 } else {
-  const { installOwnerDashboardTheme } = await import("../src/owner-dashboard-theme.ts");
-  installOwnerDashboardTheme();
+  const { installOwnerDashboardThemeRuntime } = await import("../src/owner-dashboard-theme-runtime.ts");
+  installOwnerDashboardThemeRuntime();
   await import("../src/main.ts");
 }
