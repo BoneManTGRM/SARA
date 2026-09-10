@@ -74,8 +74,8 @@ replace_exact(
 # Update only expectations intentionally changed by the bounded learning contract.
 replace_exact(
     "tests/autonomous-learning.test.ts",
-    '''  assert.equal((prompt.match(/\\"evidence\\":/g)??[]).length,4);''',
-    '''  assert.equal((prompt.match(/\\"evidence\\":/g)??[]).length,2);''',
+    '''  assert.equal((prompt.match(/"evidence":/g)??[]).length,4);''',
+    '''  assert.equal((prompt.match(/"evidence":/g)??[]).length,2);''',
 )
 
 p = Path("tests/cloudflare-free-generator.test.ts")
@@ -92,8 +92,8 @@ p.write_text(text)
 
 replace_exact(
     "tests/cloudflare-learning-feedback.test.ts",
-    r'''    assert.match(prompt, /Bounded independent verifier feedback: Generated skill is not a pure isolated candidate: computed property access is prohibited\\./);''',
-    r'''    assert.match(prompt, /Measured repair directive: Generated skill is not a pure isolated candidate: computed property access is prohibited\\./);''',
+    r'''    assert.match(prompt, /Bounded independent verifier feedback: Generated skill is not a pure isolated candidate: computed property access is prohibited\./);''',
+    r'''    assert.match(prompt, /Measured repair directive: Generated skill is not a pure isolated candidate: computed property access is prohibited\./);''',
 )
 
 for path in ["tests/cloudflare-metadata-feedback.test.ts", "tests/cloudflare-undefined-feedback.test.ts"]:
