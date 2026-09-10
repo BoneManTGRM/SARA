@@ -1,0 +1,336 @@
+name: Apply bounded learning capacity upgrade
+
+on:
+  push:
+    branches:
+      - codex/learning-capacity-quality-20260910
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[learning-upgrade-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/learning-capacity-quality-20260910
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Apply exact source changes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {count}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          def replace_all(path, old, new, expected):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} matches, found {count}: {old[:100]!r}")
+              p.write_text(text.replace(old, new))
+
+          def replace_regex_once(path, pattern, replacement):
+              p = Path(path)
+              text = p.read_text()
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one regex match, found {count}: {pattern[:100]!r}")
+              p.write_text(updated)
+
+          # Campaign capacity remains owner-approved and bounded, but can now scale to 100 requests.
+          replace_once('src/learning-campaign.ts',
+              'const safeId = /^[a-z][a-z0-9-]{2,79}$/u;\n',
+              'const safeId = /^[a-z][a-z0-9-]{2,79}$/u;\n\n'
+              'export const LEARNING_CAMPAIGN_MAXIMUM_REQUESTS = 100;\n'
+              'export const LEARNING_CAMPAIGN_MAXIMUM_CONTRACTS = 32;\n'
+              'export const LEARNING_DAILY_RESERVATION_LIMIT = 10;\n'
+              'export const LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT = 4;\n')
+          replace_once('src/learning-campaign.ts', 'input.maximumRequests > 10 ||', 'input.maximumRequests > LEARNING_CAMPAIGN_MAXIMUM_REQUESTS ||')
+          replace_once('src/learning-campaign.ts', 'input.contracts.length > 16)', 'input.contracts.length > LEARNING_CAMPAIGN_MAXIMUM_CONTRACTS)')
+          replace_once('src/learning-campaign.ts',
+              'export const learningContractDigest = (contract: LearningContract): string => sha256(canonicalJson(contract));\n',
+              'export const learningContractDigest = (contract: LearningContract): string => sha256(canonicalJson(contract));\n'
+              'export const learningCampaignCurriculumDigest = (campaign: Pick<LearningCampaignInput, "id" | "contracts">): string =>\n'
+              '  sha256(canonicalJson({ id: campaign.id, contracts: campaign.contracts }));\n\n'
+              'export type LearningCampaignCapacityExtension = {\n'
+              '  campaignId: string;\n'
+              '  baseDigest: string;\n'
+              '  curriculumDigest: string;\n'
+              '  previousMaximumRequests: number;\n'
+              '  maximumRequests: number;\n'
+              '  extensionDigest: string;\n'
+              '};\n\n'
+              'export function compileLearningCampaignCapacityExtension(\n'
+              '  campaign: LearningCampaign,\n'
+              '  maximumRequests: number,\n'
+              '): LearningCampaignCapacityExtension {\n'
+              '  if (!Number.isSafeInteger(maximumRequests) || maximumRequests <= campaign.maximumRequests ||\n'
+              '      maximumRequests > LEARNING_CAMPAIGN_MAXIMUM_REQUESTS) {\n'
+              '    throw new Error(`Learning campaign capacity must increase to at most ${LEARNING_CAMPAIGN_MAXIMUM_REQUESTS} requests.`);\n'
+              '  }\n'
+              '  const unsigned = {\n'
+              '    campaignId: campaign.id,\n'
+              '    baseDigest: campaign.digest,\n'
+              '    curriculumDigest: learningCampaignCurriculumDigest(campaign),\n'
+              '    previousMaximumRequests: campaign.maximumRequests,\n'
+              '    maximumRequests,\n'
+              '  };\n'
+              '  return { ...unsigned, extensionDigest: sha256(canonicalJson(unsigned)) };\n'
+              '}\n')
+          replace_once('src/learning-campaign.ts',
+              'export function currentLearningCampaign(events: StoredEvent[]): LearningCampaign | undefined {\n'
+              '  return events.filter(event => event.type === "learning_campaign_configured").at(-1)?.data as LearningCampaign | undefined;\n'
+              '}\n',
+              'export function currentLearningCampaign(events: StoredEvent[]): LearningCampaign | undefined {\n'
+              '  const configured = events.filter(event => event.type === "learning_campaign_configured").at(-1)?.data as LearningCampaign | undefined;\n'
+              '  if (!configured) return undefined;\n'
+              '  let maximumRequests = configured.maximumRequests;\n'
+              '  const curriculumDigest = learningCampaignCurriculumDigest(configured);\n'
+              '  for (const event of events) {\n'
+              '    if (event.type !== "learning_campaign_capacity_extended") continue;\n'
+              '    const data = event.data as Partial<LearningCampaignCapacityExtension>;\n'
+              '    if (data.campaignId !== configured.id || data.baseDigest !== configured.digest ||\n'
+              '        data.curriculumDigest !== curriculumDigest || data.previousMaximumRequests !== maximumRequests ||\n'
+              '        !Number.isSafeInteger(data.maximumRequests) || data.maximumRequests! <= maximumRequests ||\n'
+              '        data.maximumRequests! > LEARNING_CAMPAIGN_MAXIMUM_REQUESTS) continue;\n'
+              '    const unsigned = { campaignId: data.campaignId, baseDigest: data.baseDigest, curriculumDigest: data.curriculumDigest,\n'
+              '      previousMaximumRequests: data.previousMaximumRequests, maximumRequests: data.maximumRequests };\n'
+              '    if (data.extensionDigest !== sha256(canonicalJson(unsigned))) continue;\n'
+              '    maximumRequests = data.maximumRequests!;\n'
+              '  }\n'
+              '  return maximumRequests === configured.maximumRequests ? configured : { ...configured, maximumRequests };\n'
+              '}\n')
+
+          # Kernel: raise the daily zero-cost reservation ceiling and permit four evidence-driven attempts per root.
+          replace_once('src/kernel.ts',
+              'import { compileLearningCampaign, currentLearningCampaign, campaignAccounting, learningContractDigest, selectLearningGap, type LearningCampaignInput } from "./learning-campaign.ts";\n',
+              'import { compileLearningCampaign, compileLearningCampaignCapacityExtension, currentLearningCampaign, campaignAccounting, learningContractDigest, LEARNING_DAILY_RESERVATION_LIMIT, LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT, selectLearningGap, type LearningCampaignInput } from "./learning-campaign.ts";\n')
+          replace_all('src/kernel.ts', 'dailyReservations >= 2', 'dailyReservations >= LEARNING_DAILY_RESERVATION_LIMIT', 1)
+          replace_all('src/kernel.ts', 'reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length >= 2', 'reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length >= LEARNING_DAILY_RESERVATION_LIMIT', 1)
+          replace_once('src/kernel.ts',
+              '  async learningCampaignStatus() {\n',
+              '  async reviewLearningCampaignCapacity(principal: Principal, maximumRequests: number) {\n'
+              '    if (!this.isVerifiedOwner(principal)) throw new Error("Authenticated owner authority is required to extend learning capacity.");\n'
+              '    const campaign = currentLearningCampaign((await this.state()).events);\n'
+              '    if (!campaign) throw new Error("A configured learning campaign is required before capacity can be extended.");\n'
+              '    return compileLearningCampaignCapacityExtension(campaign, maximumRequests);\n'
+              '  }\n\n'
+              '  extendLearningCampaignCapacity(principal: Principal, maximumRequests: number, approvedDigest: string) {\n'
+              '    return this.serializeMutation(async () => {\n'
+              '      const campaign = currentLearningCampaign((await this.state()).events);\n'
+              '      if (!campaign) throw new Error("A configured learning campaign is required before capacity can be extended.");\n'
+              '      const extension = compileLearningCampaignCapacityExtension(campaign, maximumRequests);\n'
+              '      if (!this.isVerifiedOwner(principal) || approvedDigest !== extension.extensionDigest) {\n'
+              '        throw new Error("EXACT_LEARNING_CAPACITY_APPROVAL_REQUIRED");\n'
+              '      }\n'
+              '      await this.authorize(principal, { action: "required_owner_approval_change", targetId: `learning-campaign-capacity:${extension.extensionDigest}`, external: false,\n'
+              '        approval: { approvalId: randomUUID(), action: "required_owner_approval_change", targetId: `learning-campaign-capacity:${extension.extensionDigest}`,\n'
+              '          ownerId: principal.id, approvedAt: new Date().toISOString() } });\n'
+              '      await this.#store.append("learning_campaign_capacity_extended", principal, extension);\n'
+              '      return { id: campaign.id, digest: campaign.digest, maximumRequests: extension.maximumRequests, extensionDigest: extension.extensionDigest };\n'
+              '    });\n'
+              '  }\n\n'
+              '  async learningCampaignStatus() {\n')
+          replace_once('src/kernel.ts',
+              '      return !previous || (previous.type === "learning_qualification_failed" && !job.learningParentJobId &&\n'
+              '        job.workCard.expectedOwnerValue > 0 && !state.jobs.some(child => child.learningParentJobId === job.id));\n',
+              '      if (!previous) return true;\n'
+              '      if (previous.type !== "learning_qualification_failed" || job.workCard.expectedOwnerValue <= 0 ||\n'
+              '          state.jobs.some(child => child.learningParentJobId === job.id)) return false;\n'
+              '      const rootJobId = job.learningRootJobId ?? job.id;\n'
+              '      const rootAttempts = state.jobs.filter(candidate => candidate.id === rootJobId || candidate.learningRootJobId === rootJobId).length;\n'
+              '      return rootAttempts < LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT;\n')
+          replace_once('src/kernel.ts',
+              '      if (!parent || !(parent.status === "failed" || (parent.status === "verified" && independentFailure)) || parent.learningParentJobId || parent.workCard.expectedOwnerValue <= 0 ||\n'
+              '        state.jobs.some(job => job.learningParentJobId === jobId)) return;\n',
+              '      if (!parent || !(parent.status === "failed" || (parent.status === "verified" && independentFailure)) || parent.workCard.expectedOwnerValue <= 0 ||\n'
+              '        state.jobs.some(job => job.learningParentJobId === jobId)) return;\n'
+              '      const rootJobId = parent.learningRootJobId ?? parent.id;\n'
+              '      const rootAttempts = state.jobs.filter(job => job.id === rootJobId || job.learningRootJobId === rootJobId).length;\n'
+              '      if (rootAttempts >= LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT) return;\n')
+          replace_once('src/kernel.ts', '        learningParentJobId:jobId,learningRootJobId:parent.learningRootJobId ?? jobId,\n', '        learningParentJobId:jobId,learningRootJobId:rootJobId,\n')
+
+          # Better learning: independent qualification failure can trigger a bounded diversified retry without exposing hidden answers.
+          replace_once('src/learning-acceleration.ts',
+              '  if (input.failureClass === "provider_transient" || input.failureClass === "provider_terminal" ||\n'
+              '      input.failureClass === "policy_failure" || input.failureClass === "unknown" ||\n'
+              '      input.failureClass === "independent_acceptance_failure") {\n'
+              '    return { outcome: "STOP_OR_REGENERATE_BY_POLICY", directive: null, evidenceDigest };\n'
+              '  }\n',
+              '  if (input.failureClass === "provider_transient" || input.failureClass === "provider_terminal" ||\n'
+              '      input.failureClass === "policy_failure" || input.failureClass === "unknown") {\n'
+              '    return { outcome: "STOP_OR_REGENERATE_BY_POLICY", directive: null, evidenceDigest };\n'
+              '  }\n'
+              '  if (input.failureClass === "independent_acceptance_failure") {\n'
+              '    return {\n'
+              '      outcome: "TARGETED_REPAIR",\n'
+              '      directive: `TARGETED_REPAIR: Re-evaluate only the frozen public requirements from first principles and produce a materially different deterministic implementation where the public contract permits it. Do not infer, request, or encode hidden qualification answers. Frozen contract ${input.contractDigest}; independently rejected candidate ${input.candidateDigest}.`,\n'
+              '      evidenceDigest,\n'
+              '    };\n'
+              '  }\n')
+          replace_once('src/learning-acceleration.ts',
+              '    "schema_failure", "source_policy_failure", "typescript_failure", "behavioral_failure",\n',
+              '    "schema_failure", "source_policy_failure", "typescript_failure", "behavioral_failure", "independent_acceptance_failure",\n')
+
+          # Private HTTP control: exact two-step capacity review/approval, plus a 10/day internal learning mandate.
+          replace_once('src/server.ts',
+              '  if (url.pathname === "/api/learning/campaign" && request.method === "GET") {\n',
+              '  if (url.pathname === "/api/learning/campaign/capacity" && request.method === "POST") {\n'
+              '    const body = await readJson(request);\n'
+              '    const maximumRequests = Number(body.maximumRequests);\n'
+              '    const extension = await kernel.reviewLearningCampaignCapacity(owner, maximumRequests);\n'
+              '    if (body.approvedDigest !== extension.extensionDigest) {\n'
+              '      json(response, 409, { error: "Review the exact learning-capacity extension before approval.", extensionDigest: extension.extensionDigest,\n'
+              '        campaignId: extension.campaignId, previousMaximumRequests: extension.previousMaximumRequests, maximumRequests: extension.maximumRequests }); return true;\n'
+              '    }\n'
+              '    json(response, 201, await kernel.extendLearningCampaignCapacity(owner, maximumRequests, extension.extensionDigest)); return true;\n'
+              '  }\n'
+              '  if (url.pathname === "/api/learning/campaign" && request.method === "GET") {\n')
+          replace_once('src/server.ts',
+              'allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:2,',
+              'allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,')
+
+          # Dashboard exposes explicit owner-reviewed controls; no silent authority expansion.
+          replace_once('src/dashboard.ts', '    let reviewedLearning = null;\n    let ownerMandate = null;\n', '    let reviewedLearning = null;\n    let reviewedLearningCapacity = null;\n    let ownerMandate = null;\n')
+          replace_once('src/dashboard.ts',
+              '                <button class="button primary" id="learning-approve" type="button" disabled>Approve exact campaign</button>\n                <button class="button" id="learning-mandate" type="button" disabled>Activate 30-day internal learning mandate</button>\n',
+              '                <button class="button primary" id="learning-approve" type="button" disabled>Approve exact campaign</button>\n'
+              '                <button class="button" id="learning-capacity-preview" type="button" disabled>Review 100-request capacity</button>\n'
+              '                <button class="button primary" id="learning-capacity-approve" type="button" disabled>Approve 100-request capacity</button>\n'
+              '                <button class="button" id="learning-mandate" type="button" disabled>Activate 30-day internal learning mandate</button>\n')
+          replace_once('src/dashboard.ts',
+              '        reviewedLearning = null; ownerMandate = null;\n',
+              '        reviewedLearning = null; reviewedLearningCapacity = null; ownerMandate = null;\n')
+          replace_once('src/dashboard.ts',
+              "        document.querySelector('#learning-approve').disabled = true;\n",
+              "        document.querySelector('#learning-approve').disabled = true;\n        document.querySelector('#learning-capacity-preview').disabled = true;\n        document.querySelector('#learning-capacity-approve').disabled = true;\n")
+          replace_once('src/dashboard.ts',
+              "      const active = ownerMandate && !ownerMandate.revokedAt && Date.parse(ownerMandate.expiresAt) > Date.now();\n",
+              "      const capacityPreview = document.querySelector('#learning-capacity-preview');\n      capacityPreview.disabled = !status.configured || status.campaign.maximumRequests >= 100;\n      if (status.campaign && status.campaign.maximumRequests >= 100) reviewedLearningCapacity = null;\n      document.querySelector('#learning-capacity-approve').disabled = !reviewedLearningCapacity || !status.configured || status.campaign.maximumRequests >= 100;\n      const active = ownerMandate && !ownerMandate.revokedAt && Date.parse(ownerMandate.expiresAt) > Date.now();\n")
+          replace_once('src/dashboard.ts',
+              "      button.disabled = !status.configured || Boolean(active);\n      button.textContent = compatible ? 'Current mandate covers internal learning'\n        : active ? 'Reconcile the active mandate before learning activation' : 'Activate 30-day internal learning mandate';\n",
+              "      const needsRateUpgrade = compatible && Number(ownerMandate.maximumDailyActions || 0) < 10;\n      button.disabled = !status.configured || (Boolean(active) && !needsRateUpgrade);\n      button.textContent = needsRateUpgrade ? 'Upgrade learning mandate to 10/day'\n        : compatible ? 'Current mandate covers internal learning'\n        : active ? 'Reconcile the active mandate before learning activation' : 'Activate 30-day internal learning mandate';\n")
+          replace_once('src/dashboard.ts',
+              "          + ' free requests, two per UTC day and two per root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')\n",
+              "          + ' free requests, up to 10 per UTC day and four attempts per learning root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')\n")
+          replace_once('src/dashboard.ts',
+              "    document.querySelector('#learning-mandate').addEventListener('click', async () => {\n",
+              "    document.querySelector('#learning-capacity-preview').addEventListener('click', async () => {\n"
+              "      reviewedLearningCapacity = null;\n"
+              "      document.querySelector('#learning-capacity-approve').disabled = true;\n"
+              "      try {\n"
+              "        const response = await fetch('/api/learning/campaign/capacity', {method:'POST', headers:Object.assign({},auth(),{'content-type':'application/json'}), body:JSON.stringify({maximumRequests:100})});\n"
+              "        const result = await response.json();\n"
+              "        if (response.status !== 409 || !result.extensionDigest) throw new Error(result.error || 'Capacity review failed.');\n"
+              "        reviewedLearningCapacity = {maximumRequests:100, approvedDigest:result.extensionDigest};\n"
+              "        document.querySelector('#learning-review').textContent = 'Approve request capacity ' + result.previousMaximumRequests + ' → ' + result.maximumRequests\n"
+              "          + '. Frozen learning contracts and hidden acceptance tests do not change. Exact extension digest: ' + result.extensionDigest + '.';\n"
+              "        document.querySelector('#learning-capacity-approve').disabled = false;\n"
+              "      } catch(error) { setMessage(error.message,true); }\n"
+              "    });\n\n"
+              "    document.querySelector('#learning-capacity-approve').addEventListener('click', async () => {\n"
+              "      if (!reviewedLearningCapacity) return;\n"
+              "      const approved = reviewedLearningCapacity;\n"
+              "      reviewedLearningCapacity = null;\n"
+              "      document.querySelector('#learning-capacity-approve').disabled = true;\n"
+              "      try {\n"
+              "        await ownerPost('/api/learning/campaign/capacity',approved);\n"
+              "        document.querySelector('#learning-review').textContent = 'Learning request capacity extended to 100. Frozen curriculum and qualification controls remain unchanged.';\n"
+              "        await refreshLearning();\n"
+              "      } catch(error) { setMessage(error.message,true); }\n"
+              "    });\n\n"
+              "    document.querySelector('#learning-mandate').addEventListener('click', async () => {\n")
+
+          # Unit/regression expectations for the new bounds and iterative behavior.
+          replace_once('tests/learning-acceleration.test.ts',
+              'test("targeted repair uses measured local evidence and refuses insufficient or independent evidence", () => {',
+              'test("targeted repair uses measured local evidence and safely diversifies after independent rejection", () => {')
+          replace_once('tests/learning-acceleration.test.ts',
+              '  assert.equal(targetedRepairPlanner({ ...base, failureClass: "independent_acceptance_failure", measuredFeedback: "Independent acceptance failed; hidden answers withheld." }).outcome, "STOP_OR_REGENERATE_BY_POLICY");\n',
+              '  const independent = targetedRepairPlanner({ ...base, failureClass: "independent_acceptance_failure", measuredFeedback: "Independent acceptance failed; hidden answers withheld." });\n'
+              '  assert.equal(independent.outcome, "TARGETED_REPAIR");\n'
+              '  assert.match(independent.directive ?? "", /materially different deterministic implementation/);\n'
+              '  assert.match(independent.directive ?? "", /Do not infer, request, or encode hidden qualification answers/);\n')
+          replace_once('tests/learning-acceleration.test.ts',
+              '  const repair = learningAttemptBudgeter({ objectiveLength: 500, publicCriteriaCount: 8, publicBehavioralTestCount: 8, priorFailureClass: "typescript_failure", previousCandidateSourceBytes: 5000 });\n',
+              '  const repair = learningAttemptBudgeter({ objectiveLength: 500, publicCriteriaCount: 8, publicBehavioralTestCount: 8, priorFailureClass: "typescript_failure", previousCandidateSourceBytes: 5000 });\n'
+              '  const independentRepair = learningAttemptBudgeter({ objectiveLength: 500, publicCriteriaCount: 8, publicBehavioralTestCount: 8, priorFailureClass: "independent_acceptance_failure", previousCandidateSourceBytes: 5000 });\n'
+              '  assert.equal(independentRepair.attemptMode, "repair");\n'
+              '  assert.equal(independentRepair.includePriorCandidateRepairContext, true);\n')
+
+          replace_once('tests/learning-campaign.test.ts', 'maximumCostPerActionUsd:0,maximumDailyActions:2,maximumConcurrentActions:1,', 'maximumCostPerActionUsd:0,maximumDailyActions:10,maximumConcurrentActions:1,')
+          replace_once('tests/learning-campaign.test.ts', '    assert.throws(()=>compileLearningCampaign({...config,maximumRequests:11}));\n', '    assert.doesNotThrow(()=>compileLearningCampaign({...config,maximumRequests:100}));\n    assert.throws(()=>compileLearningCampaign({...config,maximumRequests:101}));\n')
+          replace_once('tests/learning-campaign.test.ts',
+              'test("worker selects, qualifies, and ordinary task routing survives a real child-process restart",async()=>{\n',
+              'test("owner can extend a frozen campaign capacity to 100 without replacing its curriculum",async()=>{\n'
+              '  const {directory,kernel,owner}=await setup();\n'
+              '  try {\n'
+              '    const review=await kernel.reviewLearningCampaignCapacity(owner,100);\n'
+              '    await assert.rejects(()=>kernel.extendLearningCampaignCapacity(owner,100,"0".repeat(64)),/EXACT/);\n'
+              '    const extended=await kernel.extendLearningCampaignCapacity(owner,100,review.extensionDigest);\n'
+              '    assert.equal(extended.maximumRequests,100);\n'
+              '    assert.equal((await kernel.learningCampaignStatus()).campaign?.maximumRequests,100);\n'
+              '    const reboot=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(token)});\n'
+              '    assert.equal((await reboot.learningCampaignStatus()).campaign?.maximumRequests,100);\n'
+              '    await assert.rejects(()=>reboot.reviewLearningCampaignCapacity(owner,10),/must increase/);\n'
+              '  }finally{await rm(directory,{recursive:true,force:true});}\n'
+              '});\n\n'
+              'test("worker selects, qualifies, and ordinary task routing survives a real child-process restart",async()=>{\n')
+          replace_regex_once('tests/learning-campaign.test.ts',
+              r'test\("failed metadata lesson reaches one child after restart, with no third generation",async\(\)=>\{.*?\n\}\);\n\ntest\("pure initial generation',
+              '''test("failed metadata lesson iterates through four bounded attempts and then idles",async()=>{\n  const {directory,kernel}=await setup();let calls=0;\n  const generator:CandidateGenerator={...echo,async generate(input){calls++;if(calls>=2)assert.match(JSON.stringify(input.memoryContext),/300 characters or fewer/);\n    return {...await echo.generate(input),limitations:["x".repeat(438)]};}};\n  try {\n    assert.equal((await new AutonomousLearningWorker(kernel,generator).tick()).status,"failed");\n    const reboot=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(token)});\n    assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"failed");\n    assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"failed");\n    assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"failed");\n    assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"idle");\n    assert.equal(calls,4);assert.equal((await reboot.learningCampaignStatus()).selections.length,1);\n    assert.equal((await reboot.getStatus()).jobs.filter(j=>j.learningCampaignId).length,4);\n  }finally{await rm(directory,{recursive:true,force:true});}\n});\n\ntest("pure initial generation''')
+
+          replace_once('tests/autonomous-learning.test.ts', 'maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:2,', 'maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,')
+          replace_once('tests/autonomous-learning.test.ts',
+              '    await enqueue(kernel,5);\n    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");\n    assert.equal(calls,2);\n',
+              '    await enqueue(kernel,5);\n'
+              '    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");\n'
+              '    assert.equal(calls,3);\n'
+              '    for(let index=0;index<7;index++){\n'
+              '      await enqueue(kernel,6+index);\n'
+              '      assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");\n'
+              '    }\n'
+              '    await enqueue(kernel,20);\n'
+              '    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");\n'
+              '    assert.equal(calls,10);\n')
+
+          bounded_chain_test = '''test("actionable rejection iterates through a bounded four-attempt learning root across restart", async()=>{\n  const directory=await mkdtemp(join(tmpdir(),"sara-learning-recursive-"));\n  try {\n    let {kernel}=await setupQueue(directory);\n    const root=await enqueue(kernel,3);\n    let calls=0;\n    const generator={id:"recursive-rejection-fixture",external:false,maximumCostUsd:0,async generate(input: Parameters<import("../src/types.ts").CandidateGenerator["generate"]>[0]){\n      calls++;\n      if(calls>=2) assert.ok(input.memoryContext.memories.some((memory: {source:string})=>memory.source.startsWith(`sara://learning-failure/${sha256(request.objective)}/`)));\n      return {schemaVersion:1 as const,skillName:"Rows",summary:"Read rows",source:"export function runSkill(input: unknown): unknown { return (input as string[])[0]; }",tests:[{name:"first",input:["A"],expected:"A"}],limitations:["Fixture, not learned code"]};\n    }};\n    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");\n    for(let attempt=2;attempt<=4;attempt++){\n      kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});\n      const jobs=(await kernel.getStatus()).jobs;\n      const next=jobs.find(job=>job.status==="authorized" && job.learningRootJobId===root.id);\n      assert.ok(next);assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:next.id});\n    }\n    const jobs=(await kernel.getStatus()).jobs;\n    const chain=jobs.filter(job=>job.id===root.id || job.learningRootJobId===root.id);\n    assert.equal(chain.length,4);assert.equal(chain.filter(job=>Boolean(job.learningParentJobId)).length,3);\n    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"idle");\n    assert.equal(calls,4);\n  } finally {await rm(directory,{recursive:true,force:true});}\n});'''
+          replace_regex_once('tests/autonomous-learning.test.ts',
+              r'test\("actionable rejection queues one identical-contract follow-up across restart, then stops", async\(\)=>\{.*?\n\}\);',
+              bounded_chain_test)
+
+          metadata_chain_test = '''test("metadata rejection iterates through a bounded four-attempt learning root", async()=>{\n  const directory=await mkdtemp(join(tmpdir(),"sara-learning-metadata-"));\n  try {\n    let {kernel}=await setupQueue(directory);\n    const root=await enqueue(kernel,3);\n    let calls=0;\n    const generator={id:"recursive-metadata-fixture",external:false,maximumCostUsd:0,async generate(input: Parameters<import("../src/types.ts").CandidateGenerator["generate"]>[0]){\n      calls++;\n      if(calls>=2) assert.ok(input.memoryContext.memories.some(memory=>memory.statement.includes("300 characters or fewer")));\n      return {schemaVersion:1 as const,skillName:"Rows",summary:"Read rows",source:"export function runSkill(input: unknown): unknown { return (input as string[])[0]; }",tests:[{name:"first",input:["A"],expected:"A"}],limitations:["x".repeat(438)]};\n    }};\n    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");\n    for(let attempt=2;attempt<=4;attempt++){\n      const next=(await kernel.getStatus()).jobs.find(job=>job.status==="authorized" && job.learningRootJobId===root.id);\n      assert.ok(next);assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:next.id});\n    }\n    const jobs=(await kernel.getStatus()).jobs;\n    assert.equal(jobs.filter(job=>job.id===root.id || job.learningRootJobId===root.id).length,4);\n    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"idle");\n    assert.equal(calls,4);\n  } finally {await rm(directory,{recursive:true,force:true});}\n});'''
+          replace_regex_once('tests/autonomous-learning.test.ts',
+              r'test\("metadata rejection queues one identical-contract follow-up across restart, then stops", async\(\)=>\{.*?\n\}\);',
+              metadata_chain_test)
+
+          # Remove this temporary self-editing workflow from the final branch diff.
+          Path('.github/workflows/apply-learning-capacity-quality.yml').unlink()
+          PY
+      - name: Verify full test suite and typecheck
+        run: |
+          npm test
+          npm run typecheck
+      - name: Commit validated upgrade
+        run: |
+          git config user.name "Reparodynamics"
+          git config user.email "papadenico@yahoo.com"
+          git add -A
+          git commit -m "Increase bounded learning capacity and iterative quality [learning-upgrade-applied]"
+          git push origin HEAD:codex/learning-capacity-quality-20260910
