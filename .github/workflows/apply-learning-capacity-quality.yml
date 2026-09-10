@@ -202,9 +202,7 @@ jobs:
               '    json(response, 201, await kernel.extendLearningCampaignCapacity(owner, maximumRequests, extension.extensionDigest)); return true;\n'
               '  }\n'
               '  if (url.pathname === "/api/learning/campaign" && request.method === "GET") {\n')
-          replace_once('src/server.ts',
-              'allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:2,',
-              'allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,')
+          replace_all('src/server.ts', 'maximumDailyActions:2,', 'maximumDailyActions:10,', 1)
 
           # Dashboard exposes explicit owner-reviewed controls; no silent authority expansion.
           replace_once('src/dashboard.ts', '    let reviewedLearning = null;\n    let ownerMandate = null;\n', '    let reviewedLearning = null;\n    let reviewedLearningCapacity = null;\n    let ownerMandate = null;\n')
@@ -320,7 +318,8 @@ jobs:
               r'test\("metadata rejection queues one identical-contract follow-up across restart, then stops", async\(\)=>\{.*?\n\}\);',
               metadata_chain_test)
 
-          # Remove this temporary self-editing workflow from the final branch diff.
+          # Remove temporary workflow scaffolding from the final branch diff.
+          Path('.github/workflows/fix-learning-upgrade-workflow.yml').unlink(missing_ok=True)
           Path('.github/workflows/apply-learning-capacity-quality.yml').unlink()
           PY
       - name: Verify full test suite and typecheck
