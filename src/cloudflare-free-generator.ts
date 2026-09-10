@@ -146,9 +146,19 @@ export function proposalPrompt(
       "The previous proposal was rejected. Apply only the bounded measured repair directive; all source, TypeScript, behavioral, and independent qualification gates remain unchanged.",
       "Return the complete replacement JSON object. Do not change correct expected values merely to match broken code.",
     );
+    const compilerLines = repairFeedback?.split("\n") ?? [];
+    const safeCompilerLine = (line: string) =>
+      /^TS\d{3,5} at skill\.ts:\d+:\d+(?:: (?:A value of type unknown must be narrowed before use\.|A value may be undefined; narrow it before accessing its fields\.))?$/u.test(line);
+    const safeCompilerFeedback = compilerLines.length > 0 && compilerLines.length <= 9 && (
+      (compilerLines.length === 1 && safeCompilerLine(compilerLines[0]!)) ||
+      (/^Generated skill failed TypeScript verification with \d+ error\(s\)\.$/u.test(compilerLines[0]!) &&
+        compilerLines.slice(1).every(safeCompilerLine))
+    );
     const safeDirective = repairFeedback?.startsWith("TARGETED_REPAIR:")
       ? repairFeedback.slice(0, 1_500)
-      : boundedCandidateFailureFeedback(new Error(repairFeedback || "Candidate verification failed; no earlier gate is asserted to have passed.")).slice(0, 1_500);
+      : safeCompilerFeedback
+        ? repairFeedback!.slice(0, 1_500)
+        : boundedCandidateFailureFeedback(new Error(repairFeedback || "Candidate verification failed; no earlier gate is asserted to have passed.")).slice(0, 1_500);
     const repairContext = {
       skillName: repairProposal.skillName,
       summary: repairProposal.summary.slice(0, 300),

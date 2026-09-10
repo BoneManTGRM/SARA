@@ -153,8 +153,8 @@ test("content-equivalent reordering moves precise feedback after the same reject
   const original=proposalPrompt(input,proposal,feedback,"feedback-first");
   const reordered=proposalPrompt(input,proposal,feedback,"candidate-first");
   assert.deepEqual(original.split("\n").sort(),reordered.split("\n").sort());
-  assert.ok(original.indexOf(feedback)<original.indexOf("Previous rejected proposal:"));
-  assert.ok(reordered.indexOf(feedback)>reordered.indexOf("Previous rejected proposal:"));
+  assert.ok(original.indexOf(feedback)<original.indexOf("Previous rejected candidate (bounded repair context):"));
+  assert.ok(reordered.indexOf(feedback)>reordered.indexOf("Previous rejected candidate (bounded repair context):"));
 });
 
 test("a stop on/off during generation invalidates its authority without refunding its request",async()=>{

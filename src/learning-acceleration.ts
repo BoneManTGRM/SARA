@@ -61,7 +61,7 @@ export function learningFailureTriage(evidence: unknown): LearningFailureTriage 
   if (/pure isolated candidate|imports and module loading|computed property access|prototype|constructor access|source policy/iu.test(text)) {
     return { failureClass: "source_policy_failure", nextAction: "targeted_repair", evidenceCode: "source_policy" };
   }
-  if (/schema version|structurally incomplete|unsupported fields|not valid json|ambiguous|proposal.+(?:schema|json)/iu.test(text)) {
+  if (/schema version|structurally incomplete|unsupported fields|not valid json|ambiguous|proposal.+(?:schema|json)|skill name must be|skill candidate summary must be|skill limitations must contain|behavioral test names must be unique/iu.test(text)) {
     return { failureClass: "schema_failure", nextAction: "targeted_repair", evidenceCode: "schema" };
   }
   if (/learning mandate changed|active_learning_mandate_required|learning_authority|emergency stop|policy denied|owner approval|authority changed/iu.test(lower)) {
