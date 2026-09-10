@@ -48,11 +48,14 @@ jobs:
             echo "test_status=${TEST_STATUS}"
             echo "typecheck_status=${TYPE_STATUS}"
             echo
-            echo "=== npm test ==="
-            tail -n 500 /tmp/test.log
+            echo "=== focused npm test failures ==="
+            grep -n -E -B 8 -A 24 'not ok|AssertionError|ERR_ASSERTION|failureType|error:|expected:|actual:' /tmp/test.log | head -n 900
+            echo
+            echo "=== npm test summary ==="
+            tail -n 80 /tmp/test.log
             echo
             echo "=== npm run typecheck ==="
-            tail -n 500 /tmp/typecheck.log
+            cat /tmp/typecheck.log
           } > .learning-upgrade-diagnostic.txt
           if [ "$TEST_STATUS" -eq 0 ] && [ "$TYPE_STATUS" -eq 0 ]; then
             echo "ALL_VERIFICATION_PASSED" >> .learning-upgrade-diagnostic.txt
