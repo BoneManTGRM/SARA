@@ -65,9 +65,19 @@ test("eligible HTTP 408 receives one same-reservation retry", async () => {
         };
       },
     });
-    assert.equal(result.status, "verified_shadow");
-    assert.equal(calls, 2);
     const audit = await kernel.inspectAudit();
+    if (result.status !== "verified_shadow") {
+      const state = await kernel.state();
+      const evidence = {
+        result,
+        calls,
+        jobs: state.jobs.map((job) => ({ id: job.id, status: job.status, reason: job.reason })),
+        mutations: state.mutations.map((mutation) => ({ id: mutation.id, stage: mutation.stage, candidateDigest: mutation.candidateDigest })),
+        events: audit.slice(-24).map((event) => ({ type: event.type, data: event.data })),
+      };
+      assert.fail(`retry regression evidence: ${JSON.stringify(evidence)}`);
+    }
+    assert.equal(calls, 2);
     assert.equal(audit.filter((event) => event.type === "autonomous_learning_reserved").length, 1);
   } finally {
     await rm(directory, { recursive: true, force: true });
