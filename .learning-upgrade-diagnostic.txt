@@ -1,0 +1,510 @@
+test_status=1
+typecheck_status=0
+
+=== npm test ===
+    ok 2 - treats an empty claim queue as normal and never sends a non-zero budget
+      ---
+      duration_ms: 1.11215
+      type: 'test'
+      ...
+    # Subtest: claims a generalized proposal before consulting the deterministic recovery queue
+    ok 3 - claims a generalized proposal before consulting the deterministic recovery queue
+      ---
+      duration_ms: 1.086511
+      type: 'test'
+      ...
+    # Subtest: falls back safely when the live site has not enabled the generalized claim contract yet
+    ok 4 - falls back safely when the live site has not enabled the generalized claim contract yet
+      ---
+      duration_ms: 0.623702
+      type: 'test'
+      ...
+    # Subtest: records a claim-bound result only at the canonical executor origin
+    ok 5 - records a claim-bound result only at the canonical executor origin
+      ---
+      duration_ms: 1.208165
+      type: 'test'
+      ...
+    1..5
+ok 660 - site executor HTTP client
+  ---
+  duration_ms: 39.105097
+  type: 'suite'
+  ...
+# Subtest: site executor orchestration
+    # Subtest: records a bounded failure with a digest and rethrows when publication fails
+    ok 1 - records a bounded failure with a digest and rethrows when publication fails
+      ---
+      duration_ms: 1903.453828
+      type: 'test'
+      ...
+    # Subtest: does nothing when no authorized directive is available
+    ok 2 - does nothing when no authorized directive is available
+      ---
+      duration_ms: 7.364342
+      type: 'test'
+      ...
+    1..2
+ok 661 - site executor orchestration
+  ---
+  duration_ms: 1912.04292
+  type: 'suite'
+  ...
+# Subtest: prepares the native verifier before claiming a directive
+ok 662 - prepares the native verifier before claiming a directive
+  ---
+  duration_ms: 1.257719
+  type: 'test'
+  ...
+# Subtest: records repository verification evidence without publishing raw output
+ok 663 - records repository verification evidence without publishing raw output
+  ---
+  duration_ms: 1095.785057
+  type: 'test'
+  ...
+# Subtest: does not overwrite an uncertain successful recording with failure
+ok 664 - does not overwrite an uncertain successful recording with failure
+  ---
+  duration_ms: 959.865218
+  type: 'test'
+  ...
+# Subtest: SARA protected family succession calculation
+    # Subtest: pays the eligible spouse 100% only as an owner-attested, legally inactive scenario
+    ok 1 - pays the eligible spouse 100% only as an owner-attested, legally inactive scenario
+      ---
+      duration_ms: 86.515227
+      type: 'test'
+      ...
+    # Subtest: splits 50/50 after an owner-attested death or incapacity scenario
+    ok 2 - splits 50/50 after an owner-attested death or incapacity scenario
+      ---
+      duration_ms: 61.865452
+      type: 'test'
+      ...
+    # Subtest: pays the sole owner-or-child survivor 100% after the spouse scenario
+    ok 3 - pays the sole owner-or-child survivor 100% after the spouse scenario
+      ---
+      duration_ms: 53.743611
+      type: 'test'
+      ...
+    # Subtest: preserves the explicit owner-death cascade from spouse 100% to child 100%
+    ok 4 - preserves the explicit owner-death cascade from spouse 100% to child 100%
+      ---
+      duration_ms: 52.316456
+      type: 'test'
+      ...
+    # Subtest: pays owner 100% after an attested separation or owner revocation scenario
+    ok 5 - pays owner 100% after an attested separation or owner revocation scenario
+      ---
+      duration_ms: 56.243631
+      type: 'test'
+      ...
+    # Subtest: falls through to child, then holds, when earlier roles are unavailable
+    ok 6 - falls through to child, then holds, when earlier roles are unavailable
+      ---
+      duration_ms: 29.02015
+      type: 'test'
+      ...
+    # Subtest: rejects malformed statuses, mismatched evidence classes, and zero evidence digests
+    ok 7 - rejects malformed statuses, mismatched evidence classes, and zero evidence digests
+      ---
+      duration_ms: 20.302504
+      type: 'test'
+      ...
+    # Subtest: requires the exact authenticated owner and approval bound to the entire scenario
+    ok 8 - requires the exact authenticated owner and approval bound to the entire scenario
+      ---
+      duration_ms: 50.932244
+      type: 'test'
+      ...
+    1..8
+ok 665 - SARA protected family succession calculation
+  ---
+  duration_ms: 413.045066
+  type: 'suite'
+  ...
+# Subtest: Telegram NICO delivery workflow
+    # Subtest: runs one exact assessment, independently verifies zero-review automated delivery, and returns provider acceptance
+    ok 1 - runs one exact assessment, independently verifies zero-review automated delivery, and returns provider acceptance
+      ---
+      duration_ms: 70.602093
+      type: 'test'
+      ...
+    # Subtest: refuses automatic replay after an uncertain create failure across restart
+    ok 2 - refuses automatic replay after an uncertain create failure across restart
+      ---
+      duration_ms: 20.288022
+      type: 'test'
+      ...
+    # Subtest: fails closed on unresolved review work and never requests or emails a package
+    ok 3 - fails closed on unresolved review work and never requests or emails a package
+      ---
+      duration_ms: 13.244343
+      type: 'test'
+      ...
+    # Subtest: rejects stale target evidence, human-review claims, malformed commits, and credential-bearing payloads
+    ok 4 - rejects stale target evidence, human-review claims, malformed commits, and credential-bearing payloads
+      ---
+      duration_ms: 47.523756
+      type: 'test'
+      ...
+    1..4
+ok 666 - Telegram NICO delivery workflow
+  ---
+  duration_ms: 153.394647
+  type: 'suite'
+  ...
+# Subtest: exclusively admits a command across two operator instances
+ok 667 - exclusively admits a command across two operator instances
+  ---
+  duration_ms: 28.520065
+  type: 'test'
+  ...
+# Subtest: does not bypass the daily limit by retrying a rejected request
+ok 668 - does not bypass the daily limit by retrying a rejected request
+  ---
+  duration_ms: 22.343536
+  type: 'test'
+  ...
+# Subtest: uses the actual NicoOperatorClient intake and package signatures
+ok 669 - uses the actual NicoOperatorClient intake and package signatures
+  ---
+  duration_ms: 65.181285
+  type: 'test'
+  ...
+# Subtest: checks Gmail identity before any assessment and honors revocation before package authorization
+ok 670 - checks Gmail identity before any assessment and honors revocation before package authorization
+  ---
+  duration_ms: 27.838034
+  type: 'test'
+  ...
+# Subtest: Telegram NICO delivery operator
+    # Subtest: rejects an unpaired Telegram identity before any external action
+    ok 1 - rejects an unpaired Telegram identity before any external action
+      ---
+      duration_ms: 10.705739
+      type: 'test'
+      ...
+    1..1
+ok 671 - Telegram NICO delivery operator
+  ---
+  duration_ms: 11.941166
+  type: 'suite'
+  ...
+# Subtest: Telegram NICO HTTP bridge
+    # Subtest: leaves the ordinary Telegram Luna route analysis-only
+    ok 1 - leaves the ordinary Telegram Luna route analysis-only
+      ---
+      duration_ms: 51.344157
+      type: 'test'
+      ...
+    # Subtest: requires the existing bridge credential and Cody's paired Telegram identity
+    ok 2 - requires the existing bridge credential and Cody's paired Telegram identity
+      ---
+      duration_ms: 25.096344
+      type: 'test'
+      ...
+    # Subtest: delegates only a deterministic supported structured action
+    ok 3 - delegates only a deterministic supported structured action
+      ---
+      duration_ms: 9.36229
+      type: 'test'
+      ...
+    # Subtest: deterministically parses the authorized private p-map instruction without model tool authority
+    ok 4 - deterministically parses the authorized private p-map instruction without model tool authority
+      ---
+      duration_ms: 7.953131
+      type: 'test'
+      ...
+    # Subtest: starts OAuth only for the paired identity and returns a sanitized exact-account authorization step
+    ok 5 - starts OAuth only for the paired identity and returns a sanitized exact-account authorization step
+      ---
+      duration_ms: 29.121378
+      type: 'test'
+      ...
+    1..5
+ok 672 - Telegram NICO HTTP bridge
+  ---
+  duration_ms: 124.460943
+  type: 'suite'
+  ...
+# Subtest: Telegram NICO production authorization
+    # Subtest: fails closed without the exact owner mandate
+    ok 1 - fails closed without the exact owner mandate
+      ---
+      duration_ms: 1.006981
+      type: 'test'
+      ...
+    # Subtest: preserves owner revocation
+    ok 2 - preserves owner revocation
+      ---
+      duration_ms: 0.183077
+      type: 'test'
+      ...
+    # Subtest: blocks an active or unverifiable emergency stop
+    ok 3 - blocks an active or unverifiable emergency stop
+      ---
+      duration_ms: 0.41062
+      type: 'test'
+      ...
+    # Subtest: allows only the exact mandate plus explicit inactive emergency-stop evidence
+    ok 4 - allows only the exact mandate plus explicit inactive emergency-stop evidence
+      ---
+      duration_ms: 1.791456
+      type: 'test'
+      ...
+    1..4
+ok 673 - Telegram NICO production authorization
+  ---
+  duration_ms: 4.805649
+  type: 'suite'
+  ...
+# Subtest: SARA TGRM — sample weekend plan
+    # Subtest: detects coffee, missing walk, and keeps the market as a fact
+    ok 1 - detects coffee, missing walk, and keeps the market as a fact
+      ---
+      duration_ms: 2.872288
+      type: 'test'
+      ...
+    # Subtest: TGRM on: drops caffeine, adds a walk, keeps the market, verifies
+    ok 2 - TGRM on: drops caffeine, adds a walk, keeps the market, verifies
+      ---
+      duration_ms: 1.895563
+      type: 'test'
+      ...
+    # Subtest: TGRM off: leaves faults in place
+    ok 3 - TGRM off: leaves faults in place
+      ---
+      duration_ms: 0.226793
+      type: 'test'
+      ...
+    # Subtest: compare: on holds all rules, off does not
+    ok 4 - compare: on holds all rules, off does not
+      ---
+      duration_ms: 0.610332
+      type: 'test'
+      ...
+    # Subtest: clean text needs no repair
+    ok 5 - clean text needs no repair
+      ---
+      duration_ms: 0.244659
+      type: 'test'
+      ...
+    # Subtest: inactive rules are ignored
+    ok 6 - inactive rules are ignored
+      ---
+      duration_ms: 0.212811
+      type: 'test'
+      ...
+    # Subtest: repairs large uncontrolled whitespace in linear cleanup paths
+    ok 7 - repairs large uncontrolled whitespace in linear cleanup paths
+      ---
+      duration_ms: 17.19494
+      type: 'test'
+      ...
+    1..7
+ok 674 - SARA TGRM — sample weekend plan
+  ---
+  duration_ms: 24.774358
+  type: 'suite'
+  ...
+# Subtest: SARA governed tool registry
+    # Subtest: reports real tools, runtime readiness, and authority boundaries
+    ok 1 - reports real tools, runtime readiness, and authority boundaries
+      ---
+      duration_ms: 1.571774
+      type: 'test'
+      ...
+    # Subtest: does not pretend Luna is available without its runtime configuration
+    ok 2 - does not pretend Luna is available without its runtime configuration
+      ---
+      duration_ms: 0.283058
+      type: 'test'
+      ...
+    1..2
+ok 675 - SARA governed tool registry
+  ---
+  duration_ms: 3.183178
+  type: 'suite'
+  ...
+# Subtest: direct Base USDC payment verification
+    # Subtest: accepts exactly one confirmed 149 USDC transfer to the configured owner wallet
+    ok 1 - accepts exactly one confirmed 149 USDC transfer to the configured owner wallet
+      ---
+      duration_ms: 28.976344
+      type: 'test'
+      ...
+    # Subtest: rejects failed, under-confirmed, wrong-token, wrong-recipient, wrong-amount, and duplicate transfers
+    ok 2 - rejects failed, under-confirmed, wrong-token, wrong-recipient, wrong-amount, and duplicate transfers
+      ---
+      duration_ms: 4.080713
+      type: 'test'
+      ...
+    # Subtest: rejects malformed identifiers and credential-bearing RPC URLs before network use
+    ok 3 - rejects malformed identifiers and credential-bearing RPC URLs before network use
+      ---
+      duration_ms: 0.683202
+      type: 'test'
+      ...
+    1..3
+ok 676 - direct Base USDC payment verification
+  ---
+  duration_ms: 35.90541
+  type: 'suite'
+  ...
+# Subtest: offline V7 failure diagnostics
+    # Subtest: retains a bounded CHANGED_LINE_LIMIT reason instead of only Error
+    ok 1 - retains a bounded CHANGED_LINE_LIMIT reason instead of only Error
+      ---
+      duration_ms: 2.163377
+      type: 'test'
+      ...
+    # Subtest: retains a bounded STALE_ARTIFACT reason instead of only Error
+    ok 2 - retains a bounded STALE_ARTIFACT reason instead of only Error
+      ---
+      duration_ms: 0.1926
+      type: 'test'
+      ...
+    # Subtest: retains a bounded STRATEGY_MISMATCH reason instead of only Error
+    ok 3 - retains a bounded STRATEGY_MISMATCH reason instead of only Error
+      ---
+      duration_ms: 0.130938
+      type: 'test'
+      ...
+    # Subtest: retains a bounded PROTECTED_PATH reason instead of only Error
+    ok 4 - retains a bounded PROTECTED_PATH reason instead of only Error
+      ---
+      duration_ms: 0.11901
+      type: 'test'
+      ...
+    # Subtest: retains a bounded MODEL_OUTPUT_CONTRACT reason instead of only Error
+    ok 5 - retains a bounded MODEL_OUTPUT_CONTRACT reason instead of only Error
+      ---
+      duration_ms: 0.118999
+      type: 'test'
+      ...
+    # Subtest: retains a bounded MODEL_COST_INVALID reason instead of only Error
+    ok 6 - retains a bounded MODEL_COST_INVALID reason instead of only Error
+      ---
+      duration_ms: 0.243238
+      type: 'test'
+      ...
+    # Subtest: never copies provider prose, secrets, expected outputs, stacks, or causes
+    ok 7 - never copies provider prose, secrets, expected outputs, stacks, or causes
+      ---
+      duration_ms: 0.418462
+      type: 'test'
+      ...
+    # Subtest: does not invoke a message getter
+    ok 8 - does not invoke a message getter
+      ---
+      duration_ms: 0.299152
+      type: 'test'
+      ...
+    # Subtest: fails closed for a hostile descriptor trap
+    ok 9 - fails closed for a hostile descriptor trap
+      ---
+      duration_ms: 0.419884
+      type: 'test'
+      ...
+    # Subtest: bounds an untrusted stage rather than serializing it
+    ok 10 - bounds an untrusted stage rather than serializing it
+      ---
+      duration_ms: 0.508107
+      type: 'test'
+      ...
+    # Subtest: is deterministic and does not reinterpret an old generic Error
+    ok 11 - is deterministic and does not reinterpret an old generic Error
+      ---
+      duration_ms: 0.25203
+      type: 'test'
+      ...
+    # Subtest: does not turn an errored comparison into a speed claim
+    ok 12 - does not turn an errored comparison into a speed claim
+      ---
+      duration_ms: 0.334295
+      type: 'test'
+      ...
+    # Subtest: rejects a spent live authorization regardless of self-test flags
+    ok 13 - rejects a spent live authorization regardless of self-test flags
+      ---
+      duration_ms: 0.789172
+      type: 'test'
+      ...
+    # Subtest: captures an actual controller boundary rejection without another verifier or model call
+    ok 14 - captures an actual controller boundary rejection without another verifier or model call
+      ---
+      duration_ms: 2.316459
+      type: 'test'
+      ...
+    # Subtest: the runner itself rejects --live before provider access, even with credential-shaped input
+    ok 15 - the runner itself rejects --live before provider access, even with credential-shaped input
+      ---
+      duration_ms: 268.605078
+      type: 'test'
+      ...
+    1..15
+ok 677 - offline V7 failure diagnostics
+  ---
+  duration_ms: 278.952656
+  type: 'suite'
+  ...
+# Subtest: literal maintenance is exact-source-bound and refuses script, attribute and ambiguous slots
+ok 678 - literal maintenance is exact-source-bound and refuses script, attribute and ambiguous slots
+  ---
+  duration_ms: 4.383811
+  type: 'test'
+  ...
+# (node:6923) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: owner approval, idempotency, immutable request and stop are enforced by the existing kernel
+ok 679 - owner approval, idempotency, immutable request and stop are enforced by the existing kernel
+  ---
+  duration_ms: 119.705891
+  type: 'test'
+  ...
+# Subtest: real local artifact and durable restart complete a fixture-provider workflow without replaying publication or notification
+ok 680 - real local artifact and durable restart complete a fixture-provider workflow without replaying publication or notification
+  ---
+  duration_ms: 186.854864
+  type: 'test'
+  ...
+# Subtest: missing publishing credentials stop honestly and artifact tampering prevents dispatch
+ok 681 - missing publishing credentials stop honestly and artifact tampering prevents dispatch
+  ---
+  duration_ms: 67.284722
+  type: 'test'
+  ...
+# Subtest: a mismatched deployment is restored and verified after a lost rollback response
+ok 682 - a mismatched deployment is restored and verified after a lost rollback response
+  ---
+  duration_ms: 78.850019
+  type: 'test'
+  ...
+# Subtest: durable backoff lets other jobs proceed and bounded failures retain a review obligation
+ok 683 - durable backoff lets other jobs proceed and bounded failures retain a review obligation
+  ---
+  duration_ms: 104.746789
+  type: 'test'
+  ...
+# Subtest: maintenance HTTP intake requires owner authentication and exact request approval
+ok 684 - maintenance HTTP intake requires owner authentication and exact request approval
+  ---
+  duration_ms: 116.316205
+  type: 'test'
+  ...
+1..684
+# tests 1084
+# suites 109
+# pass 1072
+# fail 12
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 169157.566832
+
+=== npm run typecheck ===
+
+> sara@1.0.0 typecheck
+> tsc --noEmit
+
