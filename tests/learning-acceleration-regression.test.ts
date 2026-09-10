@@ -67,12 +67,9 @@ test("eligible HTTP 408 receives one same-reservation retry", async () => {
     });
     const audit = await kernel.inspectAudit();
     if (result.status !== "verified_shadow") {
-      const state = await kernel.state();
       const evidence = {
         result,
         calls,
-        jobs: state.jobs.map((job) => ({ id: job.id, status: job.status })),
-        mutations: state.mutations.map((mutation) => ({ id: mutation.id, stage: mutation.stage, candidateDigest: mutation.candidateDigest })),
         events: audit
           .filter((event) => /learning|job_status_changed|mutation|verification|memory_recorded/u.test(event.type))
           .slice(-32)
