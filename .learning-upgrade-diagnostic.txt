@@ -1,496 +1,510 @@
 test_status=1
 typecheck_status=0
 
-=== npm test ===
-    ok 2 - treats an empty claim queue as normal and never sends a non-zero budget
-      ---
-      duration_ms: 1.11215
-      type: 'test'
-      ...
-    # Subtest: claims a generalized proposal before consulting the deterministic recovery queue
-    ok 3 - claims a generalized proposal before consulting the deterministic recovery queue
-      ---
-      duration_ms: 1.086511
-      type: 'test'
-      ...
-    # Subtest: falls back safely when the live site has not enabled the generalized claim contract yet
-    ok 4 - falls back safely when the live site has not enabled the generalized claim contract yet
-      ---
-      duration_ms: 0.623702
-      type: 'test'
-      ...
-    # Subtest: records a claim-bound result only at the canonical executor origin
-    ok 5 - records a claim-bound result only at the canonical executor origin
-      ---
-      duration_ms: 1.208165
-      type: 'test'
-      ...
-    1..5
-ok 660 - site executor HTTP client
-  ---
-  duration_ms: 39.105097
-  type: 'suite'
-  ...
-# Subtest: site executor orchestration
-    # Subtest: records a bounded failure with a digest and rethrows when publication fails
-    ok 1 - records a bounded failure with a digest and rethrows when publication fails
-      ---
-      duration_ms: 1903.453828
-      type: 'test'
-      ...
-    # Subtest: does nothing when no authorized directive is available
-    ok 2 - does nothing when no authorized directive is available
-      ---
-      duration_ms: 7.364342
-      type: 'test'
-      ...
-    1..2
-ok 661 - site executor orchestration
-  ---
-  duration_ms: 1912.04292
-  type: 'suite'
-  ...
-# Subtest: prepares the native verifier before claiming a directive
-ok 662 - prepares the native verifier before claiming a directive
-  ---
-  duration_ms: 1.257719
-  type: 'test'
-  ...
-# Subtest: records repository verification evidence without publishing raw output
-ok 663 - records repository verification evidence without publishing raw output
-  ---
-  duration_ms: 1095.785057
-  type: 'test'
-  ...
-# Subtest: does not overwrite an uncertain successful recording with failure
-ok 664 - does not overwrite an uncertain successful recording with failure
-  ---
-  duration_ms: 959.865218
-  type: 'test'
-  ...
-# Subtest: SARA protected family succession calculation
-    # Subtest: pays the eligible spouse 100% only as an owner-attested, legally inactive scenario
-    ok 1 - pays the eligible spouse 100% only as an owner-attested, legally inactive scenario
-      ---
-      duration_ms: 86.515227
-      type: 'test'
-      ...
-    # Subtest: splits 50/50 after an owner-attested death or incapacity scenario
-    ok 2 - splits 50/50 after an owner-attested death or incapacity scenario
-      ---
-      duration_ms: 61.865452
-      type: 'test'
-      ...
-    # Subtest: pays the sole owner-or-child survivor 100% after the spouse scenario
-    ok 3 - pays the sole owner-or-child survivor 100% after the spouse scenario
-      ---
-      duration_ms: 53.743611
-      type: 'test'
-      ...
-    # Subtest: preserves the explicit owner-death cascade from spouse 100% to child 100%
-    ok 4 - preserves the explicit owner-death cascade from spouse 100% to child 100%
-      ---
-      duration_ms: 52.316456
-      type: 'test'
-      ...
-    # Subtest: pays owner 100% after an attested separation or owner revocation scenario
-    ok 5 - pays owner 100% after an attested separation or owner revocation scenario
-      ---
-      duration_ms: 56.243631
-      type: 'test'
-      ...
-    # Subtest: falls through to child, then holds, when earlier roles are unavailable
-    ok 6 - falls through to child, then holds, when earlier roles are unavailable
-      ---
-      duration_ms: 29.02015
-      type: 'test'
-      ...
-    # Subtest: rejects malformed statuses, mismatched evidence classes, and zero evidence digests
-    ok 7 - rejects malformed statuses, mismatched evidence classes, and zero evidence digests
-      ---
-      duration_ms: 20.302504
-      type: 'test'
-      ...
-    # Subtest: requires the exact authenticated owner and approval bound to the entire scenario
-    ok 8 - requires the exact authenticated owner and approval bound to the entire scenario
-      ---
-      duration_ms: 50.932244
-      type: 'test'
-      ...
-    1..8
-ok 665 - SARA protected family succession calculation
-  ---
-  duration_ms: 413.045066
-  type: 'suite'
-  ...
-# Subtest: Telegram NICO delivery workflow
-    # Subtest: runs one exact assessment, independently verifies zero-review automated delivery, and returns provider acceptance
-    ok 1 - runs one exact assessment, independently verifies zero-review automated delivery, and returns provider acceptance
-      ---
-      duration_ms: 70.602093
-      type: 'test'
-      ...
-    # Subtest: refuses automatic replay after an uncertain create failure across restart
-    ok 2 - refuses automatic replay after an uncertain create failure across restart
-      ---
-      duration_ms: 20.288022
-      type: 'test'
-      ...
-    # Subtest: fails closed on unresolved review work and never requests or emails a package
-    ok 3 - fails closed on unresolved review work and never requests or emails a package
-      ---
-      duration_ms: 13.244343
-      type: 'test'
-      ...
-    # Subtest: rejects stale target evidence, human-review claims, malformed commits, and credential-bearing payloads
-    ok 4 - rejects stale target evidence, human-review claims, malformed commits, and credential-bearing payloads
-      ---
-      duration_ms: 47.523756
-      type: 'test'
-      ...
-    1..4
-ok 666 - Telegram NICO delivery workflow
-  ---
-  duration_ms: 153.394647
-  type: 'suite'
-  ...
-# Subtest: exclusively admits a command across two operator instances
-ok 667 - exclusively admits a command across two operator instances
-  ---
-  duration_ms: 28.520065
-  type: 'test'
-  ...
-# Subtest: does not bypass the daily limit by retrying a rejected request
-ok 668 - does not bypass the daily limit by retrying a rejected request
-  ---
-  duration_ms: 22.343536
-  type: 'test'
-  ...
-# Subtest: uses the actual NicoOperatorClient intake and package signatures
-ok 669 - uses the actual NicoOperatorClient intake and package signatures
-  ---
-  duration_ms: 65.181285
-  type: 'test'
-  ...
-# Subtest: checks Gmail identity before any assessment and honors revocation before package authorization
-ok 670 - checks Gmail identity before any assessment and honors revocation before package authorization
-  ---
-  duration_ms: 27.838034
-  type: 'test'
-  ...
-# Subtest: Telegram NICO delivery operator
-    # Subtest: rejects an unpaired Telegram identity before any external action
-    ok 1 - rejects an unpaired Telegram identity before any external action
-      ---
-      duration_ms: 10.705739
-      type: 'test'
-      ...
-    1..1
-ok 671 - Telegram NICO delivery operator
-  ---
-  duration_ms: 11.941166
-  type: 'suite'
-  ...
-# Subtest: Telegram NICO HTTP bridge
-    # Subtest: leaves the ordinary Telegram Luna route analysis-only
-    ok 1 - leaves the ordinary Telegram Luna route analysis-only
-      ---
-      duration_ms: 51.344157
-      type: 'test'
-      ...
-    # Subtest: requires the existing bridge credential and Cody's paired Telegram identity
-    ok 2 - requires the existing bridge credential and Cody's paired Telegram identity
-      ---
-      duration_ms: 25.096344
-      type: 'test'
-      ...
-    # Subtest: delegates only a deterministic supported structured action
-    ok 3 - delegates only a deterministic supported structured action
-      ---
-      duration_ms: 9.36229
-      type: 'test'
-      ...
-    # Subtest: deterministically parses the authorized private p-map instruction without model tool authority
-    ok 4 - deterministically parses the authorized private p-map instruction without model tool authority
-      ---
-      duration_ms: 7.953131
-      type: 'test'
-      ...
-    # Subtest: starts OAuth only for the paired identity and returns a sanitized exact-account authorization step
-    ok 5 - starts OAuth only for the paired identity and returns a sanitized exact-account authorization step
-      ---
-      duration_ms: 29.121378
-      type: 'test'
-      ...
-    1..5
-ok 672 - Telegram NICO HTTP bridge
-  ---
-  duration_ms: 124.460943
-  type: 'suite'
-  ...
-# Subtest: Telegram NICO production authorization
-    # Subtest: fails closed without the exact owner mandate
-    ok 1 - fails closed without the exact owner mandate
-      ---
-      duration_ms: 1.006981
-      type: 'test'
-      ...
-    # Subtest: preserves owner revocation
-    ok 2 - preserves owner revocation
-      ---
-      duration_ms: 0.183077
-      type: 'test'
-      ...
-    # Subtest: blocks an active or unverifiable emergency stop
-    ok 3 - blocks an active or unverifiable emergency stop
-      ---
-      duration_ms: 0.41062
-      type: 'test'
-      ...
-    # Subtest: allows only the exact mandate plus explicit inactive emergency-stop evidence
-    ok 4 - allows only the exact mandate plus explicit inactive emergency-stop evidence
-      ---
-      duration_ms: 1.791456
-      type: 'test'
-      ...
-    1..4
-ok 673 - Telegram NICO production authorization
-  ---
-  duration_ms: 4.805649
-  type: 'suite'
-  ...
-# Subtest: SARA TGRM — sample weekend plan
-    # Subtest: detects coffee, missing walk, and keeps the market as a fact
-    ok 1 - detects coffee, missing walk, and keeps the market as a fact
-      ---
-      duration_ms: 2.872288
-      type: 'test'
-      ...
-    # Subtest: TGRM on: drops caffeine, adds a walk, keeps the market, verifies
-    ok 2 - TGRM on: drops caffeine, adds a walk, keeps the market, verifies
-      ---
-      duration_ms: 1.895563
-      type: 'test'
-      ...
-    # Subtest: TGRM off: leaves faults in place
-    ok 3 - TGRM off: leaves faults in place
-      ---
-      duration_ms: 0.226793
-      type: 'test'
-      ...
-    # Subtest: compare: on holds all rules, off does not
-    ok 4 - compare: on holds all rules, off does not
-      ---
-      duration_ms: 0.610332
-      type: 'test'
-      ...
-    # Subtest: clean text needs no repair
-    ok 5 - clean text needs no repair
-      ---
-      duration_ms: 0.244659
-      type: 'test'
-      ...
-    # Subtest: inactive rules are ignored
-    ok 6 - inactive rules are ignored
-      ---
-      duration_ms: 0.212811
-      type: 'test'
-      ...
-    # Subtest: repairs large uncontrolled whitespace in linear cleanup paths
-    ok 7 - repairs large uncontrolled whitespace in linear cleanup paths
-      ---
-      duration_ms: 17.19494
-      type: 'test'
-      ...
-    1..7
-ok 674 - SARA TGRM — sample weekend plan
-  ---
-  duration_ms: 24.774358
-  type: 'suite'
-  ...
-# Subtest: SARA governed tool registry
-    # Subtest: reports real tools, runtime readiness, and authority boundaries
-    ok 1 - reports real tools, runtime readiness, and authority boundaries
-      ---
-      duration_ms: 1.571774
-      type: 'test'
-      ...
-    # Subtest: does not pretend Luna is available without its runtime configuration
-    ok 2 - does not pretend Luna is available without its runtime configuration
-      ---
-      duration_ms: 0.283058
-      type: 'test'
-      ...
-    1..2
-ok 675 - SARA governed tool registry
-  ---
-  duration_ms: 3.183178
-  type: 'suite'
-  ...
-# Subtest: direct Base USDC payment verification
-    # Subtest: accepts exactly one confirmed 149 USDC transfer to the configured owner wallet
-    ok 1 - accepts exactly one confirmed 149 USDC transfer to the configured owner wallet
-      ---
-      duration_ms: 28.976344
-      type: 'test'
-      ...
-    # Subtest: rejects failed, under-confirmed, wrong-token, wrong-recipient, wrong-amount, and duplicate transfers
-    ok 2 - rejects failed, under-confirmed, wrong-token, wrong-recipient, wrong-amount, and duplicate transfers
-      ---
-      duration_ms: 4.080713
-      type: 'test'
-      ...
-    # Subtest: rejects malformed identifiers and credential-bearing RPC URLs before network use
-    ok 3 - rejects malformed identifiers and credential-bearing RPC URLs before network use
-      ---
-      duration_ms: 0.683202
-      type: 'test'
-      ...
-    1..3
-ok 676 - direct Base USDC payment verification
-  ---
-  duration_ms: 35.90541
-  type: 'suite'
-  ...
-# Subtest: offline V7 failure diagnostics
-    # Subtest: retains a bounded CHANGED_LINE_LIMIT reason instead of only Error
-    ok 1 - retains a bounded CHANGED_LINE_LIMIT reason instead of only Error
-      ---
-      duration_ms: 2.163377
-      type: 'test'
-      ...
-    # Subtest: retains a bounded STALE_ARTIFACT reason instead of only Error
-    ok 2 - retains a bounded STALE_ARTIFACT reason instead of only Error
-      ---
-      duration_ms: 0.1926
-      type: 'test'
-      ...
-    # Subtest: retains a bounded STRATEGY_MISMATCH reason instead of only Error
-    ok 3 - retains a bounded STRATEGY_MISMATCH reason instead of only Error
-      ---
-      duration_ms: 0.130938
-      type: 'test'
-      ...
-    # Subtest: retains a bounded PROTECTED_PATH reason instead of only Error
-    ok 4 - retains a bounded PROTECTED_PATH reason instead of only Error
-      ---
-      duration_ms: 0.11901
-      type: 'test'
-      ...
-    # Subtest: retains a bounded MODEL_OUTPUT_CONTRACT reason instead of only Error
-    ok 5 - retains a bounded MODEL_OUTPUT_CONTRACT reason instead of only Error
-      ---
-      duration_ms: 0.118999
-      type: 'test'
-      ...
-    # Subtest: retains a bounded MODEL_COST_INVALID reason instead of only Error
-    ok 6 - retains a bounded MODEL_COST_INVALID reason instead of only Error
-      ---
-      duration_ms: 0.243238
-      type: 'test'
-      ...
-    # Subtest: never copies provider prose, secrets, expected outputs, stacks, or causes
-    ok 7 - never copies provider prose, secrets, expected outputs, stacks, or causes
-      ---
-      duration_ms: 0.418462
-      type: 'test'
-      ...
-    # Subtest: does not invoke a message getter
-    ok 8 - does not invoke a message getter
-      ---
-      duration_ms: 0.299152
-      type: 'test'
-      ...
-    # Subtest: fails closed for a hostile descriptor trap
-    ok 9 - fails closed for a hostile descriptor trap
-      ---
-      duration_ms: 0.419884
-      type: 'test'
-      ...
-    # Subtest: bounds an untrusted stage rather than serializing it
-    ok 10 - bounds an untrusted stage rather than serializing it
-      ---
-      duration_ms: 0.508107
-      type: 'test'
-      ...
-    # Subtest: is deterministic and does not reinterpret an old generic Error
-    ok 11 - is deterministic and does not reinterpret an old generic Error
-      ---
-      duration_ms: 0.25203
-      type: 'test'
-      ...
-    # Subtest: does not turn an errored comparison into a speed claim
-    ok 12 - does not turn an errored comparison into a speed claim
-      ---
-      duration_ms: 0.334295
+=== focused npm test failures ===
+3213-  ...
+3214-# Subtest: experiment runner differs only by an optional explicitly recorded final verifier
+3215-ok 300 - experiment runner differs only by an optional explicitly recorded final verifier
+3216-  ---
+3217-  duration_ms: 1.989466
+3218-  type: 'test'
+3219-  ...
+3220-# Subtest: offline actual-verifier pilot luna keeps hidden tests and two fresh legacy finals
+3221:not ok 301 - offline actual-verifier pilot luna keeps hidden tests and two fresh legacy finals
+3222-  ---
+3223-  duration_ms: 27.195647
+3224-  type: 'test'
+3225-  location: '/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:15:1390'
+3226:  failureType: 'testCodeFailure'
+3227:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+3228-  code: 'ENOENT'
+3229-  stack: |-
+3230-    async open (node:internal/fs/promises:639:25)
+3231-    async readFile (node:internal/fs/promises:1252:14)
+3232-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+3233-    async TestContext.<anonymous> (/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:83:32)
+3234-    async Test.run (node:internal/test_runner/test:1054:7)
+3235-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+3236-  ...
+3237-# Subtest: offline actual-verifier pilot luna_reparodynamic keeps hidden tests and two fresh legacy finals
+3238:not ok 302 - offline actual-verifier pilot luna_reparodynamic keeps hidden tests and two fresh legacy finals
+3239-  ---
+3240-  duration_ms: 21.319703
+3241-  type: 'test'
+3242-  location: '/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:15:1390'
+3243:  failureType: 'testCodeFailure'
+3244:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+3245-  code: 'ENOENT'
+3246-  stack: |-
+3247-    async open (node:internal/fs/promises:639:25)
+3248-    async readFile (node:internal/fs/promises:1252:14)
+3249-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+3250-    async TestContext.<anonymous> (/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:83:32)
+3251-    async Test.run (node:internal/test_runner/test:1054:7)
+3252-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+3253-  ...
+3254-# Subtest: a changed protected test is rejected before any provider request
+3255-ok 303 - a changed protected test is rejected before any provider request
+3256-  ---
+3257-  duration_ms: 1.85335
+3258-  type: 'test'
+3259-  ...
+3260-# Subtest: revoked authority rejects before compilation or model dispatch
+3261-ok 304 - revoked authority rejects before compilation or model dispatch
+3262-  ---
+3263-  duration_ms: 3.258078
+3264-  type: 'test'
+3265-  ...
+3266-# Subtest: a provisional native PASS cannot return a type-invalid program
+3267:not ok 305 - a provisional native PASS cannot return a type-invalid program
+3268-  ---
+3269-  duration_ms: 4.810684
+3270-  type: 'test'
+3271-  location: '/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:15:2935'
+3272:  failureType: 'testCodeFailure'
+3273:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+3274-  code: 'ENOENT'
+3275-  stack: |-
+3276-    async open (node:internal/fs/promises:639:25)
+3277-    async readFile (node:internal/fs/promises:1252:14)
+3278-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+3279-    async TestContext.<anonymous> (/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:103:16)
+3280-    async Test.run (node:internal/test_runner/test:1054:7)
+3281-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+3282-  ...
+3283-# Subtest: served dashboard scripts parse before owner event handlers are installed
+3284-ok 306 - served dashboard scripts parse before owner event handlers are installed
+3285-  ---
+3286-  duration_ms: 2.437006
+3287-  type: 'test'
+3288-  ...
+3289-# Subtest: exact reuse has a fresh capped grant while previous activation and unresolved hold remain unchanged
+3290-ok 307 - exact reuse has a fresh capped grant while previous activation and unresolved hold remain unchanged
+3291-  ---
+3292-  duration_ms: 2.203287
+3293-  type: 'test'
+3294-  ...
+3295-# Subtest: exact grant requires current canary, owner, constitution and stop authority
+3296-ok 308 - exact grant requires current canary, owner, constitution and stop authority
+3297-  ---
+--
+4205-  ...
+4206-# Subtest: all historical paid benchmark pins reject the changed maintenance kernel
+4207-ok 406 - all historical paid benchmark pins reject the changed maintenance kernel
+4208-  ---
+4209-  duration_ms: 7.51059
+4210-  type: 'test'
+4211-  ...
+4212-# Subtest: all twelve actual HTTP/kernel jobs complete with six scripted generations and fresh acceptance
+4213:not ok 407 - all twelve actual HTTP/kernel jobs complete with six scripted generations and fresh acceptance
+4214-  ---
+4215-  duration_ms: 68.252465
+4216-  type: 'test'
+4217-  location: '/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:11:4841'
+4218:  failureType: 'testCodeFailure'
+4219:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+4220-  code: 'ENOENT'
+4221-  stack: |-
+4222-    async open (node:internal/fs/promises:639:25)
+4223-    async readFile (node:internal/fs/promises:1252:14)
+4224-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+4225-    async runKernelCodingBenchmark (/home/runner/work/SARA/SARA/tests/helpers/maintenance-kernel-regression.ts:94:18)
+4226-    async <anonymous> (/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:94:16)
+4227-    async inDirectory (/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:54:9)
+4228-    async Test.run (node:internal/test_runner/test:1054:7)
+4229-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+4230-  ...
+4231-# Subtest: third-generation uncertainty stays counted even without reuse callback, and all warm jobs stay unrun
+4232:not ok 408 - third-generation uncertainty stays counted even without reuse callback, and all warm jobs stay unrun
+4233-  ---
+4234-  duration_ms: 53.643262
+4235-  type: 'test'
+4236-  location: '/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:11:7294'
+4237:  failureType: 'testCodeFailure'
+4238:  error: |-
+4239-    The input did not match the regular expression /INCOMPLETE_NO_REPLAY/. Input:
+4240-    
+4241-    "Error: ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+4242-    
+4243:  code: 'ERR_ASSERTION'
+4244:  name: 'AssertionError'
+4245:  expected:
+4246:  actual:
+4247:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+4248-  stack: |-
+4249-    async open (node:internal/fs/promises:639:25)
+4250-    async readFile (node:internal/fs/promises:1252:14)
+4251-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+4252-    async runKernelCodingBenchmark (/home/runner/work/SARA/SARA/tests/helpers/maintenance-kernel-regression.ts:94:18)
+4253-    async waitForActual (node:assert:644:5)
+4254-    async Function.rejects (node:assert:767:25)
+4255-    async <anonymous> (/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:122:3)
+4256-    async inDirectory (/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:54:9)
+4257-    async Test.run (node:internal/test_runner/test:1054:7)
+4258-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+4259-  operator: 'rejects'
+4260-  stack: |-
+4261-    async <anonymous> (/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:122:3)
+4262-    async inDirectory (/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:54:9)
+4263-    async Test.run (node:internal/test_runner/test:1054:7)
+4264-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+4265-  ...
+4266-# Subtest: authority rejection before trial admission makes no provider request
+4267-ok 409 - authority rejection before trial admission makes no provider request
+4268-  ---
+4269-  duration_ms: 20.223368
+4270-  type: 'test'
+4271-  ...
+4272-# Subtest: offline current-kernel regression cannot dispatch with a real key or live execution
+4273-ok 410 - offline current-kernel regression cannot dispatch with a real key or live execution
+4274-  ---
+4275-  duration_ms: 1.906502
+4276-  type: 'test'
+4277-  ...
+4278-# Subtest: new actual HTTP coding path preserves learning across restart and times kernel acceptance
+4279:not ok 411 - new actual HTTP coding path preserves learning across restart and times kernel acceptance
+4280-  ---
+4281-  duration_ms: 52.927437
+4282-  type: 'test'
+4283-  location: '/home/runner/work/SARA/SARA/tests/kernel-coding-lifecycle.test.ts:1:698'
+4284:  failureType: 'testCodeFailure'
+4285:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+4286-  code: 'ENOENT'
+4287-  stack: |-
+4288-    async open (node:internal/fs/promises:639:25)
+4289-    async readFile (node:internal/fs/promises:1252:14)
+4290-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+4291-    async TestContext.<anonymous> (/home/runner/work/SARA/SARA/tests/kernel-coding-lifecycle.test.ts:23:30)
+4292-    async Test.run (node:internal/test_runner/test:1054:7)
+4293-    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+4294-  ...
+4295-# Subtest: stop then resume during generation retires the already-admitted job before kernel verification
+4296-ok 412 - stop then resume during generation retires the already-admitted job before kernel verification
+4297-  ---
+4298-  duration_ms: 251.824479
+4299-  type: 'test'
+4300-  ...
+4301-# Subtest: only one continuation allowance: 17430b72-1b04-4b9f-8f1c-e75b8b5f4235 observes every competing claim
+4302-ok 413 - only one continuation allowance: 17430b72-1b04-4b9f-8f1c-e75b8b5f4235 observes every competing claim
+4303-  ---
+4304-  duration_ms: 33.994374
+4305-  type: 'test'
+4306-  ...
+4307-# Subtest: only one continuation allowance: 68990425-bf42-4ec5-a4f1-e6af301780ac observes every competing claim
+4308-ok 414 - only one continuation allowance: 68990425-bf42-4ec5-a4f1-e6af301780ac observes every competing claim
+4309-  ---
+--
+4787-  ...
+4788-# Subtest: unexpected provider usage freezes subsequent paid dispatch
+4789-ok 482 - unexpected provider usage freezes subsequent paid dispatch
+4790-  ---
+4791-  duration_ms: 99.032329
+4792-  type: 'test'
+4793-  ...
+4794-# Subtest: allocation HTTP controls require owner authentication
+4795:not ok 483 - allocation HTTP controls require owner authentication
+4796-  ---
+4797-  duration_ms: 145.938555
+4798-  type: 'test'
+4799-  location: '/home/runner/work/SARA/SARA/tests/model-budget.test.ts:1:4841'
+4800:  failureType: 'testCodeFailure'
+4801:  error: |-
+4802-    Expected values to be strictly equal:
+4803-    
+4804-    10 !== 2
+4805-    
+4806:  code: 'ERR_ASSERTION'
+4807:  name: 'AssertionError'
+4808:  expected: 2
+4809:  actual: 10
+4810-  operator: 'strictEqual'
+4811-  stack: |-
+4812-    TestContext.<anonymous> (/home/runner/work/SARA/SARA/tests/model-budget.test.ts:94:58)
+4813-    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+4814-    async Test.run (node:internal/test_runner/test:1054:7)
+4815-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+4816-  ...
+4817-# Subtest: SARA worker model routing policy
+4818-    # Subtest: routes public repository investigation through Luna first with a bounded Gemini fallback
+4819-    ok 1 - routes public repository investigation through Luna first with a bounded Gemini fallback
+4820-      ---
+4821-      duration_ms: 2.045073
+4822-      type: 'test'
+4823-      ...
+4824-    # Subtest: never sends customer-confidential work through a training-eligible free tier
+4825-    ok 2 - never sends customer-confidential work through a training-eligible free tier
+4826-      ---
+4827-      duration_ms: 0.24477
+4828-      type: 'test'
+4829-      ...
+4830-    # Subtest: fails closed instead of routing credentials or regulated data to a model
+4831-    ok 3 - fails closed instead of routing credentials or regulated data to a model
+4832-      ---
+4833-      duration_ms: 0.742736
+--
+4860-      ...
+4861-    1..2
+4862-ok 485 - bounded routed model execution
+4863-  ---
+4864-  duration_ms: 2.374502
+4865-  type: 'suite'
+4866-  ...
+4867-# Subtest: native loop retains original final and kernel checks across cold job and complete restart
+4868:not ok 486 - native loop retains original final and kernel checks across cold job and complete restart
+4869-  ---
+4870-  duration_ms: 33.074678
+4871-  type: 'test'
+4872-  location: '/home/runner/work/SARA/SARA/tests/native-coding-http.test.ts:1:543'
+4873:  failureType: 'testCodeFailure'
+4874:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+4875-  code: 'ENOENT'
+4876-  stack: |-
+4877-    async open (node:internal/fs/promises:639:25)
+4878-    async readFile (node:internal/fs/promises:1252:14)
+4879-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+4880-    async TestContext.<anonymous> (/home/runner/work/SARA/SARA/tests/native-coding-http.test.ts:41:31)
+4881-    async Test.run (node:internal/test_runner/test:1054:7)
+4882-    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+4883-  ...
+4884-# node:internal/fs/promises:639
+4885-#   return new FileHandle(await PromisePrototypeThen(
+4886-#                         ^
+4887-# Error: ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'
+4888-#     at async open (node:internal/fs/promises:639:25)
+4889-#     at async readFile (node:internal/fs/promises:1252:14)
+4890-#     at async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+4891-#     at async <anonymous> (/home/runner/work/SARA/SARA/tests/native-coding-verifier.test.ts:13:17) {
+4892-#   errno: -2,
+4893-#   code: 'ENOENT',
+4894-#   syscall: 'open',
+4895-#   path: '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'
+4896-# }
+4897-# Node.js v22.23.2
+4898-# Subtest: tests/native-coding-verifier.test.ts
+4899:not ok 112 - tests/native-coding-verifier.test.ts
+4900-  ---
+4901-  duration_ms: 1497.219064
+4902-  type: 'test'
+4903-  location: '/home/runner/work/SARA/SARA/tests/native-coding-verifier.test.ts:1:1'
+4904:  failureType: 'testCodeFailure'
+4905-  exitCode: 1
+4906-  signal: ~
+4907:  error: 'test failed'
+4908-  code: 'ERR_TEST_FAILURE'
+4909-  ...
+4910-# Subtest: NICO automated package verifier
+4911-    # Subtest: independently verifies stored and deflated ZIP entries, manifest identity, report hash, and package digest
+4912-    ok 1 - independently verifies stored and deflated ZIP entries, manifest identity, report hash, and package digest
+4913-      ---
+4914-      duration_ms: 5.688569
+4915-      type: 'test'
+4916-      ...
+4917-    # Subtest: accepts an exact PDF package only when metadata, hash, size, status, and disclosure agree
+4918-    ok 2 - accepts an exact PDF package only when metadata, hash, size, status, and disclosure agree
+4919-      ---
+4920-      duration_ms: 0.288382
+4921-      type: 'test'
+4922-      ...
+4923-    # Subtest: rejects altered bytes, stale targets, mismatched artifact identity, unresolved disclosure, and human-review claims
+4924-    ok 3 - rejects altered bytes, stale targets, mismatched artifact identity, unresolved disclosure, and human-review claims
+4925-      ---
+4926-      duration_ms: 1.348123
+4927-      type: 'test'
+4928-      ...
+4929-    1..3
+4930-ok 488 - NICO automated package verifier
+4931-  ---
+--
+5074-  ...
+5075-# Subtest: concurrent invocation cannot pass the existing reservation lock
+5076-ok 500 - concurrent invocation cannot pass the existing reservation lock
+5077-  ---
+5078-  duration_ms: 15.317132
+5079-  type: 'test'
+5080-  ...
+5081-# Subtest: superseded component runner rejects changed kernel source before any dispatch
+5082:not ok 501 - superseded component runner rejects changed kernel source before any dispatch
+5083-  ---
+5084-  duration_ms: 19.731515
+5085-  type: 'test'
+5086-  location: '/home/runner/work/SARA/SARA/tests/observed-coding-dispatch.test.ts:1:5615'
+5087:  failureType: 'testCodeFailure'
+5088:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+5089-  code: 'ENOENT'
+5090-  stack: |-
+5091-    async open (node:internal/fs/promises:639:25)
+5092-    async readFile (node:internal/fs/promises:1252:14)
+5093-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+5094-    async <anonymous> (/home/runner/work/SARA/SARA/tests/observed-coding-dispatch.test.ts:67:18)
+5095-    async directory (/home/runner/work/SARA/SARA/tests/observed-coding-dispatch.test.ts:12:137)
+5096-    async Test.run (node:internal/test_runner/test:1054:7)
+5097-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+5098-  ...
+5099-# Subtest: new hardening grant is separate, capped, and does not release the original hold
+5100-ok 502 - new hardening grant is separate, capped, and does not release the original hold
+5101-  ---
+5102-  duration_ms: 2.186068
+5103-  type: 'test'
+5104-  ...
+5105-# Subtest: only the new grant selects the new pinned launcher
+5106-ok 503 - only the new grant selects the new pinned launcher
+5107-  ---
+5108-  duration_ms: 1.095108
+5109-  type: 'test'
+5110-  ...
+5111-# Subtest: new export remains bounded to fixed job names and isolated from cold grant
+5112-ok 504 - new export remains bounded to fixed job names and isolated from cold grant
+--
+6341-  ...
+6342-# Subtest: new evidence reader exports only the exact reuse grant's bounded job files
+6343-ok 630 - new evidence reader exports only the exact reuse grant's bounded job files
+6344-  ---
+6345-  duration_ms: 21.854438
+6346-  type: 'test'
+6347-  ...
+6348-# Subtest: frozen reuse pilot rejects new kernel source without dispatching or creating a trial
+6349:not ok 631 - frozen reuse pilot rejects new kernel source without dispatching or creating a trial
+6350-  ---
+6351-  duration_ms: 17.483033
+6352-  type: 'test'
+6353-  location: '/home/runner/work/SARA/SARA/tests/reuse-speed-benchmark.test.ts:11:4'
+6354:  failureType: 'testCodeFailure'
+6355:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+6356-  code: 'ENOENT'
+6357-  stack: |-
+6358-    async open (node:internal/fs/promises:639:25)
+6359-    async readFile (node:internal/fs/promises:1252:14)
+6360-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+6361-    async TestContext.<anonymous> (/home/runner/work/SARA/SARA/tests/reuse-speed-benchmark.test.ts:90:18)
+6362-    async Test.run (node:internal/test_runner/test:1054:7)
+6363-    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+6364-  ...
+6365-# Subtest: versioned production revenue capability migration
+6366-    # Subtest: registers exact implementation-bound capabilities once and survives restart
+6367-    ok 1 - registers exact implementation-bound capabilities once and survives restart
+6368-      ---
+6369-      duration_ms: 142.610245
+6370-      type: 'test'
+6371-      ...
+6372-    # Subtest: refuses conflicting available evidence rather than overwriting it
+6373-    ok 2 - refuses conflicting available evidence rather than overwriting it
+6374-      ---
+6375-      duration_ms: 87.137225
+6376-      type: 'test'
+6377-      ...
+6378-    # Subtest: replaces limited evidence but preserves a stronger future version
+6379-    ok 3 - replaces limited evidence but preserves a stronger future version
+--
+6784-      ...
+6785-    1..6
+6786-ok 650 - durable sequential revenue worker
+6787-  ---
+6788-  duration_ms: 8.227844
+6789-  type: 'suite'
+6790-  ...
+6791-# Subtest: outer HTTP observations include mandatory kernel completion and receipts for cold/restarted warm jobs
+6792:not ok 651 - outer HTTP observations include mandatory kernel completion and receipts for cold/restarted warm jobs
+6793-  ---
+6794-  duration_ms: 42.286678
+6795-  type: 'test'
+6796-  location: '/home/runner/work/SARA/SARA/tests/self-build-http-timing-integration.test.ts:1:724'
+6797:  failureType: 'testCodeFailure'
+6798:  error: "ENOENT: no such file or directory, open '/home/runner/work/SARA/SARA/tools/native-checker/node_modules/@typescript/typescript-linux-x64/lib/lib.d.ts'"
+6799-  code: 'ENOENT'
+6800-  stack: |-
+6801-    async open (node:internal/fs/promises:639:25)
+6802-    async readFile (node:internal/fs/promises:1252:14)
+6803-    async Function.create (/home/runner/work/SARA/SARA/src/native-coding-verifier.ts:45:52)
+6804-    async TestContext.<anonymous> (/home/runner/work/SARA/SARA/tests/self-build-http-timing-integration.test.ts:43:31)
+6805-    async Test.run (node:internal/test_runner/test:1054:7)
+6806-    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+6807-  ...
+6808-# Subtest: HTTP timer includes handler awaits and emits exactly once without private inputs
+6809-ok 652 - HTTP timer includes handler awaits and emits exactly once without private inputs
+6810-  ---
+6811-  duration_ms: 95.874836
+6812-  type: 'test'
+6813-  ...
+6814-# Subtest: timing failure does not change the response or cause another emission
+6815-ok 653 - timing failure does not change the response or cause another emission
+6816-  ---
+6817-  duration_ms: 16.220245
+6818-  type: 'test'
+6819-  ...
+6820-# Subtest: health, unrelated routes and GET requests are excluded
+6821-ok 654 - health, unrelated routes and GET requests are excluded
+6822-  ---
+
+=== npm test summary ===
+      duration_ms: 0.397437
       type: 'test'
       ...
     # Subtest: rejects a spent live authorization regardless of self-test flags
     ok 13 - rejects a spent live authorization regardless of self-test flags
       ---
-      duration_ms: 0.789172
+      duration_ms: 0.861129
       type: 'test'
       ...
     # Subtest: captures an actual controller boundary rejection without another verifier or model call
     ok 14 - captures an actual controller boundary rejection without another verifier or model call
       ---
-      duration_ms: 2.316459
+      duration_ms: 2.400973
       type: 'test'
       ...
     # Subtest: the runner itself rejects --live before provider access, even with credential-shaped input
     ok 15 - the runner itself rejects --live before provider access, even with credential-shaped input
       ---
-      duration_ms: 268.605078
+      duration_ms: 274.348961
       type: 'test'
       ...
     1..15
 ok 677 - offline V7 failure diagnostics
   ---
-  duration_ms: 278.952656
+  duration_ms: 285.849277
   type: 'suite'
   ...
 # Subtest: literal maintenance is exact-source-bound and refuses script, attribute and ambiguous slots
 ok 678 - literal maintenance is exact-source-bound and refuses script, attribute and ambiguous slots
   ---
-  duration_ms: 4.383811
+  duration_ms: 3.421911
   type: 'test'
   ...
-# (node:6923) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (node:6968) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
 # (Use `node --trace-warnings ...` to show where the warning was created)
 # Subtest: owner approval, idempotency, immutable request and stop are enforced by the existing kernel
 ok 679 - owner approval, idempotency, immutable request and stop are enforced by the existing kernel
   ---
-  duration_ms: 119.705891
+  duration_ms: 127.99752
   type: 'test'
   ...
 # Subtest: real local artifact and durable restart complete a fixture-provider workflow without replaying publication or notification
 ok 680 - real local artifact and durable restart complete a fixture-provider workflow without replaying publication or notification
   ---
-  duration_ms: 186.854864
+  duration_ms: 173.275226
   type: 'test'
   ...
 # Subtest: missing publishing credentials stop honestly and artifact tampering prevents dispatch
 ok 681 - missing publishing credentials stop honestly and artifact tampering prevents dispatch
   ---
-  duration_ms: 67.284722
+  duration_ms: 66.00537
   type: 'test'
   ...
 # Subtest: a mismatched deployment is restored and verified after a lost rollback response
 ok 682 - a mismatched deployment is restored and verified after a lost rollback response
   ---
-  duration_ms: 78.850019
+  duration_ms: 95.69804
   type: 'test'
   ...
 # Subtest: durable backoff lets other jobs proceed and bounded failures retain a review obligation
 ok 683 - durable backoff lets other jobs proceed and bounded failures retain a review obligation
   ---
-  duration_ms: 104.746789
+  duration_ms: 156.060751
   type: 'test'
   ...
 # Subtest: maintenance HTTP intake requires owner authentication and exact request approval
 ok 684 - maintenance HTTP intake requires owner authentication and exact request approval
   ---
-  duration_ms: 116.316205
+  duration_ms: 137.934773
   type: 'test'
   ...
 1..684
@@ -501,7 +515,7 @@ ok 684 - maintenance HTTP intake requires owner authentication and exact request
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 169157.566832
+# duration_ms 177662.236914
 
 === npm run typecheck ===
 
