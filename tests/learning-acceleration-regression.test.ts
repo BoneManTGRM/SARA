@@ -71,9 +71,12 @@ test("eligible HTTP 408 receives one same-reservation retry", async () => {
       const evidence = {
         result,
         calls,
-        jobs: state.jobs.map((job) => ({ id: job.id, status: job.status, reason: job.reason })),
+        jobs: state.jobs.map((job) => ({ id: job.id, status: job.status })),
         mutations: state.mutations.map((mutation) => ({ id: mutation.id, stage: mutation.stage, candidateDigest: mutation.candidateDigest })),
-        events: audit.slice(-24).map((event) => ({ type: event.type, data: event.data })),
+        events: audit
+          .filter((event) => /learning|job_status_changed|mutation|verification|memory_recorded/u.test(event.type))
+          .slice(-32)
+          .map((event) => ({ type: event.type, data: event.data })),
       };
       assert.fail(`retry regression evidence: ${JSON.stringify(evidence)}`);
     }
