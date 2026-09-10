@@ -1,0 +1,41 @@
+name: Scoped learning acceleration integration
+
+on:
+  push:
+    branches:
+      - codex/learning-acceleration-20260910
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/learning-acceleration-20260910
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply exact scoped integration
+        run: python3 scripts/apply-learning-acceleration-upgrade.py
+      - name: Install dependencies
+        run: npm ci
+      - name: Targeted regression tests
+        run: node --import tsx --test tests/learning-acceleration.test.ts tests/learning-acceleration-regression.test.ts
+      - name: TypeScript verification
+        run: npm run typecheck
+      - name: Diff hygiene
+        run: git diff --check
+      - name: Commit verified integration and remove temporary helpers
+        run: |
+          rm scripts/apply-learning-acceleration-upgrade.py
+          rm .github/workflows/scoped-learning-acceleration-integration.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: integrate bounded autonomous learning acceleration"
+          git push origin HEAD:codex/learning-acceleration-20260910
