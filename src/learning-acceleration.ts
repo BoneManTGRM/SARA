@@ -120,7 +120,7 @@ export function targetedRepairPlanner(input: TargetedRepairInput): TargetedRepai
   if (!rule) return { outcome: "STOP_OR_REGENERATE_BY_POLICY", directive: null, evidenceDigest };
   return {
     outcome: "TARGETED_REPAIR",
-    directive: `${rule.directive} Frozen contract ${input.contractDigest}; rejected candidate ${input.candidateDigest}.`,
+    directive: `TARGETED_REPAIR: ${rule.directive} Frozen contract ${input.contractDigest}; rejected candidate ${input.candidateDigest}.`,
     evidenceDigest,
   };
 }

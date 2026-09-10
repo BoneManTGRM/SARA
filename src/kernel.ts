@@ -2,7 +2,15 @@ import { compileLearningCampaign, currentLearningCampaign, campaignAccounting, l
 import { qualifyLearningArtifact, executeLearningArtifact, qualificationEnvironmentDigest } from "./learning-qualification.ts";
 import { maintenanceJobs, maintenanceRequestDigest, validateMaintenanceRequest, type MaintenanceRequest, type MaintenanceJob } from "./website-maintenance.ts";
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
-import { boundedCandidateFailureFeedback, isCandidateMetadataFailureFeedback } from "./cloudflare-free-generator.ts";
+import { boundedCandidateFailureFeedback } from "./cloudflare-free-generator.ts";
+import {
+  learningAttemptBudgeter,
+  learningFailureTriage,
+  qualificationReadinessCheck,
+  skillFailureMemorySelector,
+  targetedRepairPlanner,
+  previousCandidateSourceBytes,
+} from "./learning-acceleration.ts";
 import { performance } from "node:perf_hooks";
 import { KernelVerificationPool } from "./kernel-verification-pool.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -1852,23 +1860,79 @@ export class SaraKernel {
         );
       }
       const compiled = compileExecutorHandoff(job, this.constitutionDigest);
+      const learning = job.workCard.requiredCapabilities.includes("autonomous-learning");
       const recalled = recallMemories(state.memories, {
-        query: [
-          job.workCard.objective,
-          ...job.workCard.acceptanceCriteria,
-          ...job.workCard.missingCapabilities,
-        ].join(" "),
+        query: [job.workCard.objective, ...job.workCard.acceptanceCriteria, ...job.workCard.missingCapabilities].join(" "),
         scope: "global",
         categories: ["constitutional", "strategic", "economic", "procedural", "failure", "skill"],
         limit: 12,
       });
+      const previous = job.learningParentJobId ? [...state.events].reverse().find(e => e.type === "learning_candidate_observed" &&
+        (e.data as {jobId:string}).jobId === job.learningParentJobId)?.data as
+        {proposal:import("./types.ts").SkillCandidateProposal;sourceDigest:string;proposedDigest:string} | undefined : undefined;
+      const previousFailure = job.learningParentJobId
+        ? state.memories.find(m => m.id === `learning-failure-${job.learningParentJobId}`)
+        : undefined;
+      const failureClass = previousFailure ? learningFailureTriage(previousFailure.statement).failureClass : undefined;
+      const attemptBudget = learningAttemptBudgeter({
+        objectiveLength: job.workCard.objective.length,
+        publicCriteriaCount: job.workCard.acceptanceCriteria.length,
+        publicBehavioralTestCount: job.workCard.acceptanceCriteria.length,
+        priorFailureClass: failureClass,
+        previousCandidateSourceBytes: previousCandidateSourceBytes(previous?.proposal),
+        providerMaximumCompletionTokens: 4_096,
+      });
+      const selected = learning && job.learningCapabilityId && job.learningContractDigest
+        ? skillFailureMemorySelector({
+            memories: state.memories,
+            capabilityId: job.learningCapabilityId,
+            objective: job.workCard.objective,
+            contractDigest: job.learningContractDigest,
+            failureClass,
+            maximumCount: attemptBudget.relevantMemoryMaximum,
+            maximumCharacters: attemptBudget.relevantMemoryCharacterMaximum,
+          })
+        : [...recalled.anchors, ...recalled.relevant].slice(0, 12);
       const memoryContext = {
-        contextDigest: recalled.contextDigest,
-        memories: [...recalled.anchors, ...recalled.relevant].slice(0, 12),
+        contextDigest: sha256(canonicalJson({ memoryIds: selected.map(memory => memory.id) })),
+        memories: selected,
       };
-      const previous = job.learningParentJobId ? state.events.find(e => e.type === "learning_candidate_observed" &&
-        (e.data as {jobId:string}).jobId === job.learningParentJobId)?.data as {proposal:import("./types.ts").SkillCandidateProposal;sourceDigest:string} | undefined : undefined;
-      const previousFailure = state.memories.find(m => m.id === `learning-failure-${job.learningParentJobId}`);
+      let previousAttempt: typeof previous & {feedback:string} | undefined;
+      if (learning && previous && previousFailure && job.learningContractDigest && failureClass) {
+        const plan = targetedRepairPlanner({
+          contractDigest: job.learningContractDigest,
+          candidateDigest: previous.proposedDigest,
+          publicCriteria: job.workCard.acceptanceCriteria,
+          failureClass,
+          measuredFeedback: boundedCandidateFailureFeedback(previousFailure.statement),
+          measuredMemory: previousFailure.statement,
+        });
+        await this.#store.append("learning_targeted_repair_planned", principal, {
+          jobId,
+          parentJobId: job.learningParentJobId,
+          sourceCandidateDigest: previous.proposedDigest,
+          failureClass,
+          outcome: plan.outcome,
+          evidenceDigest: plan.evidenceDigest,
+          directiveDigest: plan.directive ? sha256(plan.directive) : null,
+        });
+        if (plan.outcome === "TARGETED_REPAIR" && plan.directive) previousAttempt = { ...previous, feedback: plan.directive };
+      }
+      if (learning) {
+        await this.#store.append("learning_attempt_budgeted", principal, {
+          jobId,
+          campaignId: job.learningCampaignId ?? null,
+          capabilityId: job.learningCapabilityId ?? null,
+          contractDigest: job.learningContractDigest ?? null,
+          selectedMemoryIds: memoryContext.memories.map(memory => memory.id),
+          relevantMemoryMaximum: attemptBudget.relevantMemoryMaximum,
+          relevantMemoryCharacterMaximum: attemptBudget.relevantMemoryCharacterMaximum,
+          behavioralTests: attemptBudget.behavioralTests,
+          completionTokenBudget: attemptBudget.completionTokenBudget,
+          attemptMode: attemptBudget.attemptMode,
+        });
+      }
+      const learningBootEpoch = state.events.filter(event => event.type === "system_booted").at(-1)?.hash ?? null;
       await this.#store.append("job_status_changed", principal, {
         jobId,
         from: job.status,
@@ -1877,10 +1941,11 @@ export class SaraKernel {
         maximumCostUsd: generator.maximumCostUsd,
         memoryContextDigest: memoryContext.contextDigest,
         memoryIds: memoryContext.memories.map((memory) => memory.id),
+        ...(learning ? { learningBootEpoch } : {}),
       });
       return { ...compiled, memoryContext,
-        previousAttempt: previous && previousFailure ? {...previous, feedback:previousFailure.statement.slice(0,1500)} : undefined,
-        learning: job.workCard.requiredCapabilities.includes("autonomous-learning"),
+        previousAttempt,
+        learning,
         admissionMandateEpoch: state.events.filter(e => e.type === "standing_mandate_snapshot").at(-1)?.hash ?? null,
         admissionStopEpoch: state.events.filter(e => e.type === "emergency_stop_changed").at(-1)?.hash ?? null };
     });
@@ -2054,30 +2119,48 @@ export class SaraKernel {
         const state = await this.state();
         const runningJob = state.jobs.find((candidate) => candidate.id === jobId);
         if (runningJob?.status === "running") {
+          const isLearning = runningJob.workCard.requiredCapabilities.includes("autonomous-learning");
+          const triage = isLearning ? learningFailureTriage(error) : null;
+          const safeFailure = isLearning
+            ? `${triage!.failureClass}:${triage!.evidenceCode}`
+            : error instanceof Error ? error.message.slice(0, 500) : "Unknown candidate failure";
           await this.#store.append("job_status_changed", principal, {
             jobId,
             from: "running",
             status: "failed",
             generatorId: generator.id,
-            reason: error instanceof Error ? error.message.slice(0, 500) : "Unknown candidate failure",
+            reason: safeFailure,
           });
           await this.authorize(principal, { action: "record_memory", targetId: "global", external: false });
+          const providerFailure = Boolean(triage && ["provider_transient", "provider_terminal"].includes(triage.failureClass));
+          const failureText = providerFailure
+            ? `${runningJob.workCard.objective.slice(0, 300)}: Learning provider execution failed (${triage!.evidenceCode}); candidate quality was not evaluated by this failure.`
+            : `${runningJob.workCard.objective.slice(0, 300)}: ${boundedCandidateFailureFeedback(error).slice(0, 1_000)}`;
           const memory: MemoryRecord = {
-            id: `learning-failure-${jobId}`, category: "failure", scope: "global",
-            source: `sara://learning-failure/${sha256(runningJob.workCard.objective)}/${jobId}`,
-            statement: `${runningJob.workCard.objective.slice(0, 300)}: ${boundedCandidateFailureFeedback(error).slice(0, 1_000)}`,
+            id: providerFailure ? `learning-provider-failure-${jobId}` : `learning-failure-${jobId}`,
+            category: "failure", scope: "global",
+            source: providerFailure
+              ? `sara://learning-provider-failure/${sha256(runningJob.workCard.objective)}/${jobId}`
+              : `sara://learning-failure/${sha256(runningJob.workCard.objective)}/${jobId}`,
+            statement: failureText,
             confidence: 1, verification: "measured", observedAt: new Date().toISOString(),
             lastValidatedAt: new Date().toISOString(),
-            tags: ["learning-failure"], status: "active",
-            dependencies: proposedDigest ? [`candidate:${proposedDigest}`] : [],
+            tags: [providerFailure ? "learning-provider-failure" : "learning-failure", ...(triage ? [`failure-class:${triage.failureClass}`] : [])], status: "active",
+            dependencies: !providerFailure && proposedDigest ? [`candidate:${proposedDigest}`] : [],
           };
           await this.#store.append("memory_recorded", principal, memory);
-          if (runningJob.learningCampaignId) {
-            const feedbackDigest=sha256(boundedCandidateFailureFeedback(error));
-            const prior=state.events.find(e=>e.type==="learning_attempt_failed" && (e.data as {jobId:string}).jobId===runningJob.learningParentJobId);
-            await this.#store.append("learning_attempt_failed",principal,{jobId,feedbackDigest,
-              repeatedFeedback:Boolean(prior && (prior.data as {feedbackDigest:string}).feedbackDigest===feedbackDigest),
-              candidateDigest:proposedDigest ?? null});
+          if (runningJob.learningCampaignId && triage) {
+            const feedbackDigest = sha256(providerFailure ? triage.evidenceCode : boundedCandidateFailureFeedback(error));
+            const prior = state.events.find(e => e.type === "learning_attempt_failed" && (e.data as {jobId:string}).jobId === runningJob.learningParentJobId);
+            await this.#store.append("learning_attempt_failed", principal, {
+              jobId,
+              feedbackDigest,
+              repeatedFeedback: Boolean(prior && (prior.data as {feedbackDigest:string}).feedbackDigest === feedbackDigest),
+              candidateDigest: proposedDigest ?? null,
+              failureClass: triage.failureClass,
+              nextAction: triage.nextAction,
+              evidenceCode: triage.evidenceCode,
+            });
           }
         }
       });
@@ -2179,6 +2262,43 @@ export class SaraKernel {
       }
       return { status: prepared.previous.type === "learning_qualification_passed" ? "qualified" : "rejected" };
     }
+    let artifactIntegrityValid = false;
+    try {
+      await verifyGenomeLabArtifact(this.#store.stateDirectory, prepared.mutation.artifactRelativePath!, prepared.mutation.candidateDigest);
+      artifactIntegrityValid = true;
+    } catch { /* Readiness records only the failed prerequisite, never arbitrary verifier output. */ }
+    const producerBehavioralVerificationPassed = prepared.mutation.evidence.some(evidence =>
+      evidence.exitCode === 0 && evidence.candidateDigest === prepared.mutation.candidateDigest &&
+      evidence.command === "kernel:isolated-typescript-behavioral-verification");
+    const readiness = qualificationReadinessCheck({
+      candidateExists: true,
+      candidateDigest: prepared.mutation.candidateDigest,
+      artifactIntegrityValid,
+      sourcePolicyPassed: producerBehavioralVerificationPassed,
+      typeScriptVerificationPassed: producerBehavioralVerificationPassed,
+      producerBehavioralVerificationPassed,
+      contractId: prepared.contract.capabilityId,
+      contractDigest: prepared.contractDigest,
+      qualificationEnvironmentDigest: prepared.environmentDigest,
+      publicContractPresent: Boolean(prepared.contract.objective.trim() && prepared.contract.publicCriteria.length),
+    });
+    await this.serializeMutation(async () => {
+      const current = await this.state();
+      const alreadyRecorded = current.events.some(event => event.type === "learning_qualification_readiness_checked" &&
+        (event.data as {jobId:string;candidateDigest:string;environmentDigest:string}).jobId === jobId &&
+        (event.data as {candidateDigest:string}).candidateDigest === prepared.mutation.candidateDigest &&
+        (event.data as {environmentDigest:string}).environmentDigest === prepared.environmentDigest);
+      if (!alreadyRecorded) await this.#store.append("learning_qualification_readiness_checked", SARA_PRINCIPAL, {
+        jobId,
+        mutationId: prepared.mutation.id,
+        candidateDigest: prepared.mutation.candidateDigest,
+        contractDigest: prepared.contractDigest,
+        environmentDigest: prepared.environmentDigest,
+        status: readiness.status,
+        prerequisiteFailures: readiness.prerequisiteFailures,
+      });
+    });
+    if (readiness.status === "NOT_READY") return { status: "not_ready" as const, prerequisiteFailures: readiness.prerequisiteFailures };
     let receipt: Awaited<ReturnType<typeof qualifyLearningArtifact>> | undefined;
     try {
       receipt = await qualifyLearningArtifact({ artifactDirectory: join(this.#store.stateDirectory, prepared.mutation.artifactRelativePath!),
@@ -2227,6 +2347,13 @@ export class SaraKernel {
     const campaign = currentLearningCampaign(state.events);
     if (!campaign) return this.runNextAutonomousLearningCycle(generator);
     try { await this.learningAuthority("worker"); } catch { return {status:"blocked" as const}; }
+    const unfinished = state.jobs.some(job => job.kind === "self_development" && job.learningCampaignId === campaign.id &&
+      ["authorized", "running"].includes(job.status));
+    if (unfinished) {
+      const resumed = await this.runNextAutonomousLearningCycle(generator);
+      if (resumed.status === "verified_shadow" && resumed.jobId) return this.qualifyLearningJob(resumed.jobId);
+      return resumed;
+    }
     const environmentDigest = await qualificationEnvironmentDigest();
     const pending = state.jobs.find(job => {
       if (job.learningCampaignId !== campaign.id || job.status !== "verified") return false;
@@ -2308,7 +2435,7 @@ export class SaraKernel {
     });
   }
 
-  /** Consume one delegated backlog entry; reservations survive failure/restart. */
+  /** Consume or recover one delegated backlog entry; reservations survive failure/restart. */
   async runNextAutonomousLearningCycle(generator: CandidateGenerator): Promise<{
     status: "idle" | "blocked" | "failed" | "verified_shadow"; jobId?: string;
   }> {
@@ -2319,28 +2446,116 @@ export class SaraKernel {
       const now = new Date().toISOString();
       const reservations = state.events.filter(event => event.type === "autonomous_learning_reserved");
       const campaign = currentLearningCampaign(state.events);
-      if (campaign && campaignAccounting(campaign, state.events).remaining === 0) return null;
+      const currentBootEpoch = state.events.filter(event => event.type === "system_booted").at(-1)?.hash ?? null;
       const reservedIds = new Set(reservations.map(event => (event.data as {jobId:string}).jobId));
-      // A lost process leaves its reservation consumed and stops dispatch until reconciled.
-      if (state.jobs.some(job => job.kind === "self_development" &&
-        (job.status === "running" || (reservedIds.has(job.id) && job.status === "authorized")))) return null;
-      if (reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length >= 2) return null;
-      const job = state.jobs.filter(job => job.kind === "self_development" && job.status === "authorized" &&
-        (campaign ? job.learningCampaignId === campaign.id : !job.learningCampaignId) &&
-        job.workCard.maximumBudgetUsd === 0 && job.workCard.requiredCapabilities.includes("autonomous-learning") && !reservedIds.has(job.id))
-        .sort((a,b) => b.workCard.expectedOwnerValue - a.workCard.expectedOwnerValue || a.id.localeCompare(b.id))[0];
+      let job = state.jobs.filter(candidate => candidate.kind === "self_development" &&
+        ["authorized", "running"].includes(candidate.status) &&
+        (campaign ? candidate.learningCampaignId === campaign.id : !candidate.learningCampaignId) &&
+        candidate.workCard.maximumBudgetUsd === 0 && candidate.workCard.requiredCapabilities.includes("autonomous-learning"))
+        .sort((a,b) => Number(b.status === "running") - Number(a.status === "running") ||
+          Number(Boolean(b.learningParentJobId)) - Number(Boolean(a.learningParentJobId)) ||
+          b.workCard.expectedOwnerValue - a.workCard.expectedOwnerValue || a.id.localeCompare(b.id))[0];
       if (!job) return undefined;
+
+      const latestRunningEvent = [...state.events].reverse().find(event => event.type === "job_status_changed" &&
+        (event.data as {jobId?:string;status?:string}).jobId === job!.id && (event.data as {status?:string}).status === "running");
+      if (job.status === "running") {
+        const runningData = latestRunningEvent?.data as {learningBootEpoch?:string|null} | undefined;
+        const sameBoot = Boolean(runningData?.learningBootEpoch && runningData.learningBootEpoch === currentBootEpoch);
+        const runningAt = latestRunningEvent ? Date.parse(latestRunningEvent.occurredAt) : Number.NaN;
+        const recentLease = Number.isFinite(runningAt) && Date.now() - runningAt < 15 * 60_000;
+        if (sameBoot || recentLease) {
+          const reason = sameBoot ? "LEARNING_ATTEMPT_ACTIVE_IN_CURRENT_BOOT" : "LEARNING_RECOVERY_LEASE_ACTIVE";
+          const alreadyDeferred = state.events.some(event => event.type === "learning_recovery_deferred" &&
+            (event.data as {jobId?:string;bootEpoch?:string|null;reason?:string}).jobId === job!.id &&
+            (event.data as {bootEpoch?:string|null}).bootEpoch === currentBootEpoch &&
+            (event.data as {reason?:string}).reason === reason);
+          if (!alreadyDeferred) await this.#store.append("learning_recovery_deferred", SARA_PRINCIPAL, {
+            jobId: job.id, campaignId: job.learningCampaignId ?? null, contractDigest: job.learningContractDigest ?? null,
+            bootEpoch: currentBootEpoch, reason, leaseMinutes: recentLease ? 15 : 0,
+          });
+          return null;
+        }
+        await this.#store.append("job_status_changed", SARA_PRINCIPAL, {
+          jobId: job.id, from: "running", status: "authorized", reason: "LEARNING_PROCESS_RESTART_RECOVERY",
+          recoveryBootEpoch: currentBootEpoch,
+        });
+        await this.#store.append("learning_job_recovered", SARA_PRINCIPAL, {
+          jobId: job.id, campaignId: job.learningCampaignId ?? null, capabilityId: job.learningCapabilityId ?? null,
+          contractDigest: job.learningContractDigest ?? null, sourceJobId: job.learningSourceJobId ?? null,
+          parentJobId: job.learningParentJobId ?? null, rootJobId: job.learningRootJobId ?? job.id,
+          recoveryKind: "stale_running",
+        });
+        job = { ...job, status: "authorized" };
+      }
+
+      const existingReservation = [...reservations].reverse().find(event => (event.data as {jobId:string}).jobId === job!.id);
       const request: RoutineActionRequest = {id:`learning:${job.id}`,kind:"business_candidate_development",targetId:job.id,
         channel:"internal",serviceId:"skill-learning",estimatedCostUsd:0,external:generator.external,requestedAt:now,platform:"owner_site"};
+      if (existingReservation) {
+        const data = existingReservation.data as {jobId:string;mandateDigest:string;campaignId?:string;contractDigest?:string};
+        const invalid = !state.standingMandate || state.standingMandate.digest !== data.mandateDigest ||
+          (campaign ? data.campaignId !== campaign.id || job.learningCampaignId !== campaign.id || data.contractDigest !== job.learningContractDigest : Boolean(data.campaignId));
+        const decision = evaluateRoutineAction({mandate:state.standingMandate,request,emergencyStopped:state.emergencyStopped});
+        if (invalid || decision.outcome !== "automatic") {
+          await this.#store.append("job_status_changed", SARA_PRINCIPAL, {jobId:job.id,from:"authorized",status:"failed",reason:"LEARNING_RECOVERY_AUTHORITY_OR_IDENTITY_INVALID"});
+          await this.#store.append("learning_recovery_terminal", SARA_PRINCIPAL, {
+            jobId:job.id,campaignId:job.learningCampaignId ?? null,contractDigest:job.learningContractDigest ?? null,
+            sourceJobId:job.learningSourceJobId ?? null,parentJobId:job.learningParentJobId ?? null,rootJobId:job.learningRootJobId ?? job.id,
+            reason:"LEARNING_RECOVERY_AUTHORITY_OR_IDENTITY_INVALID",
+          });
+          return null;
+        }
+        const retriesUsed = state.events.filter(event => event.type === "learning_provider_retry_started" &&
+          (event.data as {jobId:string}).jobId === job!.id).length;
+        await this.#store.append("learning_dispatch_claimed", SARA_PRINCIPAL, {
+          jobId:job.id,campaignId:job.learningCampaignId ?? null,contractDigest:job.learningContractDigest ?? null,
+          bootEpoch:currentBootEpoch,reservationEventHash:existingReservation.hash,recovered:true,
+        });
+        return {jobId:job.id,mandateDigest:data.mandateDigest,request,
+          mandateEpoch:state.events.filter(e=>e.type==="standing_mandate_snapshot").at(-1)?.hash ?? null,
+          stopEpoch:state.events.filter(e=>e.type==="emergency_stop_changed").at(-1)?.hash ?? null,
+          transportRetriesUsed:retriesUsed};
+      }
+
+      if (campaign && campaignAccounting(campaign, state.events).remaining === 0) {
+        await this.#store.append("job_status_changed", SARA_PRINCIPAL, {jobId:job.id,from:"authorized",status:"failed",reason:"LEARNING_CAMPAIGN_REQUESTS_EXHAUSTED"});
+        await this.#store.append("learning_recovery_terminal", SARA_PRINCIPAL, {
+          jobId:job.id,campaignId:job.learningCampaignId ?? null,contractDigest:job.learningContractDigest ?? null,
+          sourceJobId:job.learningSourceJobId ?? null,parentJobId:job.learningParentJobId ?? null,rootJobId:job.learningRootJobId ?? job.id,
+          reason:"LEARNING_CAMPAIGN_REQUESTS_EXHAUSTED",
+        });
+        return null;
+      }
+      if (reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length >= 2) {
+        const alreadyDeferred = state.events.some(event => event.type === "learning_recovery_deferred" &&
+          (event.data as {jobId?:string;date?:string;reason?:string}).jobId === job!.id &&
+          (event.data as {date?:string}).date === now.slice(0,10) &&
+          (event.data as {reason?:string}).reason === "LEARNING_DAILY_RESERVATION_LIMIT");
+        if (!alreadyDeferred) await this.#store.append("learning_recovery_deferred", SARA_PRINCIPAL, {
+          jobId:job.id,campaignId:job.learningCampaignId ?? null,contractDigest:job.learningContractDigest ?? null,
+          date:now.slice(0,10),reason:"LEARNING_DAILY_RESERVATION_LIMIT",
+        });
+        return null;
+      }
+      if (reservedIds.has(job.id)) throw new Error("LEARNING_RESERVATION_IDENTITY_CORRUPT");
       if (evaluateRoutineAction({mandate:state.standingMandate,request,emergencyStopped:state.emergencyStopped}).outcome !== "automatic") return null;
       const decision = await this.authorizeAutonomousRoutine(SARA_PRINCIPAL,state,request,false);
       if (decision.outcome !== "automatic") return null;
       await this.#store.append("autonomous_learning_reserved",SARA_PRINCIPAL,{jobId:job.id,mandateDigest:state.standingMandate!.digest,...(campaign ? {campaignId:campaign.id,contractDigest:job.learningContractDigest} : {})});
+      const latest = await this.state();
+      const reservationEvent = [...latest.events].reverse().find(event => event.type === "autonomous_learning_reserved" && (event.data as {jobId:string}).jobId === job!.id)!;
+      await this.#store.append("learning_dispatch_claimed", SARA_PRINCIPAL, {
+        jobId:job.id,campaignId:job.learningCampaignId ?? null,contractDigest:job.learningContractDigest ?? null,
+        bootEpoch:currentBootEpoch,reservationEventHash:reservationEvent.hash,recovered:false,
+      });
       return {jobId:job.id,mandateDigest:state.standingMandate!.digest,request,
         mandateEpoch:state.events.filter(e=>e.type==="standing_mandate_snapshot").at(-1)?.hash ?? null,
-        stopEpoch:state.events.filter(e=>e.type==="emergency_stop_changed").at(-1)?.hash ?? null};
+        stopEpoch:state.events.filter(e=>e.type==="emergency_stop_changed").at(-1)?.hash ?? null,
+        transportRetriesUsed:0};
     });
     if (!reservation) return {status:reservation === undefined ? "idle" : "blocked"};
+    let transportRetriesUsed = reservation.transportRetriesUsed;
     try {
       const result = await this.runSelfBuildCycle(SARA_PRINCIPAL,reservation.jobId,{
         id:generator.id,external:generator.external,maximumCostUsd:0,
@@ -2353,9 +2568,46 @@ export class SaraKernel {
                 (state.events.filter(e=>e.type==="emergency_stop_changed").at(-1)?.hash ?? null) !== reservation.stopEpoch) throw new Error("Learning mandate changed before dispatch.");
           });
           await checkMandate();
-          const proposal = await generator.generate(input);
-          await checkMandate();
-          return proposal;
+          try {
+            const proposal = await generator.generate(input);
+            await checkMandate();
+            return proposal;
+          } catch (firstError) {
+            const firstTriage = learningFailureTriage(firstError);
+            if (firstTriage.failureClass !== "provider_transient" || firstTriage.nextAction !== "retry_same_reservation" || transportRetriesUsed >= 1) throw firstError;
+            await this.serializeMutation(async () => {
+              const current = await this.state();
+              const retryAlreadyStarted = current.events.some(event => event.type === "learning_provider_retry_started" &&
+                (event.data as {jobId:string}).jobId === reservation.jobId);
+              if (retryAlreadyStarted) throw new Error("LEARNING_PROVIDER_RETRY_ALREADY_CONSUMED");
+              const job = current.jobs.find(candidate => candidate.id === reservation.jobId);
+              const reserved = current.events.some(event => event.type === "autonomous_learning_reserved" &&
+                (event.data as {jobId:string;campaignId?:string;contractDigest?:string}).jobId === reservation.jobId &&
+                (!job?.learningCampaignId || ((event.data as {campaignId?:string}).campaignId === job.learningCampaignId &&
+                  (event.data as {contractDigest?:string}).contractDigest === job.learningContractDigest)));
+              if (!reserved || current.standingMandate?.digest !== reservation.mandateDigest) throw new Error("LEARNING_PROVIDER_RETRY_IDENTITY_CHANGED");
+              await this.#store.append("learning_provider_retry_started", SARA_PRINCIPAL, {
+                jobId:reservation.jobId,campaignId:job?.learningCampaignId ?? null,contractDigest:job?.learningContractDigest ?? null,
+                attempt:1,failureClass:firstTriage.failureClass,evidenceCode:firstTriage.evidenceCode,sameReservation:true,
+              });
+            });
+            transportRetriesUsed += 1;
+            await checkMandate();
+            try {
+              const proposal = await generator.generate(input);
+              await checkMandate();
+              await this.serializeMutation(() => this.#store.append("learning_provider_retry_finished", SARA_PRINCIPAL, {
+                jobId:reservation.jobId,attempt:1,status:"succeeded",sameReservation:true,
+              }));
+              return proposal;
+            } catch (secondError) {
+              const secondTriage = learningFailureTriage(secondError);
+              await this.serializeMutation(() => this.#store.append("learning_provider_retry_finished", SARA_PRINCIPAL, {
+                jobId:reservation.jobId,attempt:1,status:"failed",failureClass:secondTriage.failureClass,evidenceCode:secondTriage.evidenceCode,sameReservation:true,
+              }));
+              throw secondError;
+            }
+          }
         },
       });
       return {status:result.job.status === "verified" && result.mutation.stage === "SHADOW" ? "verified_shadow" : "failed",jobId:reservation.jobId};
@@ -2372,9 +2624,9 @@ export class SaraKernel {
       const independentFailure = error instanceof Error && error.message === "Independent acceptance failed; hidden answers withheld.";
       if (!parent || !(parent.status === "failed" || (parent.status === "verified" && independentFailure)) || parent.learningParentJobId || parent.workCard.expectedOwnerValue <= 0 ||
         state.jobs.some(job => job.learningParentJobId === jobId)) return;
-      const feedback = boundedCandidateFailureFeedback(error);
-      if (!independentFailure && !isCandidateMetadataFailureFeedback(feedback) && !/^(?:Generated skill is not a pure isolated candidate:|Generated skill contains invalid TypeScript syntax\.|Generated skill failed TypeScript verification with |Behavioral verification mismatches:)/u.test(feedback)) return;
       const failure = state.memories.find(memory => memory.id === `learning-failure-${jobId}`);
+      const triage = learningFailureTriage(independentFailure ? independentFailure ? new Error("Independent acceptance failed; hidden answers withheld.") : error : error);
+      if (!independentFailure && triage.nextAction !== "targeted_repair") return;
       if (!failure?.dependencies.some(value => value.startsWith("candidate:"))) return;
       const now = new Date().toISOString();
       const request: RoutineActionRequest = {id:`learning-followup:${jobId}`,kind:"business_candidate_development",targetId:jobId,
