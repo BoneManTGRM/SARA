@@ -1,0 +1,42 @@
+name: Repair learning upgrade workflow
+
+on:
+  push:
+    branches:
+      - codex/learning-capacity-quality-20260910
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: ${{ !contains(github.event.head_commit.message, '[workflow-repaired]') && !contains(github.event.head_commit.message, '[learning-upgrade-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/learning-capacity-quality-20260910
+          fetch-depth: 0
+      - name: Repair exact matcher and self-remove
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          target=Path('.github/workflows/apply-learning-capacity-quality.yml')
+          text=target.read_text()
+          old='''          replace_once('src/server.ts',
+              'allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:2,',
+              'allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,')'''
+          new="          replace_all('src/server.ts', 'maximumDailyActions:2,', 'maximumDailyActions:10,', 1)"
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected one workflow matcher, found {text.count(old)}')
+          target.write_text(text.replace(old,new,1))
+          Path('.github/workflows/fix-learning-upgrade-workflow.yml').unlink()
+          PY
+      - name: Commit repair
+        run: |
+          git config user.name "Reparodynamics"
+          git config user.email "papadenico@yahoo.com"
+          git add -A
+          git commit -m "Repair bounded learning upgrade workflow [workflow-repaired]"
+          git push origin HEAD:codex/learning-capacity-quality-20260910
