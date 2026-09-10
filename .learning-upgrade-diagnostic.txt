@@ -6,13 +6,13 @@ typecheck_status=0
 3214-# Subtest: experiment runner differs only by an optional explicitly recorded final verifier
 3215-ok 300 - experiment runner differs only by an optional explicitly recorded final verifier
 3216-  ---
-3217-  duration_ms: 2.127094
+3217-  duration_ms: 1.789684
 3218-  type: 'test'
 3219-  ...
 3220-# Subtest: offline actual-verifier pilot luna keeps hidden tests and two fresh legacy finals
 3221:not ok 301 - offline actual-verifier pilot luna keeps hidden tests and two fresh legacy finals
 3222-  ---
-3223-  duration_ms: 21.983513
+3223-  duration_ms: 41.394469
 3224-  type: 'test'
 3225-  location: '/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:15:1390'
 3226:  failureType: 'testCodeFailure'
@@ -29,7 +29,7 @@ typecheck_status=0
 3237-# Subtest: offline actual-verifier pilot luna_reparodynamic keeps hidden tests and two fresh legacy finals
 3238:not ok 302 - offline actual-verifier pilot luna_reparodynamic keeps hidden tests and two fresh legacy finals
 3239-  ---
-3240-  duration_ms: 16.965312
+3240-  duration_ms: 17.477926
 3241-  type: 'test'
 3242-  location: '/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:15:1390'
 3243:  failureType: 'testCodeFailure'
@@ -46,19 +46,19 @@ typecheck_status=0
 3254-# Subtest: a changed protected test is rejected before any provider request
 3255-ok 303 - a changed protected test is rejected before any provider request
 3256-  ---
-3257-  duration_ms: 1.622106
+3257-  duration_ms: 1.711089
 3258-  type: 'test'
 3259-  ...
 3260-# Subtest: revoked authority rejects before compilation or model dispatch
 3261-ok 304 - revoked authority rejects before compilation or model dispatch
 3262-  ---
-3263-  duration_ms: 1.978715
+3263-  duration_ms: 2.150487
 3264-  type: 'test'
 3265-  ...
 3266-# Subtest: a provisional native PASS cannot return a type-invalid program
 3267:not ok 305 - a provisional native PASS cannot return a type-invalid program
 3268-  ---
-3269-  duration_ms: 8.980912
+3269-  duration_ms: 5.023901
 3270-  type: 'test'
 3271-  location: '/home/runner/work/SARA/SARA/tests/current-coding-benchmark.test.ts:15:2935'
 3272:  failureType: 'testCodeFailure'
@@ -75,13 +75,13 @@ typecheck_status=0
 3283-# Subtest: served dashboard scripts parse before owner event handlers are installed
 3284-ok 306 - served dashboard scripts parse before owner event handlers are installed
 3285-  ---
-3286-  duration_ms: 3.444187
+3286-  duration_ms: 2.448312
 3287-  type: 'test'
 3288-  ...
 3289-# Subtest: exact reuse has a fresh capped grant while previous activation and unresolved hold remain unchanged
 3290-ok 307 - exact reuse has a fresh capped grant while previous activation and unresolved hold remain unchanged
 3291-  ---
-3292-  duration_ms: 2.160736
+3292-  duration_ms: 5.324671
 3293-  type: 'test'
 3294-  ...
 3295-# Subtest: exact grant requires current canary, owner, constitution and stop authority
@@ -92,13 +92,13 @@ typecheck_status=0
 4206-# Subtest: all historical paid benchmark pins reject the changed maintenance kernel
 4207-ok 406 - all historical paid benchmark pins reject the changed maintenance kernel
 4208-  ---
-4209-  duration_ms: 3.582968
+4209-  duration_ms: 5.366948
 4210-  type: 'test'
 4211-  ...
 4212-# Subtest: all twelve actual HTTP/kernel jobs complete with six scripted generations and fresh acceptance
 4213:not ok 407 - all twelve actual HTTP/kernel jobs complete with six scripted generations and fresh acceptance
 4214-  ---
-4215-  duration_ms: 56.002348
+4215-  duration_ms: 43.115765
 4216-  type: 'test'
 4217-  location: '/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:11:4841'
 4218:  failureType: 'testCodeFailure'
@@ -117,7 +117,7 @@ typecheck_status=0
 4231-# Subtest: third-generation uncertainty stays counted even without reuse callback, and all warm jobs stay unrun
 4232:not ok 408 - third-generation uncertainty stays counted even without reuse callback, and all warm jobs stay unrun
 4233-  ---
-4234-  duration_ms: 32.535131
+4234-  duration_ms: 67.782355
 4235-  type: 'test'
 4236-  location: '/home/runner/work/SARA/SARA/tests/kernel-coding-benchmark.test.ts:11:7294'
 4237:  failureType: 'testCodeFailure'
@@ -152,19 +152,19 @@ typecheck_status=0
 4266-# Subtest: authority rejection before trial admission makes no provider request
 4267-ok 409 - authority rejection before trial admission makes no provider request
 4268-  ---
-4269-  duration_ms: 16.864336
+4269-  duration_ms: 22.651399
 4270-  type: 'test'
 4271-  ...
 4272-# Subtest: offline current-kernel regression cannot dispatch with a real key or live execution
 4273-ok 410 - offline current-kernel regression cannot dispatch with a real key or live execution
 4274-  ---
-4275-  duration_ms: 3.049123
+4275-  duration_ms: 2.680153
 4276-  type: 'test'
 4277-  ...
 4278-# Subtest: new actual HTTP coding path preserves learning across restart and times kernel acceptance
 4279:not ok 411 - new actual HTTP coding path preserves learning across restart and times kernel acceptance
 4280-  ---
-4281-  duration_ms: 58.1968
+4281-  duration_ms: 85.458845
 4282-  type: 'test'
 4283-  location: '/home/runner/work/SARA/SARA/tests/kernel-coding-lifecycle.test.ts:1:698'
 4284:  failureType: 'testCodeFailure'
@@ -181,13 +181,13 @@ typecheck_status=0
 4295-# Subtest: stop then resume during generation retires the already-admitted job before kernel verification
 4296-ok 412 - stop then resume during generation retires the already-admitted job before kernel verification
 4297-  ---
-4298-  duration_ms: 191.816345
+4298-  duration_ms: 217.922048
 4299-  type: 'test'
 4300-  ...
 4301-# Subtest: only one continuation allowance: 17430b72-1b04-4b9f-8f1c-e75b8b5f4235 observes every competing claim
 4302-ok 413 - only one continuation allowance: 17430b72-1b04-4b9f-8f1c-e75b8b5f4235 observes every competing claim
 4303-  ---
-4304-  duration_ms: 31.844802
+4304-  duration_ms: 40.463966
 4305-  type: 'test'
 4306-  ...
 4307-# Subtest: only one continuation allowance: 68990425-bf42-4ec5-a4f1-e6af301780ac observes every competing claim
@@ -198,13 +198,13 @@ typecheck_status=0
 4788-# Subtest: unexpected provider usage freezes subsequent paid dispatch
 4789-ok 482 - unexpected provider usage freezes subsequent paid dispatch
 4790-  ---
-4791-  duration_ms: 121.874311
+4791-  duration_ms: 45.760774
 4792-  type: 'test'
 4793-  ...
 4794-# Subtest: allocation HTTP controls require owner authentication
 4795:not ok 483 - allocation HTTP controls require owner authentication
 4796-  ---
-4797-  duration_ms: 185.439988
+4797-  duration_ms: 172.955857
 4798-  type: 'test'
 4799-  location: '/home/runner/work/SARA/SARA/tests/model-budget.test.ts:1:4841'
 4800:  failureType: 'testCodeFailure'
@@ -228,31 +228,31 @@ typecheck_status=0
 4818-    # Subtest: routes public repository investigation through Luna first with a bounded Gemini fallback
 4819-    ok 1 - routes public repository investigation through Luna first with a bounded Gemini fallback
 4820-      ---
-4821-      duration_ms: 1.564105
+4821-      duration_ms: 2.049543
 4822-      type: 'test'
 4823-      ...
 4824-    # Subtest: never sends customer-confidential work through a training-eligible free tier
 4825-    ok 2 - never sends customer-confidential work through a training-eligible free tier
 4826-      ---
-4827-      duration_ms: 0.205476
+4827-      duration_ms: 0.236509
 4828-      type: 'test'
 4829-      ...
 4830-    # Subtest: fails closed instead of routing credentials or regulated data to a model
 4831-    ok 3 - fails closed instead of routing credentials or regulated data to a model
 4832-      ---
-4833-      duration_ms: 0.609905
+4833-      duration_ms: 0.744555
 --
 4860-      ...
 4861-    1..2
 4862-ok 485 - bounded routed model execution
 4863-  ---
-4864-  duration_ms: 1.969517
+4864-  duration_ms: 2.379387
 4865-  type: 'suite'
 4866-  ...
 4867-# Subtest: native loop retains original final and kernel checks across cold job and complete restart
 4868:not ok 486 - native loop retains original final and kernel checks across cold job and complete restart
 4869-  ---
-4870-  duration_ms: 52.017749
+4870-  duration_ms: 44.220553
 4871-  type: 'test'
 4872-  location: '/home/runner/work/SARA/SARA/tests/native-coding-http.test.ts:1:543'
 4873:  failureType: 'testCodeFailure'
@@ -283,7 +283,7 @@ typecheck_status=0
 4898-# Subtest: tests/native-coding-verifier.test.ts
 4899:not ok 112 - tests/native-coding-verifier.test.ts
 4900-  ---
-4901-  duration_ms: 1628.11039
+4901-  duration_ms: 1623.134871
 4902-  type: 'test'
 4903-  location: '/home/runner/work/SARA/SARA/tests/native-coding-verifier.test.ts:1:1'
 4904:  failureType: 'testCodeFailure'
@@ -296,19 +296,19 @@ typecheck_status=0
 4911-    # Subtest: independently verifies stored and deflated ZIP entries, manifest identity, report hash, and package digest
 4912-    ok 1 - independently verifies stored and deflated ZIP entries, manifest identity, report hash, and package digest
 4913-      ---
-4914-      duration_ms: 4.112669
+4914-      duration_ms: 5.320148
 4915-      type: 'test'
 4916-      ...
 4917-    # Subtest: accepts an exact PDF package only when metadata, hash, size, status, and disclosure agree
 4918-    ok 2 - accepts an exact PDF package only when metadata, hash, size, status, and disclosure agree
 4919-      ---
-4920-      duration_ms: 0.237726
+4920-      duration_ms: 0.237813
 4921-      type: 'test'
 4922-      ...
 4923-    # Subtest: rejects altered bytes, stale targets, mismatched artifact identity, unresolved disclosure, and human-review claims
 4924-    ok 3 - rejects altered bytes, stale targets, mismatched artifact identity, unresolved disclosure, and human-review claims
 4925-      ---
-4926-      duration_ms: 1.004696
+4926-      duration_ms: 1.056325
 4927-      type: 'test'
 4928-      ...
 4929-    1..3
@@ -319,13 +319,13 @@ typecheck_status=0
 5075-# Subtest: concurrent invocation cannot pass the existing reservation lock
 5076-ok 500 - concurrent invocation cannot pass the existing reservation lock
 5077-  ---
-5078-  duration_ms: 20.590966
+5078-  duration_ms: 22.079247
 5079-  type: 'test'
 5080-  ...
 5081-# Subtest: superseded component runner rejects changed kernel source before any dispatch
 5082:not ok 501 - superseded component runner rejects changed kernel source before any dispatch
 5083-  ---
-5084-  duration_ms: 29.556593
+5084-  duration_ms: 20.115577
 5085-  type: 'test'
 5086-  location: '/home/runner/work/SARA/SARA/tests/observed-coding-dispatch.test.ts:1:5615'
 5087:  failureType: 'testCodeFailure'
@@ -343,13 +343,13 @@ typecheck_status=0
 5099-# Subtest: new hardening grant is separate, capped, and does not release the original hold
 5100-ok 502 - new hardening grant is separate, capped, and does not release the original hold
 5101-  ---
-5102-  duration_ms: 1.9981
+5102-  duration_ms: 2.422274
 5103-  type: 'test'
 5104-  ...
 5105-# Subtest: only the new grant selects the new pinned launcher
 5106-ok 503 - only the new grant selects the new pinned launcher
 5107-  ---
-5108-  duration_ms: 0.808237
+5108-  duration_ms: 1.45592
 5109-  type: 'test'
 5110-  ...
 5111-# Subtest: new export remains bounded to fixed job names and isolated from cold grant
@@ -359,13 +359,13 @@ typecheck_status=0
 6342-# Subtest: new evidence reader exports only the exact reuse grant's bounded job files
 6343-ok 630 - new evidence reader exports only the exact reuse grant's bounded job files
 6344-  ---
-6345-  duration_ms: 36.454166
+6345-  duration_ms: 45.217238
 6346-  type: 'test'
 6347-  ...
 6348-# Subtest: frozen reuse pilot rejects new kernel source without dispatching or creating a trial
 6349:not ok 631 - frozen reuse pilot rejects new kernel source without dispatching or creating a trial
 6350-  ---
-6351-  duration_ms: 25.571809
+6351-  duration_ms: 30.903766
 6352-  type: 'test'
 6353-  location: '/home/runner/work/SARA/SARA/tests/reuse-speed-benchmark.test.ts:11:4'
 6354:  failureType: 'testCodeFailure'
@@ -383,13 +383,13 @@ typecheck_status=0
 6366-    # Subtest: registers exact implementation-bound capabilities once and survives restart
 6367-    ok 1 - registers exact implementation-bound capabilities once and survives restart
 6368-      ---
-6369-      duration_ms: 135.431101
+6369-      duration_ms: 134.605465
 6370-      type: 'test'
 6371-      ...
 6372-    # Subtest: refuses conflicting available evidence rather than overwriting it
 6373-    ok 2 - refuses conflicting available evidence rather than overwriting it
 6374-      ---
-6375-      duration_ms: 48.786828
+6375-      duration_ms: 61.699362
 6376-      type: 'test'
 6377-      ...
 6378-    # Subtest: replaces limited evidence but preserves a stronger future version
@@ -399,13 +399,13 @@ typecheck_status=0
 6785-    1..6
 6786-ok 650 - durable sequential revenue worker
 6787-  ---
-6788-  duration_ms: 7.545133
+6788-  duration_ms: 5.731969
 6789-  type: 'suite'
 6790-  ...
 6791-# Subtest: outer HTTP observations include mandatory kernel completion and receipts for cold/restarted warm jobs
 6792:not ok 651 - outer HTTP observations include mandatory kernel completion and receipts for cold/restarted warm jobs
 6793-  ---
-6794-  duration_ms: 60.360462
+6794-  duration_ms: 38.800352
 6795-  type: 'test'
 6796-  location: '/home/runner/work/SARA/SARA/tests/self-build-http-timing-integration.test.ts:1:724'
 6797:  failureType: 'testCodeFailure'
@@ -422,13 +422,13 @@ typecheck_status=0
 6808-# Subtest: HTTP timer includes handler awaits and emits exactly once without private inputs
 6809-ok 652 - HTTP timer includes handler awaits and emits exactly once without private inputs
 6810-  ---
-6811-  duration_ms: 92.171222
+6811-  duration_ms: 89.257277
 6812-  type: 'test'
 6813-  ...
 6814-# Subtest: timing failure does not change the response or cause another emission
 6815-ok 653 - timing failure does not change the response or cause another emission
 6816-  ---
-6817-  duration_ms: 22.151671
+6817-  duration_ms: 18.014322
 6818-  type: 'test'
 6819-  ...
 6820-# Subtest: health, unrelated routes and GET requests are excluded
@@ -436,75 +436,75 @@ typecheck_status=0
 6822-  ---
 
 === npm test summary ===
-      duration_ms: 0.392106
+      duration_ms: 0.344852
       type: 'test'
       ...
     # Subtest: rejects a spent live authorization regardless of self-test flags
     ok 13 - rejects a spent live authorization regardless of self-test flags
       ---
-      duration_ms: 0.932129
+      duration_ms: 0.941415
       type: 'test'
       ...
     # Subtest: captures an actual controller boundary rejection without another verifier or model call
     ok 14 - captures an actual controller boundary rejection without another verifier or model call
       ---
-      duration_ms: 2.640877
+      duration_ms: 2.292683
       type: 'test'
       ...
     # Subtest: the runner itself rejects --live before provider access, even with credential-shaped input
     ok 15 - the runner itself rejects --live before provider access, even with credential-shaped input
       ---
-      duration_ms: 287.99607
+      duration_ms: 310.536307
       type: 'test'
       ...
     1..15
 ok 677 - offline V7 failure diagnostics
   ---
-  duration_ms: 300.561536
+  duration_ms: 321.797322
   type: 'suite'
   ...
 # Subtest: literal maintenance is exact-source-bound and refuses script, attribute and ambiguous slots
 ok 678 - literal maintenance is exact-source-bound and refuses script, attribute and ambiguous slots
   ---
-  duration_ms: 5.2061
+  duration_ms: 2.857786
   type: 'test'
   ...
-# (node:6910) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# (node:6937) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
 # (Use `node --trace-warnings ...` to show where the warning was created)
 # Subtest: owner approval, idempotency, immutable request and stop are enforced by the existing kernel
 ok 679 - owner approval, idempotency, immutable request and stop are enforced by the existing kernel
   ---
-  duration_ms: 194.857955
+  duration_ms: 134.260273
   type: 'test'
   ...
 # Subtest: real local artifact and durable restart complete a fixture-provider workflow without replaying publication or notification
 ok 680 - real local artifact and durable restart complete a fixture-provider workflow without replaying publication or notification
   ---
-  duration_ms: 197.677055
+  duration_ms: 188.191474
   type: 'test'
   ...
 # Subtest: missing publishing credentials stop honestly and artifact tampering prevents dispatch
 ok 681 - missing publishing credentials stop honestly and artifact tampering prevents dispatch
   ---
-  duration_ms: 77.269048
+  duration_ms: 65.062193
   type: 'test'
   ...
 # Subtest: a mismatched deployment is restored and verified after a lost rollback response
 ok 682 - a mismatched deployment is restored and verified after a lost rollback response
   ---
-  duration_ms: 121.748061
+  duration_ms: 100.581192
   type: 'test'
   ...
 # Subtest: durable backoff lets other jobs proceed and bounded failures retain a review obligation
 ok 683 - durable backoff lets other jobs proceed and bounded failures retain a review obligation
   ---
-  duration_ms: 144.718419
+  duration_ms: 111.82122
   type: 'test'
   ...
 # Subtest: maintenance HTTP intake requires owner authentication and exact request approval
 ok 684 - maintenance HTTP intake requires owner authentication and exact request approval
   ---
-  duration_ms: 138.799955
+  duration_ms: 121.348049
   type: 'test'
   ...
 1..684
@@ -515,7 +515,7 @@ ok 684 - maintenance HTTP intake requires owner authentication and exact request
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 180192.602228
+# duration_ms 180853.16133
 
 === npm run typecheck ===
 
