@@ -51,7 +51,7 @@ test("oversized metadata reaches repair and durable evidence without accepting a
     assert.equal(saved.evidence, feedback);
     assert.deepEqual(saved.proposal, receipt);
     assert.ok(JSON.stringify(repairRequest).includes("300 characters or fewer"));
-    assert.equal(repairRequest?.max_completion_tokens, 8192);
+    assert.equal(repairRequest?.max_completion_tokens, 2048);
     assert.equal(requests, 1);
     const state = await kernel.getStatus();
     assert.equal(state.mutations.length, 0);

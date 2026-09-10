@@ -39,7 +39,7 @@ test("a real source-gate rejection reaches repair without inventing a passed sou
     await generator.generate({objective:job.workCard.objective, acceptanceCriteria:job.workCard.acceptanceCriteria,
       missingCapabilities:["catalog-audit"],constitutionDigest:"b".repeat(64),memoryContext:{contextDigest:"c".repeat(64),memories:[]}});
     assert.match(prompt, /computed property access \(including array\[index\]\)/);
-    assert.match(prompt, /Bounded independent verifier feedback: Generated skill is not a pure isolated candidate: computed property access is prohibited\./);
+    assert.match(prompt, /Measured repair directive: Generated skill is not a pure isolated candidate: computed property access is prohibited\./);
     assert.doesNotMatch(prompt, /previous proposal passed source/);
     const status = await kernel.getStatus();
     assert.equal(status.jobs[0]?.status, "failed");

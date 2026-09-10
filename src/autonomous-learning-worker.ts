@@ -11,11 +11,15 @@ export class AutonomousLearningWorker {
   async tick() {
     if (this.running) return {status:"blocked" as const};
     this.running = true;
-    try { return await this.kernel.runLearningWorkerTick(this.generator); }
-    finally { this.running = false; }
+    try {
+      const result = await this.kernel.runLearningWorkerTick(this.generator);
+      console.info(JSON.stringify({event:"sara_learning_tick",result,snapshot:await this.kernel.learningOperationalSnapshot()}));
+      return result;
+    } finally { this.running = false; }
   }
   start() {
     if (this.timer) return;
+    void this.kernel.learningOperationalSnapshot().then(snapshot => console.info(JSON.stringify({event:"sara_learning_startup",snapshot}))).catch(() => {});
     const tick = () => { void this.tick().catch(() => {
       // Unknown reservations remain consumed. Never restart a failed request here.
       console.error("SARA learning queue stopped this tick; retained state requires inspection.");

@@ -99,7 +99,7 @@ describe("Cloudflare free candidate generator", () => {
     const {reasoning_effort, ...otherwiseIdentical} = requests[1];
     assert.equal(reasoning_effort, "low");
     assert.deepEqual(otherwiseIdentical, requests[0]);
-    assert.equal(requests[1].max_completion_tokens, 8192);
+    assert.equal(requests[1].max_completion_tokens, 2048);
     assert.equal(requests[1].model, CLOUDFLARE_FREE_MODEL);
   });
 
@@ -123,7 +123,7 @@ describe("Cloudflare free candidate generator", () => {
         const {chat_template_kwargs, ...otherwiseIdentical} = requests[1];
         assert.deepEqual(chat_template_kwargs, {enable_thinking:false});
         assert.deepEqual(otherwiseIdentical, requests[0]);
-        assert.equal(requests[1].max_completion_tokens, 8192);
+        assert.equal(requests[1].max_completion_tokens, 2048);
         assert.equal(requests[1].model, CLOUDFLARE_FREE_MODEL);
       }
     }
@@ -156,7 +156,7 @@ describe("Cloudflare free candidate generator", () => {
     assert.equal(request.model, CLOUDFLARE_FREE_MODEL);
     assert.equal(request.stream, false);
     assert.equal(request.messages.length, 2);
-    assert.equal(request.max_completion_tokens, 8_192);
+    assert.equal(request.max_completion_tokens, 2_048);
   });
 
   it("extracts one complete proposal from bounded model commentary", async () => {
@@ -266,9 +266,9 @@ describe("Cloudflare free candidate generator", () => {
     });
     await generator.generate(input());
     const request = JSON.parse(requestBody) as { messages: Array<{ content: string }> };
-    assert.match(request.messages[1].content, /Previous rejected proposal:/);
+    assert.match(request.messages[1].content, /Previous rejected candidate \(bounded repair context\):/);
     assert.match(request.messages[1].content, /Opportunity Scorer/);
-    assert.match(request.messages[1].content, /Bounded independent verifier feedback:/);
+    assert.match(request.messages[1].content, /Measured repair directive:/);
     assert.match(request.messages[1].content, /actual.*score.*85/);
   });
 });

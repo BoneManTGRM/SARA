@@ -51,7 +51,7 @@ test("undefined lookup evidence explains the failure without accepting an ignore
     assert.equal(saved.evidence, feedback);
     assert.deepEqual(saved.proposal, receipt);
     assert.ok(JSON.stringify(repairRequest).includes("A value may be undefined"));
-    assert.equal(repairRequest?.max_completion_tokens, 8192);
+    assert.equal(repairRequest?.max_completion_tokens, 2048);
     assert.equal(requests, 1);
     const state = await kernel.getStatus();
     assert.equal(state.mutations.length, 0);

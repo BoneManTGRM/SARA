@@ -139,7 +139,7 @@ test("recalled failure context excludes other objectives and bounds exposed evid
     ...Array.from({length:10},(_,i)=>({...base,id:`same-${i}`,source:`sara://learning-failure/${sha256(request.objective)}/x`,statement:"z".repeat(3000)})),
   ]}}));
   assert.doesNotMatch(prompt,/OTHER_PRIVATE_TASK/);assert.ok(prompt.length<10000);
-  assert.equal((prompt.match(/"evidence":/g)??[]).length,4);
+  assert.equal((prompt.match(/"evidence":/g)??[]).length,2);
 });
 
 test("real rejection survives restart and reaches a later free-generator prompt", async () => {
