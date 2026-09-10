@@ -24,36 +24,19 @@ jobs:
           from pathlib import Path
           target=Path('.github/workflows/apply-learning-capacity-quality.yml')
           text=target.read_text()
-
           needle="          replace_once('tests/autonomous-learning.test.ts', 'maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:2,', 'maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,')"
-          addition=("          replace_once('tests/model-budget.test.ts', 'assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,2);', "
-                    "'assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,10);')\n\n" + needle)
-          if text.count(needle) != 1:
-              raise SystemExit(f'Expected one model-budget insertion point, found {text.count(needle)}')
+          addition="          replace_once('tests/model-budget.test.ts', 'assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,2);', 'assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,10);')\n\n" + needle
+          if text.count(needle) != 1: raise SystemExit(f'Expected one model-budget insertion point, found {text.count(needle)}')
           text=text.replace(needle,addition,1)
-
-          old='''      - name: Verify full test suite and typecheck
-        run: |
-          npm test
-          npm run typecheck
-'''
-          new='''      - name: Build native checker
-        run: node scripts/build-native-checker.mjs
-      - name: Verify full repository
-        run: npm run verify
-'''
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected one verification block, found {text.count(old)}')
+          old="      - name: Verify full test suite and typecheck\n        run: |\n          npm test\n          npm run typecheck\n"
+          new="      - name: Build native checker\n        run: node scripts/build-native-checker.mjs\n      - name: Verify full repository\n        run: npm run verify\n"
+          if text.count(old) != 1: raise SystemExit(f'Expected one verification block, found {text.count(old)}')
           text=text.replace(old,new,1)
-
           cleanup="          Path('.github/workflows/apply-learning-capacity-quality.yml').unlink()"
-          replacement=("          Path('.github/workflows/diagnose-learning-upgrade.yml').unlink(missing_ok=True)\n"
-                       "          Path('.learning-upgrade-diagnostic.txt').unlink(missing_ok=True)\n" + cleanup)
-          if text.count(cleanup) != 1:
-              raise SystemExit(f'Expected one cleanup point, found {text.count(cleanup)}')
+          replacement="          Path('.github/workflows/diagnose-learning-upgrade.yml').unlink(missing_ok=True)\n          Path('.learning-upgrade-diagnostic.txt').unlink(missing_ok=True)\n" + cleanup
+          if text.count(cleanup) != 1: raise SystemExit(f'Expected one cleanup point, found {text.count(cleanup)}')
           text=text.replace(cleanup,replacement,1)
           target.write_text(text)
-
           Path('.github/workflows/fix-learning-upgrade-workflow.yml').unlink()
           Path('.github/workflows/diagnose-learning-upgrade.yml').unlink(missing_ok=True)
           Path('.learning-upgrade-diagnostic.txt').unlink(missing_ok=True)
