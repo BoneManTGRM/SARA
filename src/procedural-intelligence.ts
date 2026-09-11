@@ -174,7 +174,9 @@ const INVALIDATION_TYPES = new Set<EvidenceInvalidationType>([
   "PROCEDURE_SUPERSEDED",
 ]);
 const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/u;
+const SAFE_IDENTITY_FIELD = /^[A-Za-z][A-Za-z0-9._:-]{0,127}$/u;
 const DIGEST = /^[a-f0-9]{64}$/u;
+const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/giu;
 const RAW_SECRET = /\b(?:password|api[_-]?key|access[_-]?token|refresh[_-]?token|cookie|signing[_-]?key|session[_-]?secret)\s*[:=]\s*["']?[A-Za-z0-9+/_=-]{6,}/iu;
 const BEARER_SECRET = /\bBearer\s+[A-Za-z0-9._~+/-]{8,}/u;
 
@@ -183,6 +185,7 @@ function clone<T>(value: T): T { return structuredClone(value); }
 function isRecord(value: unknown): value is StringKeyedObject { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function assertDigest(value: string, code: string): void { if (!DIGEST.test(value)) throw new Error(code); }
 function assertFiniteNonnegative(value: number, code: string): void { if (!Number.isFinite(value) || value < 0) throw new Error(code); }
+function assertTimestamp(value: unknown, code: string): void { if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) throw new Error(code); }
 function identityMatches(expected: MaterialIdentity, current: MaterialIdentity): boolean {
   return Object.entries(expected).every(([field, value]) => value === undefined || current[field] === value);
 }
@@ -191,6 +194,7 @@ function identitySpecificity(identity: MaterialIdentity): number {
 }
 function playbookKey(playbook: Pick<ProceduralPlaybook, "id" | "version">): string { return `${playbook.id}@${playbook.version}`; }
 function lessonKey(lesson: Pick<ReusableLesson, "id" | "version">): string { return `${lesson.id}@${lesson.version}`; }
+function redactIncidentalIdentifiers(value: string): string { return value.replace(UUID, "[identifier]"); }
 function assertNoRawSecrets(value: unknown): void {
   const text = canonicalJson(value);
   if (RAW_SECRET.test(text) || BEARER_SECRET.test(text)) throw new Error("RAW_SECRET_IN_REUSABLE_KNOWLEDGE");
@@ -201,7 +205,9 @@ function assertStringArray(value: unknown, code: string, allowEmpty = true): ass
 function validateIdentity(identity: MaterialIdentity, code: string): void {
   if (!isRecord(identity)) throw new Error(code);
   for (const [key, value] of Object.entries(identity)) {
-    if (!SAFE_ID.test(key) || (value !== undefined && value !== null && !["string", "number", "boolean"].includes(typeof value))) throw new Error(code);
+    if (!SAFE_IDENTITY_FIELD.test(key) ||
+        (value !== undefined && value !== null && !["string", "number", "boolean"].includes(typeof value)) ||
+        (typeof value === "number" && !Number.isFinite(value))) throw new Error(code);
   }
 }
 
@@ -226,7 +232,10 @@ function validatePlaybook(playbook: ProceduralPlaybook): void {
     assertDigest(playbook.qualificationDigest, "PROCEDURAL_INVALID_QUALIFICATION_DIGEST");
     if (playbook.provenance.producerIdentity === playbook.evaluatorIdentity) throw new Error("INDEPENDENT_EVALUATOR_REQUIRED");
   }
-  if (playbook.status === "VERIFIED" && !playbook.verifiedAt) throw new Error("PROCEDURAL_VERIFIED_AT_REQUIRED");
+  if (playbook.status === "VERIFIED") {
+    if (playbook.qualificationStatus !== "independently_qualified") throw new Error("PROCEDURAL_VERIFIED_REQUIRES_INDEPENDENT_QUALIFICATION");
+    if (!playbook.verifiedAt) throw new Error("PROCEDURAL_VERIFIED_AT_REQUIRED");
+  }
   if (playbook.qualificationStrength !== undefined) assertFiniteNonnegative(playbook.qualificationStrength, "PROCEDURAL_INVALID_QUALIFICATION_STRENGTH");
   assertNoRawSecrets(playbook);
 }
@@ -250,6 +259,45 @@ function validateLesson(lesson: ReusableLesson): void {
   assertNoRawSecrets(lesson);
 }
 
+function validateEvidenceInvalidation(invalidation: unknown): void {
+  if (!isRecord(invalidation) || !INVALIDATION_TYPES.has(invalidation.type as EvidenceInvalidationType) ||
+      typeof invalidation.field !== "string" || !SAFE_IDENTITY_FIELD.test(invalidation.field)) throw new Error("PROCEDURAL_INVALID_EVIDENCE_INVALIDATION");
+  assertStringArray(invalidation.invalidates, "PROCEDURAL_INVALID_EVIDENCE_INVALIDATION", false);
+  for (const field of ["previous", "current"] as const) {
+    const value = invalidation[field];
+    if (value !== undefined && value !== null && !["string", "number", "boolean"].includes(typeof value)) throw new Error("PROCEDURAL_INVALID_EVIDENCE_INVALIDATION");
+    if (typeof value === "number" && !Number.isFinite(value)) throw new Error("PROCEDURAL_INVALID_EVIDENCE_INVALIDATION");
+  }
+}
+
+function validateInvalidationRecord(record: unknown): void {
+  if (!isRecord(record) || !["PLAYBOOK", "LESSON"].includes(record.targetKind as string) ||
+      typeof record.targetId !== "string" || !SAFE_ID.test(record.targetId) || !Number.isSafeInteger(record.targetVersion) || Number(record.targetVersion) < 1 ||
+      !INVALIDATION_TYPES.has(record.type as EvidenceInvalidationType) || typeof record.reason !== "string" || !record.reason.trim()) throw new Error("PROCEDURAL_INVALID_INVALIDATION_RECORD");
+  assertTimestamp(record.createdAt, "PROCEDURAL_INVALID_INVALIDATION_RECORD");
+}
+
+function validateOutcomeRecord(record: unknown): void {
+  if (!isRecord(record) || typeof record.taskFamily !== "string" || !SAFE_ID.test(record.taskFamily) ||
+      typeof record.playbookId !== "string" || !SAFE_ID.test(record.playbookId) || !Number.isSafeInteger(record.playbookVersion) || Number(record.playbookVersion) < 1 ||
+      typeof record.applicabilityReason !== "string" || !record.applicabilityReason.trim() || typeof record.priorEvidenceReusable !== "boolean" ||
+      !["VERIFIED", "FAILED"].includes(record.outcome as string) || !Array.isArray(record.invalidations)) throw new Error("PROCEDURAL_INVALID_OUTCOME_RECORD");
+  assertDigest(String(record.taskReferenceDigest), "PROCEDURAL_INVALID_OUTCOME_RECORD");
+  assertDigest(String(record.selectionDigest), "PROCEDURAL_INVALID_OUTCOME_RECORD");
+  record.invalidations.forEach(validateEvidenceInvalidation);
+  assertStringArray(record.freshVerificationEvidence, "PROCEDURAL_INVALID_OUTCOME_RECORD", false);
+  assertStringArray(record.operations, "PROCEDURAL_INVALID_OUTCOME_RECORD", false);
+  assertStringArray(record.operationsAvoided, "PROCEDURAL_INVALID_OUTCOME_RECORD");
+  assertTimestamp(record.createdAt, "PROCEDURAL_INVALID_OUTCOME_RECORD");
+}
+
+function validateQualificationFailureRecord(record: unknown): void {
+  if (!isRecord(record) || !["PLAYBOOK", "LESSON"].includes(record.kind as string) || typeof record.id !== "string" || !SAFE_ID.test(record.id) ||
+      !Number.isSafeInteger(record.version) || Number(record.version) < 1 || typeof record.reason !== "string" || !record.reason.trim()) throw new Error("PROCEDURAL_INVALID_QUALIFICATION_FAILURE_RECORD");
+  assertDigest(String(record.evidenceDigest), "PROCEDURAL_INVALID_QUALIFICATION_FAILURE_RECORD");
+  assertTimestamp(record.createdAt, "PROCEDURAL_INVALID_QUALIFICATION_FAILURE_RECORD");
+}
+
 function validateState(state: KnowledgeState): void {
   if (!isRecord(state) || state.schemaVersion !== 1 || !Number.isSafeInteger(state.generation) || state.generation < 1 ||
       !Array.isArray(state.playbooks) || state.playbooks.length > MAX_PLAYBOOKS || !Array.isArray(state.lessons) || state.lessons.length > MAX_LESSONS ||
@@ -269,6 +317,9 @@ function validateState(state: KnowledgeState): void {
     if (lessonKeys.has(key)) throw new Error("PROCEDURAL_DUPLICATE_LESSON");
     lessonKeys.add(key);
   }
+  state.invalidations.forEach(validateInvalidationRecord);
+  state.outcomes.forEach(validateOutcomeRecord);
+  state.qualificationFailures.forEach(validateQualificationFailureRecord);
   assertNoRawSecrets(state);
 }
 
@@ -379,6 +430,47 @@ export function classifyTaskFamily(description: string, playbooks: readonly Proc
   return { taskFamily: winner[0], score: winner[1].score, matchedPlaybookIds: winner[1].ids.sort() };
 }
 
+export function extractCandidateLesson(input: {
+  id: string;
+  version?: number;
+  taskFamily: string;
+  nature: LessonNature;
+  observation: string;
+  inference: string;
+  confidence: number;
+  sourceEvidence: string[];
+  producerIdentity: string;
+  applicabilityIdentity: MaterialIdentity;
+  invalidationConditions: EvidenceInvalidationType[];
+  claimKey?: string;
+}): ReusableLesson {
+  assertNoRawSecrets(input);
+  assertStringArray(input.sourceEvidence, "CANDIDATE_LESSON_SOURCE_EVIDENCE_REQUIRED", false);
+  if (!input.observation.trim() || !input.inference.trim()) throw new Error("CANDIDATE_LESSON_CONTENT_REQUIRED");
+  const lesson: ReusableLesson = {
+    id: input.id,
+    version: input.version ?? 1,
+    knowledgeClass: input.nature === "NEGATIVE" ? "FAILURE_NEGATIVE" : "PROCEDURAL",
+    taskFamily: input.taskFamily,
+    status: "CANDIDATE",
+    nature: input.nature,
+    observation: redactIncidentalIdentifiers(input.observation.trim()),
+    inference: redactIncidentalIdentifiers(input.inference.trim()),
+    confidence: input.confidence,
+    sourceEvidence: clone(input.sourceEvidence),
+    producerIdentity: input.producerIdentity,
+    evaluatorIdentity: "unassigned",
+    qualificationDigest: "",
+    applicabilityIdentity: clone(input.applicabilityIdentity),
+    invalidationConditions: clone(input.invalidationConditions),
+    createdAt: nowIso(),
+    verifiedAt: null,
+    ...(input.claimKey ? { claimKey: input.claimKey } : {}),
+  };
+  validateLesson(lesson);
+  return lesson;
+}
+
 export function retrieveVerifiedLessons(lessons: readonly ReusableLesson[], taskFamily: string, identity: MaterialIdentity): ReusableLesson[] {
   const candidates = lessons.filter((lesson) => lesson.status === "VERIFIED" && lesson.taskFamily === taskFamily && identityMatches(lesson.applicabilityIdentity, identity)).map((lesson) => clone(lesson));
   const grouped = new Map<string, ReusableLesson[]>();
@@ -406,7 +498,7 @@ export function retrieveVerifiedLessons(lessons: readonly ReusableLesson[], task
 
 function rankPlaybooks(task: ReuseTask, playbooks: readonly ProceduralPlaybook[]): ProceduralPlaybook[] {
   return playbooks
-    .filter((playbook) => playbook.status === "VERIFIED" && playbook.taskFamily === task.taskFamily && identityMatches(playbook.procedureApplicabilityIdentity, task.identity))
+    .filter((playbook) => playbook.status === "VERIFIED" && playbook.qualificationStatus === "independently_qualified" && playbook.taskFamily === task.taskFamily && identityMatches(playbook.procedureApplicabilityIdentity, task.identity))
     .sort((left, right) =>
       identitySpecificity(right.procedureApplicabilityIdentity) - identitySpecificity(left.procedureApplicabilityIdentity) ||
       (right.qualificationStrength ?? 0) - (left.qualificationStrength ?? 0) ||
@@ -540,7 +632,7 @@ export class ProceduralKnowledgeStore {
   async assertSelectionCurrent(selection: ProcedureSelection, task: ReuseTask): Promise<void> {
     await this.#refresh();
     const current = this.#state.playbooks.find((playbook) => playbook.id === selection.playbook.id && playbook.version === selection.playbook.version);
-    if (!current || current.status !== "VERIFIED" || sha256(canonicalJson(current)) !== selection.playbookDigest || !identityMatches(current.procedureApplicabilityIdentity, task.identity)) throw new Error("KNOWLEDGE_CHANGED_BEFORE_EXECUTION");
+    if (!current || current.status !== "VERIFIED" || current.qualificationStatus !== "independently_qualified" || sha256(canonicalJson(current)) !== selection.playbookDigest || !identityMatches(current.procedureApplicabilityIdentity, task.identity)) throw new Error("KNOWLEDGE_CHANGED_BEFORE_EXECUTION");
   }
 
   async invalidate(id: string, version: number, type: EvidenceInvalidationType, reason: string): Promise<void> {
@@ -560,6 +652,26 @@ export class ProceduralKnowledgeStore {
         throw new Error("PROCEDURAL_UNKNOWN_KNOWLEDGE");
       }
       state.invalidations.push({ targetKind: playbook ? "PLAYBOOK" : "LESSON", targetId: id, targetVersion: version, type, reason, createdAt: nowIso() });
+    });
+  }
+
+  async supersedePlaybook(oldId: string, oldVersion: number, newId: string, newVersion: number, reason: string): Promise<void> {
+    if (!reason.trim()) throw new Error("PROCEDURAL_SUPERSESSION_REASON_REQUIRED");
+    await this.#commit((state) => {
+      const oldPlaybook = state.playbooks.find((item) => item.id === oldId && item.version === oldVersion);
+      const replacement = state.playbooks.find((item) => item.id === newId && item.version === newVersion);
+      if (!oldPlaybook || !replacement) throw new Error("PROCEDURAL_UNKNOWN_PLAYBOOK");
+      const oldKey = playbookKey(oldPlaybook);
+      const replacementKey = playbookKey(replacement);
+      if (oldKey === replacementKey) throw new Error("PROCEDURAL_SELF_SUPERSESSION");
+      if (oldPlaybook.taskFamily !== replacement.taskFamily) throw new Error("PROCEDURAL_SUPERSESSION_FAMILY_MISMATCH");
+      if (replacement.status !== "VERIFIED" || replacement.qualificationStatus !== "independently_qualified") throw new Error("PROCEDURAL_SUPERSESSION_REPLACEMENT_NOT_VERIFIED");
+      if (oldPlaybook.status === "SUPERSEDED" && oldPlaybook.supersededBy === replacementKey) return;
+      if (oldPlaybook.status !== "VERIFIED") throw new Error("ILLEGAL_TRUST_TRANSITION");
+      oldPlaybook.status = transitionTrustState(oldPlaybook.status, "SUPERSEDED", { producerIdentity: "supersession", evaluatorIdentity: "supersession", sourceEvidence: [], qualificationDigest: "" });
+      oldPlaybook.supersededBy = replacementKey;
+      if (!replacement.supersedes.includes(oldKey)) replacement.supersedes.push(oldKey);
+      state.invalidations.push({ targetKind: "PLAYBOOK", targetId: oldPlaybook.id, targetVersion: oldPlaybook.version, type: "PROCEDURE_SUPERSEDED", reason, createdAt: nowIso() });
     });
   }
 
@@ -598,6 +710,8 @@ export class ProceduralKnowledgeStore {
 
   async recordLessonQualificationFailure(id: string, version: number, evidenceDigest: string, reason: string): Promise<void> {
     assertDigest(evidenceDigest, "INVALID_QUALIFICATION_DIGEST");
+    if (!reason.trim()) throw new Error("QUALIFICATION_FAILURE_REASON_REQUIRED");
+    assertNoRawSecrets(reason);
     await this.#commit((state) => {
       const lesson = state.lessons.find((item) => item.id === id && item.version === version);
       if (!lesson) throw new Error("PROCEDURAL_UNKNOWN_LESSON");
@@ -642,6 +756,7 @@ export class ProceduralKnowledgeStore {
   }
 
   async recordOutcome(outcome: ReuseOutcomeRecord): Promise<void> {
+    validateOutcomeRecord(outcome);
     assertNoRawSecrets(outcome);
     await this.#commit((state) => { state.outcomes.push(clone(outcome)); });
   }
@@ -661,6 +776,10 @@ export async function buildReuseContext(store: ProceduralKnowledgeStore, task: R
   return { selection, lessons, semanticDigest };
 }
 
+function safeReuseFallback(): { mode: "EXISTING_AUTHORIZED_PATH_REQUIRED"; authoritativeReuse: false; reason: string } {
+  return { mode: "EXISTING_AUTHORIZED_PATH_REQUIRED", authoritativeReuse: false, reason: "KNOWLEDGE_RETRIEVAL_UNAVAILABLE" };
+}
+
 export async function executeVerifiedProcedure<T>(input: {
   store: ProceduralKnowledgeStore | (() => Promise<ProceduralKnowledgeStore>);
   task: ReuseTask;
@@ -673,12 +792,21 @@ export async function executeVerifiedProcedure<T>(input: {
   freshVerify: (result: T) => Promise<{ passed: boolean; evidence: string[] }>;
 }): Promise<any> {
   let store: ProceduralKnowledgeStore;
-  try { store = typeof input.store === "function" ? await input.store() : input.store; }
-  catch (error) { return { mode: "EXISTING_AUTHORIZED_PATH_REQUIRED", authoritativeReuse: false, reason: error instanceof Error ? error.message : "knowledge retrieval unavailable" }; }
+  let classification: { taskFamily: string; score: number; matchedPlaybookIds: string[] };
+  let selection: ProcedureSelection;
+  let lessons: ReusableLesson[];
+  let priorEvidence: ReturnType<typeof decidePriorEvidenceReuse>;
+  try {
+    store = typeof input.store === "function" ? await input.store() : input.store;
+    classification = store.classify(input.task.description);
+    if (classification.taskFamily !== input.task.taskFamily) throw new Error("TASK_FAMILY_MISMATCH");
+    selection = store.select(input.task);
+    lessons = store.retrieveLessons(input.task);
+    priorEvidence = decidePriorEvidenceReuse({ expectedIdentity: selection.playbook.evidenceReuseIdentity, currentIdentity: input.task.identity });
+  } catch {
+    return safeReuseFallback();
+  }
 
-  const selection = store.select(input.task);
-  const lessons = store.retrieveLessons(input.task);
-  const priorEvidence = decidePriorEvidenceReuse({ expectedIdentity: selection.playbook.evidenceReuseIdentity, currentIdentity: input.task.identity });
   const prohibited = input.task.requestedActions.find((action) => selection.playbook.prohibitedActions.includes(action));
   if (prohibited) throw new Error(`PROHIBITED_ACTION:${prohibited}`);
   for (const authority of selection.playbook.authorityRequired) if (!input.grantedAuthorities.includes(authority)) throw new Error(`AUTHORITY_REQUIRED:${authority}`);
@@ -720,6 +848,7 @@ export async function executeVerifiedProcedure<T>(input: {
     authoritativeReuse: true,
     outcome,
     taskFamily: input.task.taskFamily,
+    classification,
     playbook: { id: selection.playbook.id, version: selection.playbook.version },
     applicability: { applicable: true, reason: selection.applicabilityReason },
     priorEvidence,
