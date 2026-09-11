@@ -24,9 +24,7 @@ async function stopChild(child: ChildProcess): Promise<void> {
   }
 }
 
-test("runtime attestation recognizes a state directory nested under the Railway volume mount", async () => {
-  const volumeRoot = await mkdtemp(join(tmpdir(), "sara-runtime-volume-"));
-  const stateDirectory = join(volumeRoot, "sara");
+async function readRuntimeAttestation(stateDirectory: string, volumeMount: string): Promise<Record<string, unknown>> {
   const child = spawn(
     process.execPath,
     ["--import", "tsx", "scripts/start-runtime.ts"],
@@ -46,7 +44,7 @@ test("runtime attestation recognizes a state directory nested under the Railway 
         CLOUDFLARE_API_TOKEN: "",
         RAILWAY_GIT_COMMIT_SHA: "a".repeat(40),
         RAILWAY_DEPLOYMENT_ID: "test-deployment-1",
-        RAILWAY_VOLUME_MOUNT_PATH: volumeRoot,
+        RAILWAY_VOLUME_MOUNT_PATH: volumeMount,
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -58,7 +56,7 @@ test("runtime attestation recognizes a state directory nested under the Railway 
   child.stderr?.on("data", (chunk: string) => { stderr += chunk; });
 
   try {
-    const attestation = await new Promise<Record<string, unknown>>((resolve, reject) => {
+    return await new Promise<Record<string, unknown>>((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error(`Timed out waiting for runtime attestation. stdout=${stdout.slice(-2_000)} stderr=${stderr.slice(-2_000)}`));
       }, 15_000);
@@ -89,12 +87,33 @@ test("runtime attestation recognizes a state directory nested under the Railway 
         }
       });
     });
+  } finally {
+    await stopChild(child);
+  }
+}
 
+test("runtime attestation recognizes a state directory nested under the Railway volume mount", async () => {
+  const volumeRoot = await mkdtemp(join(tmpdir(), "sara-runtime-volume-"));
+  try {
+    const attestation = await readRuntimeAttestation(join(volumeRoot, "sara"), volumeRoot);
     assert.equal(attestation.status, "verified");
     assert.equal(attestation.persistentVolumeMountMatches, true);
     assert.equal(attestation.stateDirectoryClass, "persistent_volume");
   } finally {
-    await stopChild(child);
     await rm(volumeRoot, { recursive: true, force: true });
+  }
+});
+
+test("runtime attestation rejects a path-prefix collision outside the Railway volume mount", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "sara-runtime-prefix-"));
+  try {
+    const volumeRoot = join(parent, "data");
+    const stateDirectory = join(parent, "data-other", "sara");
+    const attestation = await readRuntimeAttestation(stateDirectory, volumeRoot);
+    assert.equal(attestation.status, "verified");
+    assert.equal(attestation.persistentVolumeMountMatches, false);
+    assert.equal(attestation.stateDirectoryClass, "configured_other");
+  } finally {
+    await rm(parent, { recursive: true, force: true });
   }
 });
