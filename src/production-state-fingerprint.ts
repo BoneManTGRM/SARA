@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { campaignAccounting, currentLearningCampaign } from "./learning-campaign.ts";
 import { EventStoreIntegrityError, type StoredEvent } from "./store.ts";
@@ -93,6 +94,34 @@ function parseEventLog(raw: string): StoredEvent[] {
   return events;
 }
 
+/**
+ * A concurrent append can briefly expose an incomplete final record to a
+ * lock-free observer. Retry only when the observed invalid bytes change; the
+ * same invalid snapshot twice is treated as persistent corruption.
+ */
+async function readVerifiedEventSnapshot(eventPath: string): Promise<StoredEvent[] | null> {
+  let previousInvalidDigest: string | null = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let raw: string;
+    try {
+      raw = await readFile(eventPath, "utf8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+    try {
+      return parseEventLog(raw);
+    } catch (error) {
+      if (!(error instanceof EventStoreIntegrityError)) throw error;
+      const invalidDigest = sha256(raw);
+      if (invalidDigest === previousInvalidDigest || attempt === 2) throw error;
+      previousInvalidDigest = invalidDigest;
+      await delay(10);
+    }
+  }
+  throw new EventStoreIntegrityError("Unable to obtain a stable event-log snapshot.");
+}
+
 function mutationProjection(events: StoredEvent[]): MutationProjection[] {
   const mutations = new Map<string, MutationProjection>();
   for (const event of events) {
@@ -168,16 +197,8 @@ function emptyFingerprint(): ProductionStateFingerprint {
 }
 
 export async function readProductionStateFingerprint(stateDirectory: string): Promise<ProductionStateFingerprint> {
-  let raw: string;
-  try {
-    raw = await readFile(join(stateDirectory, "events.ndjson"), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyFingerprint();
-    throw error;
-  }
-
-  const events = parseEventLog(raw);
-  if (events.length === 0) return emptyFingerprint();
+  const events = await readVerifiedEventSnapshot(join(stateDirectory, "events.ndjson"));
+  if (!events || events.length === 0) return emptyFingerprint();
 
   const latestBoot = events.filter((event) => event.type === "system_booted").at(-1);
   const boot = latestBoot?.data as { constitutionVersion?: unknown; constitutionDigest?: unknown } | undefined;
