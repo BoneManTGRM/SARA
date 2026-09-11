@@ -87,10 +87,23 @@ test("allocation HTTP controls require owner authentication",async()=>{
   assert.equal(((await response.json()) as {monthlyLimitUsd:number}).monthlyLimitUsd,.01);
   const learningUrl=url.replace("/api/model-budget","/api/autonomy/learning-mandate");
   assert.equal((await fetch(learningUrl,{method:"POST"})).status,401);
-  const activation=await fetch(learningUrl,{method:"POST",headers:{authorization:`Bearer ${token}`}});
+  const routineUrl=url.replace("/api/model-budget","/api/autonomy/standing-mandate");
+  const routineResponse=await fetch(routineUrl,{method:"POST",headers:{authorization:`Bearer ${token}`}});
+  assert.equal(routineResponse.status,201,await routineResponse.clone().text());
+  const routine=await routineResponse.json() as {digest:string;maximumDailyActions:number;maximumCostPerActionUsd:number};
+  assert.equal(routine.maximumDailyActions,10);assert.equal(routine.maximumCostPerActionUsd,3);
+  const missingReconciliation=await fetch(learningUrl,{method:"POST",headers:{authorization:`Bearer ${token}`}});
+  assert.equal(missingReconciliation.status,409);
+  const staleReconciliation=await fetch(learningUrl,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({expectedCurrentMandateDigest:"0".repeat(64)})});
+  assert.equal(staleReconciliation.status,409);
+  const activation=await fetch(learningUrl,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({expectedCurrentMandateDigest:routine.digest})});
   assert.equal(activation.status,201,await activation.clone().text());
-  const mandate=await activation.json() as {allowedChannels:string[];allowedServiceIds:string[];maximumCostPerActionUsd:number;maximumDailyActions:number};
-  assert.deepEqual(mandate.allowedChannels,["internal"]);assert.deepEqual(mandate.allowedServiceIds,["skill-learning"]);
+  const mandate=await activation.json() as {digest:string;id:string;allowedChannels:string[];allowedServiceIds:string[];maximumCostPerActionUsd:number;maximumDailyActions:number};
+  assert.match(mandate.id,/^internal-learning-/);assert.deepEqual(mandate.allowedChannels,["internal"]);assert.deepEqual(mandate.allowedServiceIds,["skill-learning"]);
   assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,20);
+  const statusResponse=await fetch(url.replace("/api/model-budget","/api/status"),{headers:{authorization:`Bearer ${token}`}});
+  assert.equal(statusResponse.status,200);
+  const status=await statusResponse.json() as {standingMandate:{digest:string;id:string;revokedAt:string|null}};
+  assert.equal(status.standingMandate.digest,mandate.digest);assert.equal(status.standingMandate.revokedAt,null);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));await rm(directory,{recursive:true,force:true});}
 });

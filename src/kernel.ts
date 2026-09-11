@@ -3008,6 +3008,44 @@ export class SaraKernel {
     });
   }
 
+  replaceStandingMandate(
+    principal: Principal,
+    input: StandingMandateInput,
+    expectedCurrentMandateDigest: string | null,
+    approval?: OwnerApproval,
+  ): Promise<StandingMandate> {
+    return this.serializeMutation(async () => {
+      if (!this.isVerifiedOwner(principal)) throw new Error("Authenticated owner authority is required to replace a standing mandate.");
+      if (input.ownerId !== principal.id) throw new Error("The mandate owner must match the authenticated owner.");
+      const mandate = compileStandingMandate(input);
+      const existing = (await this.state()).standingMandate;
+      const active = Boolean(existing && !existing.revokedAt && Date.parse(existing.expiresAt) > Date.now());
+      if (active && existing!.digest !== expectedCurrentMandateDigest) {
+        throw new Error("EXACT_CURRENT_MANDATE_DIGEST_REQUIRED");
+      }
+      const targetId = `standing-mandate:${input.id}`;
+      await this.authorize(principal, {
+        action: "required_owner_approval_change",
+        targetId,
+        external: false,
+        ...(approval ? { approval } : {}),
+      });
+      if (!active) {
+        await this.#store.append("standing_mandate_snapshot", principal, mandate);
+        return mandate;
+      }
+      if (existing!.digest === mandate.digest) return existing!;
+      const revoked: StandingMandate = {
+        ...existing!,
+        revokedAt: new Date().toISOString(),
+        revocationReason: "Owner reconciled and replaced the active standing mandate.",
+      };
+      await this.#store.append("standing_mandate_snapshot", principal, revoked);
+      await this.#store.append("standing_mandate_snapshot", principal, mandate);
+      return mandate;
+    });
+  }
+
   revokeStandingMandate(principal: Principal, mandateId: string, reason: string): Promise<StandingMandate> {
     return this.serializeMutation(async () => {
       await this.authorize(principal, {

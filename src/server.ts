@@ -807,17 +807,19 @@ async function handleOwnerRevenueWrite(
   if (request.method === "POST" && url.pathname === "/api/autonomy/learning-mandate") {
     const body=await readJson(request);
     const current=(await kernel.getStatus()).standingMandate;
-    if (current && body.expectedCurrentMandateDigest !== current.digest) {
-      json(response,409,{error:"Explicitly reconcile the existing mandate before replacing it with internal-only learning authority.",currentMandateDigest:current.digest});
+    const currentActive=Boolean(current && !current.revokedAt && Date.parse(current.expiresAt)>Date.now());
+    if (currentActive && body.expectedCurrentMandateDigest !== current!.digest) {
+      json(response,409,{error:"Explicitly reconcile the exact active mandate before replacing it with internal-only learning authority.",currentMandateDigest:current!.digest});
       return true;
     }
     const now=new Date();
     const id=`internal-learning-${now.toISOString().slice(0,10)}`;
-    json(response,201,await kernel.activateStandingMandate(owner,{
+    json(response,201,await kernel.replaceStandingMandate(owner,{
       id,ownerId:owner.id,allowedActions:["business_candidate_development"],allowedChannels:["internal"],
       allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:20,
       startsAt:now.toISOString(),expiresAt:new Date(now.getTime()+30*86_400_000).toISOString(),
-    },{approvalId:randomUUID(),action:"required_owner_approval_change",targetId:`standing-mandate:${id}`,approvedAt:now.toISOString(),ownerId:owner.id}));
+    },currentActive ? body.expectedCurrentMandateDigest as string : null,
+    {approvalId:randomUUID(),action:"required_owner_approval_change",targetId:`standing-mandate:${id}`,approvedAt:now.toISOString(),ownerId:owner.id}));
     return true;
   }
   if (request.method === "POST" && url.pathname === "/api/autonomy/standing-mandate") {
