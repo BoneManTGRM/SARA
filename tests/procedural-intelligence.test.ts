@@ -130,3 +130,14 @@ test("procedure can remain applicable while changed source invalidates prior exe
     invalidates: ["prior_execution_pass"],
   }]);
 });
+
+test("prior execution evidence without a material identity never becomes reusable by default", () => {
+  const decidePriorEvidenceReuse = (memoryFabric as Record<string, unknown>).decidePriorEvidenceReuse as (input: unknown) => any;
+  const result = decidePriorEvidenceReuse({
+    expectedIdentity: {},
+    currentIdentity: { repository: "BoneManTGRM/SARA", sourceRevision: "source-current" },
+  });
+  assert.equal(result.reusable, false);
+  assert.deepEqual(result.invalidations, []);
+  assert.match(result.reason, /no material prior-evidence identity/i);
+});
