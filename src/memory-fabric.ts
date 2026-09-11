@@ -160,3 +160,138 @@ export function recallMemories(memories: readonly MemoryRecord[], input: MemoryR
   };
   return { ...result, contextDigest: sha256(canonicalJson(result)) };
 }
+
+export type ProcedureApplicabilityIdentity = Record<string, string | number | boolean | null | undefined>;
+
+export interface ProcedureSelectionTask {
+  taskFamily: string;
+  identity: ProcedureApplicabilityIdentity;
+}
+
+export interface SelectableVerifiedProcedure {
+  id: string;
+  version: number;
+  taskFamily: string;
+  status: string;
+  procedureApplicabilityIdentity?: ProcedureApplicabilityIdentity;
+  qualificationStatus?: string;
+  qualificationDigest?: string;
+  sourceEvidence?: readonly string[];
+}
+
+export interface VerifiedProcedureSelection<T extends SelectableVerifiedProcedure = SelectableVerifiedProcedure> {
+  playbook: T;
+  procedureApplicable: true;
+  applicabilityReason: string;
+  selectionDigest: string;
+}
+
+function applicabilityMatches(expected: ProcedureApplicabilityIdentity | undefined, actual: ProcedureApplicabilityIdentity): boolean {
+  if (!expected) return true;
+  return Object.entries(expected).every(([key, value]) => value === undefined || actual[key] === value);
+}
+
+export function selectVerifiedProcedure<T extends SelectableVerifiedProcedure>(input: {
+  task: ProcedureSelectionTask;
+  playbooks: readonly T[];
+}): VerifiedProcedureSelection<T> {
+  const candidates = input.playbooks
+    .filter((playbook) => playbook.status === "VERIFIED" && playbook.qualificationStatus === "independently_qualified")
+    .filter((playbook) => playbook.taskFamily === input.task.taskFamily)
+    .filter((playbook) => applicabilityMatches(playbook.procedureApplicabilityIdentity, input.task.identity))
+    .map((playbook) => ({
+      playbook,
+      specificity: Object.values(playbook.procedureApplicabilityIdentity ?? {}).filter((value) => value !== undefined).length,
+      sourceStrength: playbook.sourceEvidence?.length ?? 0,
+    }))
+    .sort((left, right) =>
+      right.specificity - left.specificity ||
+      right.sourceStrength - left.sourceStrength ||
+      right.playbook.version - left.playbook.version ||
+      left.playbook.id.localeCompare(right.playbook.id)
+    );
+
+  const winner = candidates[0];
+  if (!winner) throw new Error("NO_APPLICABLE_VERIFIED_PLAYBOOK");
+
+  const selectionIdentity = {
+    taskFamily: input.task.taskFamily,
+    playbookId: winner.playbook.id,
+    playbookVersion: winner.playbook.version,
+    applicabilityIdentity: winner.playbook.procedureApplicabilityIdentity ?? {},
+  };
+  return {
+    playbook: winner.playbook,
+    procedureApplicable: true,
+    applicabilityReason: "verified task-family and material applicability identity matched",
+    selectionDigest: sha256(canonicalJson(selectionIdentity)),
+  };
+}
+
+export type EvidenceInvalidationType =
+  | "SOURCE_CHANGED"
+  | "DEPENDENCY_CHANGED"
+  | "CONFIGURATION_CHANGED"
+  | "ENVIRONMENT_CHANGED"
+  | "REQUIREMENT_CHANGED"
+  | "EVALUATOR_CHANGED"
+  | "POLICY_CHANGED"
+  | "AUTHORITY_CHANGED"
+  | "EVIDENCE_CORRUPT"
+  | "PROCEDURE_SUPERSEDED";
+
+export interface EvidenceInvalidation {
+  type: EvidenceInvalidationType;
+  field: string;
+  previous: string | number | boolean | null | undefined;
+  current: string | number | boolean | null | undefined;
+  invalidates: readonly string[];
+}
+
+const EVIDENCE_IDENTITY_INVALIDATION: Readonly<Record<string, EvidenceInvalidationType>> = Object.freeze({
+  sourceRevision: "SOURCE_CHANGED",
+  dependencyDigest: "DEPENDENCY_CHANGED",
+  configurationDigest: "CONFIGURATION_CHANGED",
+  environment: "ENVIRONMENT_CHANGED",
+  requirementDigest: "REQUIREMENT_CHANGED",
+  acceptanceDigest: "REQUIREMENT_CHANGED",
+  evaluator: "EVALUATOR_CHANGED",
+  policyDigest: "POLICY_CHANGED",
+  authorityContextDigest: "AUTHORITY_CHANGED",
+});
+
+export function decidePriorEvidenceReuse(input: {
+  expectedIdentity: ProcedureApplicabilityIdentity;
+  currentIdentity: ProcedureApplicabilityIdentity;
+}): {
+  reusable: boolean;
+  invalidations: EvidenceInvalidation[];
+  reason: string;
+} {
+  const expectedFields = Object.entries(input.expectedIdentity).filter(([, value]) => value !== undefined);
+  if (!expectedFields.length) {
+    return {
+      reusable: false,
+      invalidations: [],
+      reason: "no material prior-evidence identity is defined",
+    };
+  }
+
+  const invalidations = expectedFields
+    .filter(([field, previous]) => input.currentIdentity[field] !== previous)
+    .map(([field, previous]) => ({
+      type: EVIDENCE_IDENTITY_INVALIDATION[field] ?? "REQUIREMENT_CHANGED",
+      field,
+      previous,
+      current: input.currentIdentity[field],
+      invalidates: ["prior_execution_pass"],
+    } satisfies EvidenceInvalidation));
+
+  return {
+    reusable: invalidations.length === 0,
+    invalidations,
+    reason: invalidations.length === 0
+      ? "all material prior-evidence identity fields match"
+      : "prior execution evidence is stale for one or more material identity fields",
+  };
+}
