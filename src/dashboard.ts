@@ -1095,10 +1095,10 @@ export const DASHBOARD_HTML = `<!doctype html>
         && ownerMandate.allowedChannels.includes('internal') && ownerMandate.allowedServiceIds.includes('skill-learning');
       const button = document.querySelector('#learning-mandate');
       const needsRateUpgrade = compatible && Number(ownerMandate.maximumDailyActions || 0) < 20;
-      button.disabled = !status.configured || (Boolean(active) && !needsRateUpgrade);
+      button.disabled = !status.configured || (compatible && !needsRateUpgrade);
       button.textContent = needsRateUpgrade ? 'Upgrade learning mandate to 20/day'
         : compatible ? 'Current mandate covers internal learning'
-        : active ? 'Reconcile the active mandate before learning activation' : 'Activate 30-day internal learning mandate';
+        : active ? 'Replace active mandate with 20/day internal learning' : 'Activate 30-day internal learning mandate';
     }
 
     document.querySelector('#learning-contract').addEventListener('input', () => {
@@ -1118,7 +1118,7 @@ export const DASHBOARD_HTML = `<!doctype html>
         if (response.status !== 409 || !result.campaignDigest) throw new Error(result.error || 'Campaign review failed.');
         reviewedLearning = {campaign, approvedDigest:result.campaignDigest};
         document.querySelector('#learning-review').textContent = 'Approve ' + campaign.id + ', maximum ' + campaign.maximumRequests
-          + ' free requests, up to 10 per UTC day and four attempts per learning root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')
+          + ' free requests, up to 20 per UTC day and four attempts per learning root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')
           + '. Exact digest: ' + result.campaignDigest + '. No operational promotion is granted.';
         document.querySelector('#learning-approve').disabled = false;
       } catch(error) { setMessage(error.message,true); }
@@ -1164,6 +1164,10 @@ export const DASHBOARD_HTML = `<!doctype html>
     });
 
     document.querySelector('#learning-mandate').addEventListener('click', async () => {
+      const active = ownerMandate && !ownerMandate.revokedAt && Date.parse(ownerMandate.expiresAt) > Date.now();
+      const compatible = active && ownerMandate.allowedActions.includes('business_candidate_development')
+        && ownerMandate.allowedChannels.includes('internal') && ownerMandate.allowedServiceIds.includes('skill-learning');
+      if (active && !compatible && !window.confirm('Replace the current standing mandate with the zero-cost internal learning mandate? The current routine mandate will be replaced under exact owner reconciliation.')) return;
       try {
         await ownerPost('/api/autonomy/learning-mandate',ownerMandate ? {expectedCurrentMandateDigest:ownerMandate.digest} : {});
         await loadPrivateState();
