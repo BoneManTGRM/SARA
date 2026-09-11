@@ -229,3 +229,62 @@ export function selectVerifiedProcedure<T extends SelectableVerifiedProcedure>(i
     selectionDigest: sha256(canonicalJson(selectionIdentity)),
   };
 }
+
+export type EvidenceInvalidationType =
+  | "SOURCE_CHANGED"
+  | "DEPENDENCY_CHANGED"
+  | "CONFIGURATION_CHANGED"
+  | "ENVIRONMENT_CHANGED"
+  | "REQUIREMENT_CHANGED"
+  | "EVALUATOR_CHANGED"
+  | "POLICY_CHANGED"
+  | "AUTHORITY_CHANGED"
+  | "EVIDENCE_CORRUPT"
+  | "PROCEDURE_SUPERSEDED";
+
+export interface EvidenceInvalidation {
+  type: EvidenceInvalidationType;
+  field: string;
+  previous: string | number | boolean | null | undefined;
+  current: string | number | boolean | null | undefined;
+  invalidates: readonly string[];
+}
+
+const EVIDENCE_IDENTITY_INVALIDATION: Readonly<Record<string, EvidenceInvalidationType>> = Object.freeze({
+  sourceRevision: "SOURCE_CHANGED",
+  dependencyDigest: "DEPENDENCY_CHANGED",
+  configurationDigest: "CONFIGURATION_CHANGED",
+  environment: "ENVIRONMENT_CHANGED",
+  requirementDigest: "REQUIREMENT_CHANGED",
+  acceptanceDigest: "REQUIREMENT_CHANGED",
+  evaluator: "EVALUATOR_CHANGED",
+  policyDigest: "POLICY_CHANGED",
+  authorityContextDigest: "AUTHORITY_CHANGED",
+});
+
+export function decidePriorEvidenceReuse(input: {
+  expectedIdentity: ProcedureApplicabilityIdentity;
+  currentIdentity: ProcedureApplicabilityIdentity;
+}): {
+  reusable: boolean;
+  invalidations: EvidenceInvalidation[];
+  reason: string;
+} {
+  const invalidations = Object.entries(input.expectedIdentity)
+    .filter(([field, previous]) => previous !== undefined && input.currentIdentity[field] !== previous)
+    .map(([field, previous]) => ({
+      type: EVIDENCE_IDENTITY_INVALIDATION[field] ?? "REQUIREMENT_CHANGED",
+      field,
+      previous,
+      current: input.currentIdentity[field],
+      invalidates: ["prior_execution_pass"],
+    } satisfies EvidenceInvalidation));
+
+  return {
+    reusable: invalidations.length === 0,
+    invalidations,
+    reason: invalidations.length === 0
+      ? "all material prior-evidence identity fields match"
+      : "prior execution evidence is stale for one or more material identity fields",
+  };
+}
