@@ -67,6 +67,25 @@ describe("exception-only autonomy", () => {
     assert.equal(evaluateRoutineAction({ mandate, request: request({ estimatedCostUsd: 0.01 }), emergencyStopped: false }).outcome, "owner_approval");
   });
 
+  it("allows 20 daily actions only for the exact zero-cost internal learning mandate", () => {
+    const learning: Parameters<typeof compileStandingMandate>[0] = {
+      id: "learning-mandate-20",
+      allowedActions: ["business_candidate_development"],
+      allowedChannels: ["internal"],
+      allowedServiceIds: ["skill-learning"],
+      maximumCostPerActionUsd: 0,
+      maximumDailyActions: 20,
+      maximumConcurrentActions: 1,
+      startsAt: "2026-09-03T00:00:00.000Z",
+      expiresAt: "2026-10-03T00:00:00.000Z",
+      ownerId: "OWNER",
+    };
+    assert.equal(compileStandingMandate(learning).maximumDailyActions, 20);
+    assert.throws(() => compileStandingMandate({ ...learning, maximumDailyActions: 21 }), /1 through 20/);
+    assert.throws(() => compileStandingMandate({ ...learning, allowedChannels: ["public_web"] }), /1 through 10/);
+    assert.throws(() => compileStandingMandate({ ...learning, allowedServiceIds: ["public-repository-readiness-snapshot"] }), /1 through 10/);
+  });
+
   it("denies hard boundaries regardless of mandate", () => {
     const mandate = compileStandingMandate({
       id: "mandate-1",

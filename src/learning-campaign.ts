@@ -15,7 +15,7 @@ const safeId = /^[a-z][a-z0-9-]{2,79}$/u;
 
 export const LEARNING_CAMPAIGN_MAXIMUM_REQUESTS = 100;
 export const LEARNING_CAMPAIGN_MAXIMUM_CONTRACTS = 32;
-export const LEARNING_DAILY_RESERVATION_LIMIT = 10;
+export const LEARNING_DAILY_RESERVATION_LIMIT = 20;
 export const LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT = 4;
 
 /** Owner-frozen data, never a producer-supplied acceptance oracle. */

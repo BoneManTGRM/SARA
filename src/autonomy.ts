@@ -123,8 +123,20 @@ export function compileStandingMandate(input: StandingMandateInput): StandingMan
   if (!Number.isFinite(input.maximumCostPerActionUsd) || input.maximumCostPerActionUsd < 0 || input.maximumCostPerActionUsd > 3) {
     throw new Error("Maximum cost per routine action must be between $0 and $3.");
   }
-  if (!Number.isInteger(input.maximumDailyActions) || input.maximumDailyActions < 1 || input.maximumDailyActions > 10) {
-    throw new Error("Maximum daily actions must be an integer from 1 through 10.");
+  const learningDailyLimit = (
+    allowedActions.length === 1
+    && allowedActions[0] === "business_candidate_development"
+    && Array.isArray(input.allowedChannels)
+    && input.allowedChannels.length === 1
+    && input.allowedChannels[0] === "internal"
+    && Array.isArray(input.allowedServiceIds)
+    && input.allowedServiceIds.length === 1
+    && input.allowedServiceIds[0] === "skill-learning"
+    && input.maximumCostPerActionUsd === 0
+    && input.maximumConcurrentActions === 1
+  ) ? 20 : 10;
+  if (!Number.isInteger(input.maximumDailyActions) || input.maximumDailyActions < 1 || input.maximumDailyActions > learningDailyLimit) {
+    throw new Error(`Maximum daily actions must be an integer from 1 through ${learningDailyLimit}.`);
   }
   if (!Number.isInteger(input.maximumConcurrentActions) || input.maximumConcurrentActions !== 1) {
     throw new Error("Initial autonomous concurrency must remain exactly one.");

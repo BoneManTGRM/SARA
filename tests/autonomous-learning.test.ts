@@ -15,7 +15,7 @@ async function setupQueue(directory:string) {
   const now=Date.now();
   await kernel.activateStandingMandate(owner,{
     id:"learning-test",ownerId:owner.id,allowedActions:["business_candidate_development"],allowedChannels:["internal"],allowedServiceIds:["skill-learning"],
-    maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,
+    maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:20,
     startsAt:new Date(now-60_000).toISOString(),expiresAt:new Date(now+86400000).toISOString(),
   },{approvalId:"test-approval",ownerId:owner.id,action:"required_owner_approval_change",targetId:"standing-mandate:learning-test",approvedAt:new Date(now).toISOString()});
   return {kernel,owner};
@@ -54,13 +54,13 @@ test("autonomous queue requires a mandate, prioritizes value, and consumes faile
     await enqueue(kernel,5);
     assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
     assert.equal(calls,3);
-    for(let index=0;index<7;index++){
+    for(let index=0;index<17;index++){
       await enqueue(kernel,6+index);
       assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
     }
-    await enqueue(kernel,20);
+    await enqueue(kernel,30);
     assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");
-    assert.equal(calls,10);
+    assert.equal(calls,20);
     await assert.rejects(()=>kernel.runNextAutonomousLearningCycle({...generator,maximumCostUsd:.01}),/zero-cost/);
     const memory=await kernel.recallMemory({query:"Validate catalog rows",scope:"global",categories:["failure"]});
     assert.doesNotMatch(JSON.stringify(memory),/PRIVATE/);

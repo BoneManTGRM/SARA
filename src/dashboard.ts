@@ -1094,9 +1094,9 @@ export const DASHBOARD_HTML = `<!doctype html>
       const compatible = active && ownerMandate.allowedActions.includes('business_candidate_development')
         && ownerMandate.allowedChannels.includes('internal') && ownerMandate.allowedServiceIds.includes('skill-learning');
       const button = document.querySelector('#learning-mandate');
-      const needsRateUpgrade = compatible && Number(ownerMandate.maximumDailyActions || 0) < 10;
+      const needsRateUpgrade = compatible && Number(ownerMandate.maximumDailyActions || 0) < 20;
       button.disabled = !status.configured || (Boolean(active) && !needsRateUpgrade);
-      button.textContent = needsRateUpgrade ? 'Upgrade learning mandate to 10/day'
+      button.textContent = needsRateUpgrade ? 'Upgrade learning mandate to 20/day'
         : compatible ? 'Current mandate covers internal learning'
         : active ? 'Reconcile the active mandate before learning activation' : 'Activate 30-day internal learning mandate';
     }
