@@ -109,15 +109,82 @@ export function campaignAccounting(campaign: LearningCampaign, events: StoredEve
     today: reservations.filter(event => event.occurredAt.slice(0, 10) === new Date().toISOString().slice(0, 10)).length };
 }
 
-/** Select only actual unmet task requirements; no model calls or invented demand. */
+type LearningGapSelection = {
+  campaignId?: string;
+  capabilityId?: string;
+  contractDigest?: string;
+  sourceJobId?: string;
+};
+
+type LearningQualification = {
+  capabilityId?: string;
+  contractDigest?: string;
+};
+
+function eligibleLearningSource(job: Job, capabilityId: string): boolean {
+  return !job.learningCampaignId &&
+    !job.workCard.requiredCapabilities.includes("autonomous-learning") &&
+    job.status !== "verified" && job.status !== "running" &&
+    job.workCard.expectedOwnerValue > 0 &&
+    job.workCard.missingCapabilities.includes(capabilityId);
+}
+
+/** Select unmet work only under the owner-frozen curriculum; never invent a contract or replay a reservation. */
 export function selectLearningGap(campaign: LearningCampaign, jobs: Job[], events: StoredEvent[]) {
-  const attempted = new Set(events.filter(event => event.type === "learning_gap_selected")
-    .map(event => (event.data as { capabilityId: string }).capabilityId));
+  const selections = events.filter(event => event.type === "learning_gap_selected")
+    .map(event => event.data as LearningGapSelection)
+    .filter(selection => selection.campaignId === campaign.id);
+  const attempted = new Set(selections.flatMap(selection =>
+    typeof selection.capabilityId === "string" ? [selection.capabilityId] : []));
+
   const choices = campaign.contracts.filter(contract => !attempted.has(contract.capabilityId)).flatMap(contract =>
-    jobs.filter(job => !job.learningCampaignId && !job.workCard.requiredCapabilities.includes("autonomous-learning") &&
-      job.status !== "verified" && job.status !== "running" && job.workCard.expectedOwnerValue > 0 &&
-      job.workCard.missingCapabilities.includes(contract.capabilityId))
+    jobs.filter(job => eligibleLearningSource(job, contract.capabilityId))
       .map(job => ({ contract, sourceJob: job, score: job.workCard.expectedOwnerValue / contract.estimatedEffort })));
-  return choices.sort((a, b) => b.score - a.score || a.contract.capabilityId.localeCompare(b.contract.capabilityId) ||
+  const firstChoice = choices.sort((a, b) => b.score - a.score || a.contract.capabilityId.localeCompare(b.contract.capabilityId) ||
     a.sourceJob.id.localeCompare(b.sourceJob.id))[0];
+  if (firstChoice) return firstChoice;
+
+  // Keep #164's first-pass curriculum seeding authoritative: do not repeat a
+  // failed capability while any frozen contract has never been selected.
+  if (campaign.contracts.some(contract => !attempted.has(contract.capabilityId))) return undefined;
+
+  const continuations = campaign.contracts.flatMap((contract, contractIndex) => {
+    const contractDigest = learningContractDigest(contract);
+    const qualified = events.some(event => {
+      if (event.type !== "learning_qualification_passed") return false;
+      const data = event.data as LearningQualification;
+      return data.capabilityId === contract.capabilityId && data.contractDigest === contractDigest;
+    });
+    if (qualified) return [];
+
+    // Reopen only a terminal root that never entered the existing bounded
+    // child-repair chain. Once a root has any child, that root's normal
+    // LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT lifecycle remains authoritative.
+    const roots = jobs.filter(job => job.learningCampaignId === campaign.id &&
+      job.learningCapabilityId === contract.capabilityId && job.learningContractDigest === contractDigest &&
+      !job.learningParentJobId);
+    const latestRoot = roots.at(-1);
+    if (!latestRoot || latestRoot.status !== "failed") return [];
+    const hasChild = jobs.some(job => job.learningCampaignId === campaign.id &&
+      job.learningCapabilityId === contract.capabilityId && job.learningContractDigest === contractDigest &&
+      (job.learningRootJobId === latestRoot.id || job.learningParentJobId === latestRoot.id));
+    if (hasChild) return [];
+
+    const previousSelection = selections.filter(selection => selection.capabilityId === contract.capabilityId &&
+      (selection.contractDigest === undefined || selection.contractDigest === contractDigest)).at(-1);
+    if (!previousSelection || typeof previousSelection.sourceJobId !== "string") return [];
+    const sourceJob = jobs.find(job => job.id === previousSelection.sourceJobId);
+    if (!sourceJob || !eligibleLearningSource(sourceJob, contract.capabilityId)) return [];
+
+    return [{
+      contract,
+      sourceJob,
+      score: sourceJob.workCard.expectedOwnerValue / contract.estimatedEffort,
+      attempts: roots.length,
+      contractIndex,
+    }];
+  });
+  const continuation = continuations.sort((a, b) => a.attempts - b.attempts ||
+    a.contractIndex - b.contractIndex || b.score - a.score || a.sourceJob.id.localeCompare(b.sourceJob.id))[0];
+  return continuation ? { contract: continuation.contract, sourceJob: continuation.sourceJob, score: continuation.score } : undefined;
 }
