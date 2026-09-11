@@ -1,0 +1,184 @@
+name: Apply learning mandate reconciliation repair
+
+on:
+  push:
+    branches:
+      - fix/learning-mandate-reconciliation-20260911
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[mandate-reconcile-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply exact reconciliation repair
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def exact_replace(path: str, old: str, new: str, expected: int = 1) -> None:
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} occurrences, found {count}: {old!r}")
+              p.write_text(text.replace(old, new, expected))
+
+          kernel_anchor = '''  revokeStandingMandate(principal: Principal, mandateId: string, reason: string): Promise<StandingMandate> {'''
+          kernel_insert = '''  replaceStandingMandate(
+    principal: Principal,
+    input: StandingMandateInput,
+    expectedCurrentMandateDigest: string | null,
+    approval?: OwnerApproval,
+  ): Promise<StandingMandate> {
+    return this.serializeMutation(async () => {
+      if (!this.isVerifiedOwner(principal)) throw new Error("Authenticated owner authority is required to replace a standing mandate.");
+      if (input.ownerId !== principal.id) throw new Error("The mandate owner must match the authenticated owner.");
+      const mandate = compileStandingMandate(input);
+      const existing = (await this.state()).standingMandate;
+      const active = Boolean(existing && !existing.revokedAt && Date.parse(existing.expiresAt) > Date.now());
+      if (active && existing!.digest !== expectedCurrentMandateDigest) {
+        throw new Error("EXACT_CURRENT_MANDATE_DIGEST_REQUIRED");
+      }
+      const targetId = `standing-mandate:${input.id}`;
+      await this.authorize(principal, {
+        action: "required_owner_approval_change",
+        targetId,
+        external: false,
+        ...(approval ? { approval } : {}),
+      });
+      if (!active) {
+        await this.#store.append("standing_mandate_snapshot", principal, mandate);
+        return mandate;
+      }
+      if (existing!.digest === mandate.digest) return existing!;
+      const revoked: StandingMandate = {
+        ...existing!,
+        revokedAt: new Date().toISOString(),
+        revocationReason: "Owner reconciled and replaced the active standing mandate.",
+      };
+      await this.#store.append("standing_mandate_snapshot", principal, revoked);
+      await this.#store.append("standing_mandate_snapshot", principal, mandate);
+      return mandate;
+    });
+  }
+
+''' + kernel_anchor
+          exact_replace('src/kernel.ts', kernel_anchor, kernel_insert)
+
+          server_old = '''    const current=(await kernel.getStatus()).standingMandate;
+    if (current && body.expectedCurrentMandateDigest !== current.digest) {
+      json(response,409,{error:"Explicitly reconcile the existing mandate before replacing it with internal-only learning authority.",currentMandateDigest:current.digest});
+      return true;
+    }
+    const now=new Date();
+    const id=`internal-learning-${now.toISOString().slice(0,10)}`;
+    json(response,201,await kernel.activateStandingMandate(owner,{'''
+          server_new = '''    const current=(await kernel.getStatus()).standingMandate;
+    const currentActive=Boolean(current && !current.revokedAt && Date.parse(current.expiresAt)>Date.now());
+    if (currentActive && body.expectedCurrentMandateDigest !== current!.digest) {
+      json(response,409,{error:"Explicitly reconcile the exact active mandate before replacing it with internal-only learning authority.",currentMandateDigest:current!.digest});
+      return true;
+    }
+    const now=new Date();
+    const id=`internal-learning-${now.toISOString().slice(0,10)}`;
+    json(response,201,await kernel.replaceStandingMandate(owner,{'''
+          exact_replace('src/server.ts', server_old, server_new)
+
+          server_tail_old = '''      startsAt:now.toISOString(),expiresAt:new Date(now.getTime()+30*86_400_000).toISOString(),
+    },{approvalId:randomUUID(),action:"required_owner_approval_change",targetId:`standing-mandate:${id}`,approvedAt:now.toISOString(),ownerId:owner.id}));'''
+          server_tail_new = '''      startsAt:now.toISOString(),expiresAt:new Date(now.getTime()+30*86_400_000).toISOString(),
+    },currentActive ? body.expectedCurrentMandateDigest as string : null,
+    {approvalId:randomUUID(),action:"required_owner_approval_change",targetId:`standing-mandate:${id}`,approvedAt:now.toISOString(),ownerId:owner.id}));'''
+          exact_replace('src/server.ts', server_tail_old, server_tail_new)
+
+          dashboard_old = '''      const needsRateUpgrade = compatible && Number(ownerMandate.maximumDailyActions || 0) < 20;
+      button.disabled = !status.configured || (Boolean(active) && !needsRateUpgrade);
+      button.textContent = needsRateUpgrade ? 'Upgrade learning mandate to 20/day'
+        : compatible ? 'Current mandate covers internal learning'
+        : active ? 'Reconcile the active mandate before learning activation' : 'Activate 30-day internal learning mandate';'''
+          dashboard_new = '''      const needsRateUpgrade = compatible && Number(ownerMandate.maximumDailyActions || 0) < 20;
+      button.disabled = !status.configured || (compatible && !needsRateUpgrade);
+      button.textContent = needsRateUpgrade ? 'Upgrade learning mandate to 20/day'
+        : compatible ? 'Current mandate covers internal learning'
+        : active ? 'Replace active mandate with 20/day internal learning' : 'Activate 30-day internal learning mandate';'''
+          exact_replace('src/dashboard.ts', dashboard_old, dashboard_new)
+          exact_replace('src/dashboard.ts', "          + ' free requests, up to 10 per UTC day and four attempts per learning root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')", "          + ' free requests, up to 20 per UTC day and four attempts per learning root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')")
+
+          click_old = '''    document.querySelector('#learning-mandate').addEventListener('click', async () => {
+      try {
+        await ownerPost('/api/autonomy/learning-mandate',ownerMandate ? {expectedCurrentMandateDigest:ownerMandate.digest} : {});
+        await loadPrivateState();
+      } catch(error) { setMessage(error.message,true); }
+    });'''
+          click_new = '''    document.querySelector('#learning-mandate').addEventListener('click', async () => {
+      const active = ownerMandate && !ownerMandate.revokedAt && Date.parse(ownerMandate.expiresAt) > Date.now();
+      const compatible = active && ownerMandate.allowedActions.includes('business_candidate_development')
+        && ownerMandate.allowedChannels.includes('internal') && ownerMandate.allowedServiceIds.includes('skill-learning');
+      if (active && !compatible && !window.confirm('Replace the current standing mandate with the zero-cost internal learning mandate? The current routine mandate will be revoked atomically.')) return;
+      try {
+        await ownerPost('/api/autonomy/learning-mandate',ownerMandate ? {expectedCurrentMandateDigest:ownerMandate.digest} : {});
+        await loadPrivateState();
+      } catch(error) { setMessage(error.message,true); }
+    });'''
+          exact_replace('src/dashboard.ts', click_old, click_new)
+
+          test_old = '''  const learningUrl=url.replace("/api/model-budget","/api/autonomy/learning-mandate");
+  assert.equal((await fetch(learningUrl,{method:"POST"})).status,401);
+  const activation=await fetch(learningUrl,{method:"POST",headers:{authorization:`Bearer ${token}`}});
+  assert.equal(activation.status,201,await activation.clone().text());
+  const mandate=await activation.json() as {allowedChannels:string[];allowedServiceIds:string[];maximumCostPerActionUsd:number;maximumDailyActions:number};
+  assert.deepEqual(mandate.allowedChannels,["internal"]);assert.deepEqual(mandate.allowedServiceIds,["skill-learning"]);
+  assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,20);'''
+          test_new = '''  const learningUrl=url.replace("/api/model-budget","/api/autonomy/learning-mandate");
+  assert.equal((await fetch(learningUrl,{method:"POST"})).status,401);
+  const routineUrl=url.replace("/api/model-budget","/api/autonomy/standing-mandate");
+  const routineResponse=await fetch(routineUrl,{method:"POST",headers:{authorization:`Bearer ${token}`}});
+  assert.equal(routineResponse.status,201,await routineResponse.clone().text());
+  const routine=await routineResponse.json() as {digest:string;maximumDailyActions:number;maximumCostPerActionUsd:number};
+  assert.equal(routine.maximumDailyActions,10);assert.equal(routine.maximumCostPerActionUsd,3);
+  const missingReconciliation=await fetch(learningUrl,{method:"POST",headers:{authorization:`Bearer ${token}`}});
+  assert.equal(missingReconciliation.status,409);
+  const staleReconciliation=await fetch(learningUrl,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({expectedCurrentMandateDigest:"0".repeat(64)})});
+  assert.equal(staleReconciliation.status,409);
+  const activation=await fetch(learningUrl,{method:"POST",headers:{authorization:`Bearer ${token}`,"content-type":"application/json"},body:JSON.stringify({expectedCurrentMandateDigest:routine.digest})});
+  assert.equal(activation.status,201,await activation.clone().text());
+  const mandate=await activation.json() as {id:string;allowedChannels:string[];allowedServiceIds:string[];maximumCostPerActionUsd:number;maximumDailyActions:number};
+  assert.match(mandate.id,/^internal-learning-/);assert.deepEqual(mandate.allowedChannels,["internal"]);assert.deepEqual(mandate.allowedServiceIds,["skill-learning"]);
+  assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,20);
+  const statusResponse=await fetch(url.replace("/api/model-budget","/api/status"),{headers:{authorization:`Bearer ${token}`}});
+  assert.equal(statusResponse.status,200);
+  const status=await statusResponse.json() as {standingMandate:{digest:string;id:string;revokedAt:string|null}};
+  assert.equal(status.standingMandate.digest,(mandate as unknown as {digest:string}).digest);assert.equal(status.standingMandate.revokedAt,null);'''
+          exact_replace('tests/model-budget.test.ts', test_old, test_new)
+
+          dash_test_old = '''  for(const script of scripts)assert.doesNotThrow(()=>new Script(script[1]!,{filename:"served-dashboard.js"}));
+});'''
+          dash_test_new = '''  for(const script of scripts)assert.doesNotThrow(()=>new Script(script[1]!,{filename:"served-dashboard.js"}));
+  assert.match(DASHBOARD_HTML,/Replace active mandate with 20\\/day internal learning/);
+  assert.match(DASHBOARD_HTML,/current routine mandate will be revoked atomically/);
+});'''
+          exact_replace('tests/dashboard-script.test.ts', dash_test_old, dash_test_new)
+          PY
+      - name: Build native checker
+        run: node scripts/build-native-checker.mjs
+      - name: Verify repository
+        run: npm run verify
+      - name: Commit verified source change
+        run: |
+          git config user.name "Reparodynamics"
+          git config user.email "papadenico@yahoo.com"
+          git add src/kernel.ts src/server.ts src/dashboard.ts tests/model-budget.test.ts tests/dashboard-script.test.ts
+          git diff --cached --check
+          git commit -m "Repair learning mandate reconciliation [mandate-reconcile-applied]"
+          git push origin HEAD:fix/learning-mandate-reconciliation-20260911
