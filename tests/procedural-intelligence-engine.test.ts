@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { canonicalJson, sha256 } from "../src/canonical.ts";
 import {
   PROCEDURAL_SEED_PLAYBOOKS,
   ProceduralKnowledgeStore,
@@ -144,6 +145,7 @@ test("invalidated, incompatible, and unqualified knowledge is never authoritativ
   assert.throws(() => ProceduralKnowledgeStore.inMemory([playbook({ status: "INVALIDATED" })]).select(task()), /NO_APPLICABLE_VERIFIED_PLAYBOOK/);
   assert.throws(() => ProceduralKnowledgeStore.inMemory([playbook({ taskFamily: "railway_deployment_verification" })]).select(task()), /NO_APPLICABLE_VERIFIED_PLAYBOOK/);
   assert.throws(() => ProceduralKnowledgeStore.inMemory([playbook({ status: "CANDIDATE" })]).select(task()), /NO_APPLICABLE_VERIFIED_PLAYBOOK/);
+  assert.throws(() => ProceduralKnowledgeStore.inMemory([playbook({ qualificationStatus: "unqualified" })]), /PROCEDURAL_VERIFIED_REQUIRES_INDEPENDENT_QUALIFICATION/);
 });
 
 test("multiple matching verified playbooks choose stronger exact evidence, but an unresolved tie fails safely", () => {
@@ -164,6 +166,12 @@ test("negative lessons apply only under matching relevant identity and never rep
   assert.equal(changed.length, 0);
 });
 
+test("equally qualified contradictory lessons fail safely instead of silently choosing", () => {
+  const first = lesson({ id: "lesson-a", claimKey: "lockfile-rule", inference: "Regenerate the lockfile.", qualificationStrength: 90 });
+  const second = lesson({ id: "lesson-b", claimKey: "lockfile-rule", inference: "Never regenerate the lockfile.", qualificationStrength: 90 });
+  assert.throws(() => retrieveVerifiedLessons([first, second], "github_pr_qualification", { repository: "BoneManTGRM/SARA", dependencyDigest: sha("1") }), /VERIFIED_LESSON_CONFLICT/);
+});
+
 test("candidate lessons and failed qualifications remain non-authoritative", () => {
   assert.equal(retrieveVerifiedLessons([lesson({ status: "CANDIDATE" })], "github_pr_qualification", { repository: "BoneManTGRM/SARA", dependencyDigest: sha("1") }).length, 0);
   assert.equal(retrieveVerifiedLessons([lesson({ status: "QUALIFIED", qualificationDigest: sha("9") })], "github_pr_qualification", { repository: "BoneManTGRM/SARA", dependencyDigest: sha("1") }).length, 0);
@@ -178,6 +186,30 @@ test("durable verified knowledge survives restart and malformed state fails clos
 
   const statePath = restarted.statePath;
   await writeFile(statePath, "{ malformed", { encoding: "utf8", mode: 0o600 });
+  await assert.rejects(() => ProceduralKnowledgeStore.open(root, []), /PROCEDURAL_STATE_CORRUPT/);
+});
+
+test("malformed audit records fail closed even when the outer state digest is recomputed", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sara-procedural-audit-corrupt-"));
+  const store = await ProceduralKnowledgeStore.open(root, [playbook()]);
+  const envelope = JSON.parse(await readFile(store.statePath, "utf8")) as { state: any; digest: string };
+  envelope.state.outcomes.push({
+    taskFamily: "github_pr_qualification",
+    taskReferenceDigest: sha("1"),
+    playbookId: "github-pr-qualification",
+    playbookVersion: 1,
+    selectionDigest: sha("2"),
+    applicabilityReason: "synthetic malformed audit record",
+    priorEvidenceReusable: false,
+    invalidations: [],
+    freshVerificationEvidence: [],
+    outcome: "VERIFIED",
+    operations: ["fresh_verify"],
+    operationsAvoided: [],
+    createdAt: "not-a-timestamp",
+  });
+  envelope.digest = sha256(canonicalJson(envelope.state));
+  await writeFile(store.statePath, canonicalJson(envelope), { encoding: "utf8", mode: 0o600 });
   await assert.rejects(() => ProceduralKnowledgeStore.open(root, []), /PROCEDURAL_STATE_CORRUPT/);
 });
 
@@ -256,6 +288,23 @@ test("retrieval failure falls back safely without executing variable work", asyn
   assert.equal(executed, false);
 });
 
+test("task-family classification mismatch falls back safely before variable work", async () => {
+  const store = ProceduralKnowledgeStore.inMemory([playbook()]);
+  let executed = false;
+  const result = await executeVerifiedProcedure({
+    store,
+    task: task({ description: "customer delivery request" }),
+    grantedAuthorities: ["repository_read"],
+    authorizedCostCeilingUsd: 0,
+    estimatedCostUsd: 0,
+    variableWork: async () => { executed = true; return { ok: true }; },
+    freshVerify: async () => ({ passed: true, evidence: ["fresh"] }),
+  });
+  assert.equal(result.mode, "EXISTING_AUTHORIZED_PATH_REQUIRED");
+  assert.equal(result.authoritativeReuse, false);
+  assert.equal(executed, false);
+});
+
 test("fixed-condition reuse avoids procedure reconstruction but preserves fresh verification", async () => {
   const store = ProceduralKnowledgeStore.inMemory([playbook({ authorityRequired: ["repository_read"] })]);
   const reuse = await executeVerifiedProcedure({
@@ -278,8 +327,8 @@ test("seed library is bounded, verified, evidence-backed, and cannot authorize a
   assert.ok(PROCEDURAL_SEED_PLAYBOOKS.length >= 5 && PROCEDURAL_SEED_PLAYBOOKS.length <= 8);
   for (const seed of PROCEDURAL_SEED_PLAYBOOKS) {
     assert.equal(seed.status, "VERIFIED");
+    assert.equal(seed.qualificationStatus, "independently_qualified");
     assert.ok(seed.sourceEvidence.length > 0);
-    assert.ok(seed.authorityRequired.length >= 0);
     assert.ok(seed.prohibitedActions.includes("promote_shadow_mutation"));
     assert.ok(seed.prohibitedActions.includes("bypass_required_checks"));
   }
