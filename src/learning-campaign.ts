@@ -157,15 +157,18 @@ export function selectLearningGap(campaign: LearningCampaign, jobs: Job[], event
     });
     if (qualified) return [];
 
-    const failedJob = jobs.some(job => job.learningCampaignId === campaign.id &&
+    // Reopen only a terminal root that never entered the existing bounded
+    // child-repair chain. Once a root has any child, that root's normal
+    // LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT lifecycle remains authoritative.
+    const roots = jobs.filter(job => job.learningCampaignId === campaign.id &&
       job.learningCapabilityId === contract.capabilityId && job.learningContractDigest === contractDigest &&
-      job.status === "failed");
-    const failedQualification = events.some(event => {
-      if (event.type !== "learning_qualification_failed") return false;
-      const data = event.data as LearningQualification;
-      return data.capabilityId === contract.capabilityId && data.contractDigest === contractDigest;
-    });
-    if (!failedJob && !failedQualification) return [];
+      !job.learningParentJobId);
+    const latestRoot = roots.at(-1);
+    if (!latestRoot || latestRoot.status !== "failed") return [];
+    const hasChild = jobs.some(job => job.learningCampaignId === campaign.id &&
+      job.learningCapabilityId === contract.capabilityId && job.learningContractDigest === contractDigest &&
+      (job.learningRootJobId === latestRoot.id || job.learningParentJobId === latestRoot.id));
+    if (hasChild) return [];
 
     const previousSelection = selections.filter(selection => selection.capabilityId === contract.capabilityId &&
       (selection.contractDigest === undefined || selection.contractDigest === contractDigest)).at(-1);
@@ -173,13 +176,11 @@ export function selectLearningGap(campaign: LearningCampaign, jobs: Job[], event
     const sourceJob = jobs.find(job => job.id === previousSelection.sourceJobId);
     if (!sourceJob || !eligibleLearningSource(sourceJob, contract.capabilityId)) return [];
 
-    const attempts = jobs.filter(job => job.learningCampaignId === campaign.id &&
-      job.learningCapabilityId === contract.capabilityId && job.learningContractDigest === contractDigest).length;
     return [{
       contract,
       sourceJob,
       score: sourceJob.workCard.expectedOwnerValue / contract.estimatedEffort,
-      attempts,
+      attempts: roots.length,
       contractIndex,
     }];
   });
