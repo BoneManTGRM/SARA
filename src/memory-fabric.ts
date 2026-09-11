@@ -196,18 +196,16 @@ export function selectVerifiedProcedure<T extends SelectableVerifiedProcedure>(i
   playbooks: readonly T[];
 }): VerifiedProcedureSelection<T> {
   const candidates = input.playbooks
-    .filter((playbook) => playbook.status === "VERIFIED")
+    .filter((playbook) => playbook.status === "VERIFIED" && playbook.qualificationStatus === "independently_qualified")
     .filter((playbook) => playbook.taskFamily === input.task.taskFamily)
     .filter((playbook) => applicabilityMatches(playbook.procedureApplicabilityIdentity, input.task.identity))
     .map((playbook) => ({
       playbook,
       specificity: Object.values(playbook.procedureApplicabilityIdentity ?? {}).filter((value) => value !== undefined).length,
-      qualificationStrength: playbook.qualificationStatus === "independently_qualified" ? 1 : 0,
       sourceStrength: playbook.sourceEvidence?.length ?? 0,
     }))
     .sort((left, right) =>
       right.specificity - left.specificity ||
-      right.qualificationStrength - left.qualificationStrength ||
       right.sourceStrength - left.sourceStrength ||
       right.playbook.version - left.playbook.version ||
       left.playbook.id.localeCompare(right.playbook.id)
@@ -270,8 +268,17 @@ export function decidePriorEvidenceReuse(input: {
   invalidations: EvidenceInvalidation[];
   reason: string;
 } {
-  const invalidations = Object.entries(input.expectedIdentity)
-    .filter(([field, previous]) => previous !== undefined && input.currentIdentity[field] !== previous)
+  const expectedFields = Object.entries(input.expectedIdentity).filter(([, value]) => value !== undefined);
+  if (!expectedFields.length) {
+    return {
+      reusable: false,
+      invalidations: [],
+      reason: "no material prior-evidence identity is defined",
+    };
+  }
+
+  const invalidations = expectedFields
+    .filter(([field, previous]) => input.currentIdentity[field] !== previous)
     .map(([field, previous]) => ({
       type: EVIDENCE_IDENTITY_INVALIDATION[field] ?? "REQUIREMENT_CHANGED",
       field,
