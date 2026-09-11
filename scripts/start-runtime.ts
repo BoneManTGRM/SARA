@@ -24,12 +24,20 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
   const deploymentId = process.env.RAILWAY_DEPLOYMENT_ID ?? "";
   if (/^[a-f0-9]{40}$/u.test(sourceRevision) && /^[A-Za-z0-9-]{8,}$/u.test(deploymentId)) {
     try {
-      const { runProductionProceduralReuseProof } = await import("../src/procedural-intelligence.ts");
-      const proof = await runProductionProceduralReuseProof({
+      const { runBoundProductionProceduralReuseProof } = await import("../src/production-procedural-reuse.ts");
+      const proof = await runBoundProductionProceduralReuseProof({
         stateDirectory: resolve(process.env.SARA_STATE_DIRECTORY ?? "./state"),
         sourceRevision,
         deploymentId,
         grantedAuthorities: ["runtime_read"],
+        runtime: {
+          projectId: process.env.RAILWAY_PROJECT_ID ?? "",
+          serviceId: process.env.RAILWAY_SERVICE_ID ?? "",
+          serviceName: process.env.RAILWAY_SERVICE_NAME ?? "",
+          environmentId: process.env.RAILWAY_ENVIRONMENT_ID ?? "",
+          environmentName: process.env.RAILWAY_ENVIRONMENT_NAME ?? "",
+          volumeMountPath: process.env.RAILWAY_VOLUME_MOUNT_PATH ?? "",
+        },
       });
       console.log(JSON.stringify({
         event: "sara_procedural_reuse_proof",
@@ -41,6 +49,7 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
         priorEvidence: proof.priorEvidence,
         freshVerification: proof.freshVerification,
         efficiency: proof.efficiency,
+        runtimeBoundary: proof.runtimeBoundary,
       }));
     } catch {
       console.error(JSON.stringify({ event: "sara_procedural_reuse_proof", status: "failed_closed" }));
