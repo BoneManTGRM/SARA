@@ -22,11 +22,47 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
 
   const sourceRevision = process.env.RAILWAY_GIT_COMMIT_SHA ?? "";
   const deploymentId = process.env.RAILWAY_DEPLOYMENT_ID ?? "";
+  const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? "./state");
+
+  try {
+    const { readProductionStateFingerprint } = await import("../src/production-state-fingerprint.ts");
+    const state = await readProductionStateFingerprint(stateDirectory);
+    const volumeMount = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+    console.log(JSON.stringify({
+      event: "sara_release_state_attestation",
+      status: "verified",
+      schemaVersion: 1,
+      sourceRevision: /^[a-f0-9]{40}$/u.test(sourceRevision) ? sourceRevision : null,
+      deploymentId: /^[A-Za-z0-9-]{8,}$/u.test(deploymentId) ? deploymentId : null,
+      applicationVersion: process.env.npm_package_version ?? null,
+      stateDirectoryClass: stateDirectory === resolve("/data") ? "persistent_volume" : "configured_other",
+      persistentVolumeMountMatches: volumeMount ? resolve(volumeMount) === stateDirectory : null,
+      workerConfiguration: {
+        autonomousLearningEnabled: process.env.SARA_AUTONOMOUS_LEARNING_ENABLED === "true",
+        workersPlan: process.env.SARA_WORKERS_PLAN === "free"
+          ? "free"
+          : process.env.SARA_WORKERS_PLAN
+            ? "configured_nonfree"
+            : "missing",
+        cloudflareConfigured: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN),
+        ownerAuthenticationConfigured: Boolean(process.env.SARA_OWNER_TOKEN_SHA256 || process.env.SARA_OWNER_TOKEN),
+      },
+      state,
+    }));
+  } catch {
+    console.error(JSON.stringify({
+      event: "sara_release_state_attestation",
+      status: "not_verified",
+      sourceRevision: /^[a-f0-9]{40}$/u.test(sourceRevision) ? sourceRevision : null,
+      deploymentId: /^[A-Za-z0-9-]{8,}$/u.test(deploymentId) ? deploymentId : null,
+    }));
+  }
+
   if (/^[a-f0-9]{40}$/u.test(sourceRevision) && /^[A-Za-z0-9-]{8,}$/u.test(deploymentId)) {
     try {
       const { runBoundProductionProceduralReuseProof } = await import("../src/production-procedural-reuse.ts");
       const proof = await runBoundProductionProceduralReuseProof({
-        stateDirectory: resolve(process.env.SARA_STATE_DIRECTORY ?? "./state"),
+        stateDirectory,
         sourceRevision,
         deploymentId,
         grantedAuthorities: ["runtime_read"],
