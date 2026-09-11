@@ -102,6 +102,10 @@ test("candidate lesson stays non-authoritative until independent qualification a
     qualificationDigest: digest("f"),
   });
   assert.equal(store.retrieveLessons(task()).length, 1);
+  const published = store.snapshot().lessons.find((item) => item.id === candidate.id);
+  assert.ok(published?.sourceEvidence.includes("ci:failed-source-bound-pass"));
+  assert.ok(published?.sourceEvidence.includes("qualification:pass"));
+  assert.ok(published?.sourceEvidence.includes("publication:pass"));
 });
 
 test("failed lesson qualification is retained but cannot become authoritative", async () => {
@@ -172,6 +176,7 @@ test("verified playbook versions can be superseded without erasing audit history
   assert.equal(snapshot.playbooks.find((item) => item.version === 1)?.status, "SUPERSEDED");
   assert.equal(snapshot.playbooks.find((item) => item.version === 1)?.supersededBy, `${newVersion.id}@2`);
   assert.ok(snapshot.playbooks.find((item) => item.version === 2)?.supersedes.includes(`${oldVersion.id}@1`));
+  assert.equal(snapshot.invalidations.at(-1)?.type, "PROCEDURE_SUPERSEDED");
   assert.equal(store.select(task()).playbook.version, 2);
 });
 
@@ -190,6 +195,10 @@ test("production-shaped proof classifies the task, invalidates stale prior PASS,
   assert.equal(result.priorEvidence.reusable, false);
   assert.ok(result.priorEvidence.invalidations.some((item: { type: string }) => item.type === "SOURCE_CHANGED"));
   assert.equal(result.freshVerification.passed, true);
-  assert.ok(result.efficiency.operationsAvoided.includes("derive_procedure"));
+  assert.deepEqual(result.efficiency.operationsAvoided, ["inspect_source_for_procedure", "derive_procedure"]);
+  assert.equal(result.efficiency.baselineOperationCount, 6);
+  assert.equal(result.efficiency.reuseOperationCount, 5);
   assert.equal(result.efficiency.verificationReduced, false);
+  assert.equal(result.efficiency.wallClockDurationMs, null);
+  assert.equal(result.efficiency.providerCostUsd, null);
 });
