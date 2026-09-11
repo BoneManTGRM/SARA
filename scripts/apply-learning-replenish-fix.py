@@ -79,7 +79,8 @@ exact_replace("src/kernel.ts", kernel_old, kernel_new)
 anchor = '''test("pure initial generation rejects constructor destructuring before execution",async()=>{'''
 insert = '''test("unknown terminal failures replenish the same frozen gap only within the four-attempt root",async()=>{
   const {directory,kernel}=await setup();let calls=0;
-  const generator:CandidateGenerator={...echo,async generate(){calls++;throw new Error("Unknown provider failure");}};
+  const generator:CandidateGenerator={id:"unknown-replenish-fixture",external:false,maximumCostUsd:0,
+    async generate():Promise<never>{calls++;throw new Error("Unknown provider failure");}};
   try {
     const worker=new AutonomousLearningWorker(kernel,generator);
     assert.equal((await worker.tick()).status,"failed");
