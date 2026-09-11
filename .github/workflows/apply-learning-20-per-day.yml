@@ -105,7 +105,7 @@ jobs:
           test_anchor = '  it("denies hard boundaries regardless of mandate", () => {'
           test_insert = "\n".join([
               '  it("allows 20 daily actions only for the exact zero-cost internal learning mandate", () => {',
-              '    const learning = {',
+              '    const learning: Parameters<typeof compileStandingMandate>[0] = {',
               '      id: "learning-mandate-20",',
               '      allowedActions: ["business_candidate_development"],',
               '      allowedChannels: ["internal"],',
