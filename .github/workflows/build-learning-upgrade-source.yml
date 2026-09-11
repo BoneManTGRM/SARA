@@ -42,9 +42,11 @@ jobs:
           text=p.read_text()
           old='assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,2);'
           new='assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,10);'
-          if text.count(old) != 1:
-              raise SystemExit(f'Expected one learning mandate expectation, found {text.count(old)}')
-          p.write_text(text.replace(old,new,1))
+          if old in text:
+              text=text.replace(old,new,1)
+          elif new not in text:
+              raise SystemExit('Learning mandate expectation was neither the legacy nor upgraded value.')
+          p.write_text(text)
           PY
       - name: Build native checker
         run: node scripts/build-native-checker.mjs
