@@ -691,7 +691,7 @@ export class ProceduralKnowledgeStore {
       if (!lesson) throw new Error("PROCEDURAL_UNKNOWN_LESSON");
       lesson.status = transitionTrustState(lesson.status, "QUALIFIED", { producerIdentity: lesson.producerIdentity, evaluatorIdentity: evidence.evaluatorIdentity, sourceEvidence: evidence.sourceEvidence, qualificationDigest: evidence.qualificationDigest });
       lesson.evaluatorIdentity = evidence.evaluatorIdentity;
-      lesson.sourceEvidence = clone(evidence.sourceEvidence);
+      lesson.sourceEvidence = [...new Set([...lesson.sourceEvidence, ...evidence.sourceEvidence])];
       lesson.qualificationDigest = evidence.qualificationDigest;
     });
   }
@@ -702,7 +702,7 @@ export class ProceduralKnowledgeStore {
       if (!lesson) throw new Error("PROCEDURAL_UNKNOWN_LESSON");
       lesson.status = transitionTrustState(lesson.status, "VERIFIED", { producerIdentity: lesson.producerIdentity, evaluatorIdentity: evidence.evaluatorIdentity, sourceEvidence: evidence.sourceEvidence, qualificationDigest: evidence.qualificationDigest });
       lesson.evaluatorIdentity = evidence.evaluatorIdentity;
-      lesson.sourceEvidence = clone(evidence.sourceEvidence);
+      lesson.sourceEvidence = [...new Set([...lesson.sourceEvidence, ...evidence.sourceEvidence])];
       lesson.qualificationDigest = evidence.qualificationDigest;
       lesson.verifiedAt = nowIso();
     });
@@ -736,7 +736,7 @@ export class ProceduralKnowledgeStore {
       if (!playbook) throw new Error("PROCEDURAL_UNKNOWN_PLAYBOOK");
       playbook.status = transitionTrustState(playbook.status, "QUALIFIED", { producerIdentity: playbook.provenance.producerIdentity, evaluatorIdentity: evidence.evaluatorIdentity, sourceEvidence: evidence.sourceEvidence, qualificationDigest: evidence.qualificationDigest });
       playbook.evaluatorIdentity = evidence.evaluatorIdentity;
-      playbook.sourceEvidence = clone(evidence.sourceEvidence);
+      playbook.sourceEvidence = [...new Set([...playbook.sourceEvidence, ...evidence.sourceEvidence])];
       playbook.qualificationDigest = evidence.qualificationDigest;
       playbook.qualificationStatus = "independently_qualified";
     });
@@ -748,7 +748,7 @@ export class ProceduralKnowledgeStore {
       if (!playbook) throw new Error("PROCEDURAL_UNKNOWN_PLAYBOOK");
       playbook.status = transitionTrustState(playbook.status, "VERIFIED", { producerIdentity: playbook.provenance.producerIdentity, evaluatorIdentity: evidence.evaluatorIdentity, sourceEvidence: evidence.sourceEvidence, qualificationDigest: evidence.qualificationDigest });
       playbook.evaluatorIdentity = evidence.evaluatorIdentity;
-      playbook.sourceEvidence = clone(evidence.sourceEvidence);
+      playbook.sourceEvidence = [...new Set([...playbook.sourceEvidence, ...evidence.sourceEvidence])];
       playbook.qualificationDigest = evidence.qualificationDigest;
       playbook.qualificationStatus = "independently_qualified";
       playbook.verifiedAt = nowIso();
