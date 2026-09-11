@@ -35,6 +35,27 @@ jobs:
               p.write_text(text.replace(old, new, expected))
 
           exact_replace(
+              'src/autonomy.ts',
+              '''  if (!Number.isInteger(input.maximumDailyActions) || input.maximumDailyActions < 1 || input.maximumDailyActions > 10) {
+    throw new Error("Maximum daily actions must be an integer from 1 through 10.");
+  }''',
+              '''  const learningDailyLimit = (
+    allowedActions.length === 1
+    && allowedActions[0] === "business_candidate_development"
+    && Array.isArray(input.allowedChannels)
+    && input.allowedChannels.length === 1
+    && input.allowedChannels[0] === "internal"
+    && Array.isArray(input.allowedServiceIds)
+    && input.allowedServiceIds.length === 1
+    && input.allowedServiceIds[0] === "skill-learning"
+    && input.maximumCostPerActionUsd === 0
+    && input.maximumConcurrentActions === 1
+  ) ? 20 : 10;
+  if (!Number.isInteger(input.maximumDailyActions) || input.maximumDailyActions < 1 || input.maximumDailyActions > learningDailyLimit) {
+    throw new Error(`Maximum daily actions must be an integer from 1 through ${learningDailyLimit}.`);
+  }''',
+          )
+          exact_replace(
               'src/learning-campaign.ts',
               'export const LEARNING_DAILY_RESERVATION_LIMIT = 10;',
               'export const LEARNING_DAILY_RESERVATION_LIMIT = 20;',
@@ -79,6 +100,30 @@ jobs:
               'await enqueue(kernel,20);\n    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");\n    assert.equal(calls,10);',
               'await enqueue(kernel,30);\n    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");\n    assert.equal(calls,20);',
           )
+          exact_replace(
+              'tests/autonomy.test.ts',
+              '''  it("denies hard boundaries regardless of mandate", () => {''',
+              '''  it("allows 20 daily actions only for the exact zero-cost internal learning mandate", () => {
+    const learning = {
+      id: "learning-mandate-20",
+      allowedActions: ["business_candidate_development"] as const,
+      allowedChannels: ["internal"],
+      allowedServiceIds: ["skill-learning"],
+      maximumCostPerActionUsd: 0,
+      maximumDailyActions: 20,
+      maximumConcurrentActions: 1,
+      startsAt: "2026-09-03T00:00:00.000Z",
+      expiresAt: "2026-10-03T00:00:00.000Z",
+      ownerId: "OWNER",
+    };
+    assert.equal(compileStandingMandate(learning).maximumDailyActions, 20);
+    assert.throws(() => compileStandingMandate({ ...learning, maximumDailyActions: 21 }), /1 through 20/);
+    assert.throws(() => compileStandingMandate({ ...learning, allowedChannels: ["public_web"] }), /1 through 10/);
+    assert.throws(() => compileStandingMandate({ ...learning, allowedServiceIds: ["public-repository-readiness-snapshot"] }), /1 through 10/);
+  });
+
+  it("denies hard boundaries regardless of mandate", () => {''',
+          )
           PY
       - name: Build native checker
         run: node scripts/build-native-checker.mjs
@@ -88,7 +133,7 @@ jobs:
         run: |
           git config user.name "Reparodynamics"
           git config user.email "papadenico@yahoo.com"
-          git add src/learning-campaign.ts src/server.ts src/dashboard.ts tests/model-budget.test.ts tests/learning-campaign.test.ts tests/autonomous-learning.test.ts
+          git add src/autonomy.ts src/learning-campaign.ts src/server.ts src/dashboard.ts tests/autonomy.test.ts tests/model-budget.test.ts tests/learning-campaign.test.ts tests/autonomous-learning.test.ts
           git diff --cached --check
           git commit -m "Raise bounded learning mandate to 20 per day [learning-20-applied]"
           git push origin HEAD:codex/learning-20-per-day-20260911
