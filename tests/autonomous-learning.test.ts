@@ -67,6 +67,35 @@ test("autonomous queue requires a mandate, prioritizes value, and consumes faile
   } finally {await rm(directory,{recursive:true,force:true});}
 });
 
+test("a replacement learning mandate does not reuse a stale daily-limit denial", async()=>{
+  const directory=await mkdtemp(join(tmpdir(),"sara-learning-stale-decision-"));
+  try {
+    const kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
+    const owner=kernel.authenticateOwnerToken(ownerToken);
+    const now=Date.now();
+    await kernel.activateStandingMandate(owner,{
+      id:"learning-stale-v1",ownerId:owner.id,allowedActions:["business_candidate_development"],allowedChannels:["internal"],allowedServiceIds:["skill-learning"],
+      maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:1,
+      startsAt:new Date(now-60_000).toISOString(),expiresAt:new Date(now+86_400_000).toISOString(),
+    },{approvalId:"stale-v1",ownerId:owner.id,action:"required_owner_approval_change",targetId:"standing-mandate:learning-stale-v1",approvedAt:new Date(now).toISOString()});
+    const low=await enqueue(kernel,1), high=await enqueue(kernel,3);
+    let calls=0;
+    const generator={id:"stale-decision-fixture",external:false,maximumCostUsd:0,async generate():Promise<never>{calls++;throw new Error("PRIVATE provider failure");}};
+    assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:high.id});
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");
+    assert.equal(calls,1);
+    const current=(await kernel.getStatus()).standingMandate!;
+    const replacementNow=Date.now();
+    await kernel.replaceStandingMandate(owner,{
+      id:"learning-stale-v2",ownerId:owner.id,allowedActions:["business_candidate_development"],allowedChannels:["internal"],allowedServiceIds:["skill-learning"],
+      maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:20,
+      startsAt:new Date(replacementNow-1_000).toISOString(),expiresAt:new Date(replacementNow+86_400_000).toISOString(),
+    },current.digest,{approvalId:"stale-v2",ownerId:owner.id,action:"required_owner_approval_change",targetId:"standing-mandate:learning-stale-v2",approvedAt:new Date(replacementNow).toISOString()});
+    assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:low.id});
+    assert.equal(calls,2);
+  } finally {await rm(directory,{recursive:true,force:true});}
+});
+
 test("two consumers cannot duplicate a learning dispatch, including after restart", async()=>{
   const directory=await mkdtemp(join(tmpdir(),"sara-learning-exclusive-"));
   try {
