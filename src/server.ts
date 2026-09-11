@@ -754,6 +754,16 @@ async function handleOwnerRevenueWrite(
   owner: OwnerSession,
   options: ServerOptions,
 ): Promise<boolean> {
+  if (url.pathname === "/api/learning/campaign/capacity" && request.method === "POST") {
+    const body = await readJson(request);
+    const maximumRequests = Number(body.maximumRequests);
+    const extension = await kernel.reviewLearningCampaignCapacity(owner, maximumRequests);
+    if (body.approvedDigest !== extension.extensionDigest) {
+      json(response, 409, { error: "Review the exact learning-capacity extension before approval.", extensionDigest: extension.extensionDigest,
+        campaignId: extension.campaignId, previousMaximumRequests: extension.previousMaximumRequests, maximumRequests: extension.maximumRequests }); return true;
+    }
+    json(response, 201, await kernel.extendLearningCampaignCapacity(owner, maximumRequests, extension.extensionDigest)); return true;
+  }
   if (url.pathname === "/api/learning/campaign" && request.method === "GET") {
     json(response, 200, {...await kernel.learningCampaignStatus(), runtime: options.learningRuntimeStatus?.() ?? {enabled:false,providerConfigured:false}}); return true;
   }
@@ -805,7 +815,7 @@ async function handleOwnerRevenueWrite(
     const id=`internal-learning-${now.toISOString().slice(0,10)}`;
     json(response,201,await kernel.activateStandingMandate(owner,{
       id,ownerId:owner.id,allowedActions:["business_candidate_development"],allowedChannels:["internal"],
-      allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:2,
+      allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,
       startsAt:now.toISOString(),expiresAt:new Date(now.getTime()+30*86_400_000).toISOString(),
     },{approvalId:randomUUID(),action:"required_owner_approval_change",targetId:`standing-mandate:${id}`,approvedAt:now.toISOString(),ownerId:owner.id}));
     return true;

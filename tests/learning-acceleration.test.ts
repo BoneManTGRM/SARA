@@ -25,13 +25,16 @@ test("learning failure triage separates provider and candidate failures", () => 
   assert.equal(learningFailureTriage(new Error("Learning mandate changed before dispatch.")).failureClass, "policy_failure");
 });
 
-test("targeted repair uses measured local evidence and refuses insufficient or independent evidence", () => {
+test("targeted repair uses measured local evidence and safely diversifies after independent rejection", () => {
   const base = { contractDigest: digest, candidateDigest: "b".repeat(64), publicCriteria: ["Alphabetize output."], measuredMemory: "" };
   const plan = targetedRepairPlanner({ ...base, failureClass: "behavioral_failure", measuredFeedback: "Behavioral verification mismatches: ordering mismatch" });
   assert.equal(plan.outcome, "TARGETED_REPAIR");
   assert.match(plan.directive ?? "", /ordering/iu);
   assert.equal(targetedRepairPlanner({ ...base, failureClass: "unknown", measuredFeedback: "something failed" }).outcome, "STOP_OR_REGENERATE_BY_POLICY");
-  assert.equal(targetedRepairPlanner({ ...base, failureClass: "independent_acceptance_failure", measuredFeedback: "Independent acceptance failed; hidden answers withheld." }).outcome, "STOP_OR_REGENERATE_BY_POLICY");
+  const independent = targetedRepairPlanner({ ...base, failureClass: "independent_acceptance_failure", measuredFeedback: "Independent acceptance failed; hidden answers withheld." });
+  assert.equal(independent.outcome, "TARGETED_REPAIR");
+  assert.match(independent.directive ?? "", /materially different deterministic implementation/);
+  assert.match(independent.directive ?? "", /Do not infer, request, or encode hidden qualification answers/);
 });
 
 test("learning attempt budgeter is bounded and reduces former 8192-token worst case", () => {
@@ -41,6 +44,9 @@ test("learning attempt budgeter is bounded and reduces former 8192-token worst c
   assert.equal("maximumCostUsd" in small, false);
   assert.equal("maximumRequests" in small, false);
   const repair = learningAttemptBudgeter({ objectiveLength: 500, publicCriteriaCount: 8, publicBehavioralTestCount: 8, priorFailureClass: "typescript_failure", previousCandidateSourceBytes: 5000 });
+  const independentRepair = learningAttemptBudgeter({ objectiveLength: 500, publicCriteriaCount: 8, publicBehavioralTestCount: 8, priorFailureClass: "independent_acceptance_failure", previousCandidateSourceBytes: 5000 });
+  assert.equal(independentRepair.attemptMode, "repair");
+  assert.equal(independentRepair.includePriorCandidateRepairContext, true);
   assert.equal(repair.attemptMode, "repair");
   assert.equal(repair.includePriorCandidateRepairContext, true);
   assert.ok(repair.relevantMemoryMaximum <= 4);

@@ -112,9 +112,15 @@ export function targetedRepairPlanner(input: TargetedRepairInput): TargetedRepai
     evidence,
   }));
   if (input.failureClass === "provider_transient" || input.failureClass === "provider_terminal" ||
-      input.failureClass === "policy_failure" || input.failureClass === "unknown" ||
-      input.failureClass === "independent_acceptance_failure") {
+      input.failureClass === "policy_failure" || input.failureClass === "unknown") {
     return { outcome: "STOP_OR_REGENERATE_BY_POLICY", directive: null, evidenceDigest };
+  }
+  if (input.failureClass === "independent_acceptance_failure") {
+    return {
+      outcome: "TARGETED_REPAIR",
+      directive: `TARGETED_REPAIR: Re-evaluate only the frozen public requirements from first principles and produce a materially different deterministic implementation where the public contract permits it. Do not infer, request, or encode hidden qualification answers. Frozen contract ${input.contractDigest}; independently rejected candidate ${input.candidateDigest}.`,
+      evidenceDigest,
+    };
   }
   const rule = REPAIR_RULES.find((candidate) => candidate.pattern.test(evidence));
   if (!rule) return { outcome: "STOP_OR_REGENERATE_BY_POLICY", directive: null, evidenceDigest };
@@ -150,7 +156,7 @@ export function learningAttemptBudgeter(input: LearningAttemptBudgetInput): Lear
   const criteria = Math.max(0, Math.min(16, Math.floor(input.publicCriteriaCount)));
   const publicTests = Math.max(0, Math.min(64, Math.floor(input.publicBehavioralTestCount)));
   const repair = input.priorFailureClass !== undefined && [
-    "schema_failure", "source_policy_failure", "typescript_failure", "behavioral_failure",
+    "schema_failure", "source_policy_failure", "typescript_failure", "behavioral_failure", "independent_acceptance_failure",
   ].includes(input.priorFailureClass);
   const complexity = objectiveLength + criteria * 140 + publicTests * 90 + Math.min(16_384, input.previousCandidateSourceBytes ?? 0) / 8;
   const requested = complexity <= 2_200 ? 2048 : complexity <= 4_800 ? 3072 : 4096;
