@@ -31,7 +31,7 @@ async function setup(maximumRequests=10) {
   const kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(token)});
   const owner=kernel.authenticateOwnerToken(token),now=new Date();
   await kernel.activateStandingMandate(owner,{id:"campaign-learning",ownerId:owner.id,allowedActions:["business_candidate_development"],
-    allowedChannels:["internal"],allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumDailyActions:10,maximumConcurrentActions:1,
+    allowedChannels:["internal"],allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumDailyActions:20,maximumConcurrentActions:1,
     startsAt:new Date(now.getTime()-60000).toISOString(),expiresAt:new Date(now.getTime()+86400000).toISOString()},
     {approvalId:"fixture-mandate",ownerId:owner.id,action:"required_owner_approval_change",targetId:"standing-mandate:campaign-learning",approvedAt:now.toISOString()});
   const campaign={...config,maximumRequests};

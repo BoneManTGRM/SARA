@@ -91,6 +91,6 @@ test("allocation HTTP controls require owner authentication",async()=>{
   assert.equal(activation.status,201,await activation.clone().text());
   const mandate=await activation.json() as {allowedChannels:string[];allowedServiceIds:string[];maximumCostPerActionUsd:number;maximumDailyActions:number};
   assert.deepEqual(mandate.allowedChannels,["internal"]);assert.deepEqual(mandate.allowedServiceIds,["skill-learning"]);
-  assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,10);
+  assert.equal(mandate.maximumCostPerActionUsd,0);assert.equal(mandate.maximumDailyActions,20);
  }finally{await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));await rm(directory,{recursive:true,force:true});}
 });

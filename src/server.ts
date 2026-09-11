@@ -815,7 +815,7 @@ async function handleOwnerRevenueWrite(
     const id=`internal-learning-${now.toISOString().slice(0,10)}`;
     json(response,201,await kernel.activateStandingMandate(owner,{
       id,ownerId:owner.id,allowedActions:["business_candidate_development"],allowedChannels:["internal"],
-      allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,
+      allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:20,
       startsAt:now.toISOString(),expiresAt:new Date(now.getTime()+30*86_400_000).toISOString(),
     },{approvalId:randomUUID(),action:"required_owner_approval_change",targetId:`standing-mandate:${id}`,approvedAt:now.toISOString(),ownerId:owner.id}));
     return true;
