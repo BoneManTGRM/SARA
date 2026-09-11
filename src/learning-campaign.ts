@@ -13,11 +13,16 @@ export type LearningCampaignInput = { id: string; maximumRequests: number; contr
 export type LearningCampaign = LearningCampaignInput & { digest: string };
 const safeId = /^[a-z][a-z0-9-]{2,79}$/u;
 
+export const LEARNING_CAMPAIGN_MAXIMUM_REQUESTS = 100;
+export const LEARNING_CAMPAIGN_MAXIMUM_CONTRACTS = 32;
+export const LEARNING_DAILY_RESERVATION_LIMIT = 10;
+export const LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT = 4;
+
 /** Owner-frozen data, never a producer-supplied acceptance oracle. */
 export function compileLearningCampaign(input: LearningCampaignInput): LearningCampaign {
   if (!input || typeof input !== "object" || Object.keys(input).sort().join() !== "contracts,id,maximumRequests" ||
-      typeof input.id !== "string" || !safeId.test(input.id) || !Number.isSafeInteger(input.maximumRequests) || input.maximumRequests < 1 || input.maximumRequests > 10 ||
-      !Array.isArray(input.contracts) || input.contracts.length < 1 || input.contracts.length > 16) {
+      typeof input.id !== "string" || !safeId.test(input.id) || !Number.isSafeInteger(input.maximumRequests) || input.maximumRequests < 1 || input.maximumRequests > LEARNING_CAMPAIGN_MAXIMUM_REQUESTS ||
+      !Array.isArray(input.contracts) || input.contracts.length < 1 || input.contracts.length > LEARNING_CAMPAIGN_MAXIMUM_CONTRACTS) {
     throw new Error("Invalid bounded learning campaign.");
   }
   if (Buffer.byteLength(canonicalJson(input)) > 128 * 1024) throw new Error("Learning campaign exceeds its data limit.");
@@ -49,8 +54,53 @@ export function compileLearningCampaign(input: LearningCampaignInput): LearningC
 }
 
 export const learningContractDigest = (contract: LearningContract): string => sha256(canonicalJson(contract));
+export const learningCampaignCurriculumDigest = (campaign: Pick<LearningCampaignInput, "id" | "contracts">): string =>
+  sha256(canonicalJson({ id: campaign.id, contracts: campaign.contracts }));
+
+export type LearningCampaignCapacityExtension = {
+  campaignId: string;
+  baseDigest: string;
+  curriculumDigest: string;
+  previousMaximumRequests: number;
+  maximumRequests: number;
+  extensionDigest: string;
+};
+
+export function compileLearningCampaignCapacityExtension(
+  campaign: LearningCampaign,
+  maximumRequests: number,
+): LearningCampaignCapacityExtension {
+  if (!Number.isSafeInteger(maximumRequests) || maximumRequests <= campaign.maximumRequests ||
+      maximumRequests > LEARNING_CAMPAIGN_MAXIMUM_REQUESTS) {
+    throw new Error(`Learning campaign capacity must increase to at most ${LEARNING_CAMPAIGN_MAXIMUM_REQUESTS} requests.`);
+  }
+  const unsigned = {
+    campaignId: campaign.id,
+    baseDigest: campaign.digest,
+    curriculumDigest: learningCampaignCurriculumDigest(campaign),
+    previousMaximumRequests: campaign.maximumRequests,
+    maximumRequests,
+  };
+  return { ...unsigned, extensionDigest: sha256(canonicalJson(unsigned)) };
+}
 export function currentLearningCampaign(events: StoredEvent[]): LearningCampaign | undefined {
-  return events.filter(event => event.type === "learning_campaign_configured").at(-1)?.data as LearningCampaign | undefined;
+  const configured = events.filter(event => event.type === "learning_campaign_configured").at(-1)?.data as LearningCampaign | undefined;
+  if (!configured) return undefined;
+  let maximumRequests = configured.maximumRequests;
+  const curriculumDigest = learningCampaignCurriculumDigest(configured);
+  for (const event of events) {
+    if (event.type !== "learning_campaign_capacity_extended") continue;
+    const data = event.data as Partial<LearningCampaignCapacityExtension>;
+    if (data.campaignId !== configured.id || data.baseDigest !== configured.digest ||
+        data.curriculumDigest !== curriculumDigest || data.previousMaximumRequests !== maximumRequests ||
+        !Number.isSafeInteger(data.maximumRequests) || data.maximumRequests! <= maximumRequests ||
+        data.maximumRequests! > LEARNING_CAMPAIGN_MAXIMUM_REQUESTS) continue;
+    const unsigned = { campaignId: data.campaignId, baseDigest: data.baseDigest, curriculumDigest: data.curriculumDigest,
+      previousMaximumRequests: data.previousMaximumRequests, maximumRequests: data.maximumRequests };
+    if (data.extensionDigest !== sha256(canonicalJson(unsigned))) continue;
+    maximumRequests = data.maximumRequests!;
+  }
+  return maximumRequests === configured.maximumRequests ? configured : { ...configured, maximumRequests };
 }
 export function campaignAccounting(campaign: LearningCampaign, events: StoredEvent[]) {
   const reservations = events.filter(event => event.type === "autonomous_learning_reserved" &&

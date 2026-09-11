@@ -825,6 +825,8 @@ export const DASHBOARD_HTML = `<!doctype html>
                 <p id="learning-review" role="status"></p>
                 <button class="button" id="learning-preview" type="button">Review campaign</button>
                 <button class="button primary" id="learning-approve" type="button" disabled>Approve exact campaign</button>
+                <button class="button" id="learning-capacity-preview" type="button" disabled>Review 100-request capacity</button>
+                <button class="button primary" id="learning-capacity-approve" type="button" disabled>Approve 100-request capacity</button>
                 <button class="button" id="learning-mandate" type="button" disabled>Activate 30-day internal learning mandate</button>
               </fieldset>
             </div>
@@ -882,6 +884,7 @@ export const DASHBOARD_HTML = `<!doctype html>
     const directiveForm = document.querySelector('#directive-form');
     const directiveFields = document.querySelector('#directive-fields');
     let reviewedLearning = null;
+    let reviewedLearningCapacity = null;
     let ownerMandate = null;
     const auth = () => ({ Authorization: 'Bearer ' + (sessionStorage.getItem('sara-owner-token') || '') });
     const money = (value) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(value || 0));
@@ -898,11 +901,13 @@ export const DASHBOARD_HTML = `<!doctype html>
       directiveFields.disabled = !connected;
       document.querySelector('#learning-fields').disabled = !connected;
       if (!connected) {
-        reviewedLearning = null; ownerMandate = null;
+        reviewedLearning = null; reviewedLearningCapacity = null; ownerMandate = null;
         document.querySelector('#learning-contract').value = '';
         document.querySelector('#learning-review').textContent = '';
         document.querySelector('#learning-status').textContent = 'Owner authentication required.';
         document.querySelector('#learning-approve').disabled = true;
+        document.querySelector('#learning-capacity-preview').disabled = true;
+        document.querySelector('#learning-capacity-approve').disabled = true;
       }
     }
 
@@ -1081,12 +1086,18 @@ export const DASHBOARD_HTML = `<!doctype html>
         ? status.campaign.id + ': ' + status.campaign.reserved + '/' + status.campaign.maximumRequests + ' requests reserved; ' + status.campaign.remaining + ' remain.'
         : 'No campaign configured.') + ' Worker: ' + (status.runtime.enabled ? 'enabled' : 'disabled')
         + '. Free provider: ' + (status.runtime.providerConfigured ? 'configured' : 'missing configuration') + '.';
+      const capacityPreview = document.querySelector('#learning-capacity-preview');
+      capacityPreview.disabled = !status.configured || status.campaign.maximumRequests >= 100;
+      if (status.campaign && status.campaign.maximumRequests >= 100) reviewedLearningCapacity = null;
+      document.querySelector('#learning-capacity-approve').disabled = !reviewedLearningCapacity || !status.configured || status.campaign.maximumRequests >= 100;
       const active = ownerMandate && !ownerMandate.revokedAt && Date.parse(ownerMandate.expiresAt) > Date.now();
       const compatible = active && ownerMandate.allowedActions.includes('business_candidate_development')
         && ownerMandate.allowedChannels.includes('internal') && ownerMandate.allowedServiceIds.includes('skill-learning');
       const button = document.querySelector('#learning-mandate');
-      button.disabled = !status.configured || Boolean(active);
-      button.textContent = compatible ? 'Current mandate covers internal learning'
+      const needsRateUpgrade = compatible && Number(ownerMandate.maximumDailyActions || 0) < 10;
+      button.disabled = !status.configured || (Boolean(active) && !needsRateUpgrade);
+      button.textContent = needsRateUpgrade ? 'Upgrade learning mandate to 10/day'
+        : compatible ? 'Current mandate covers internal learning'
         : active ? 'Reconcile the active mandate before learning activation' : 'Activate 30-day internal learning mandate';
     }
 
@@ -1107,7 +1118,7 @@ export const DASHBOARD_HTML = `<!doctype html>
         if (response.status !== 409 || !result.campaignDigest) throw new Error(result.error || 'Campaign review failed.');
         reviewedLearning = {campaign, approvedDigest:result.campaignDigest};
         document.querySelector('#learning-review').textContent = 'Approve ' + campaign.id + ', maximum ' + campaign.maximumRequests
-          + ' free requests, two per UTC day and two per root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')
+          + ' free requests, up to 10 per UTC day and four attempts per learning root. Frozen capabilities: ' + campaign.contracts.map((c)=>c.capabilityId).join(', ')
           + '. Exact digest: ' + result.campaignDigest + '. No operational promotion is granted.';
         document.querySelector('#learning-approve').disabled = false;
       } catch(error) { setMessage(error.message,true); }
@@ -1122,6 +1133,32 @@ export const DASHBOARD_HTML = `<!doctype html>
         await ownerPost('/api/learning/campaign',approved);
         document.querySelector('#learning-contract').value = '';
         document.querySelector('#learning-review').textContent = 'Exact campaign retained. Request accounting cannot be reset by submitting it again.';
+        await refreshLearning();
+      } catch(error) { setMessage(error.message,true); }
+    });
+
+    document.querySelector('#learning-capacity-preview').addEventListener('click', async () => {
+      reviewedLearningCapacity = null;
+      document.querySelector('#learning-capacity-approve').disabled = true;
+      try {
+        const response = await fetch('/api/learning/campaign/capacity', {method:'POST', headers:Object.assign({},auth(),{'content-type':'application/json'}), body:JSON.stringify({maximumRequests:100})});
+        const result = await response.json();
+        if (response.status !== 409 || !result.extensionDigest) throw new Error(result.error || 'Capacity review failed.');
+        reviewedLearningCapacity = {maximumRequests:100, approvedDigest:result.extensionDigest};
+        document.querySelector('#learning-review').textContent = 'Approve request capacity ' + result.previousMaximumRequests + ' → ' + result.maximumRequests
+          + '. Frozen learning contracts and hidden acceptance tests do not change. Exact extension digest: ' + result.extensionDigest + '.';
+        document.querySelector('#learning-capacity-approve').disabled = false;
+      } catch(error) { setMessage(error.message,true); }
+    });
+
+    document.querySelector('#learning-capacity-approve').addEventListener('click', async () => {
+      if (!reviewedLearningCapacity) return;
+      const approved = reviewedLearningCapacity;
+      reviewedLearningCapacity = null;
+      document.querySelector('#learning-capacity-approve').disabled = true;
+      try {
+        await ownerPost('/api/learning/campaign/capacity',approved);
+        document.querySelector('#learning-review').textContent = 'Learning request capacity extended to 100. Frozen curriculum and qualification controls remain unchanged.';
         await refreshLearning();
       } catch(error) { setMessage(error.message,true); }
     });

@@ -15,7 +15,7 @@ async function setupQueue(directory:string) {
   const now=Date.now();
   await kernel.activateStandingMandate(owner,{
     id:"learning-test",ownerId:owner.id,allowedActions:["business_candidate_development"],allowedChannels:["internal"],allowedServiceIds:["skill-learning"],
-    maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:2,
+    maximumCostPerActionUsd:0,maximumConcurrentActions:1,maximumDailyActions:10,
     startsAt:new Date(now-60_000).toISOString(),expiresAt:new Date(now+86400000).toISOString(),
   },{approvalId:"test-approval",ownerId:owner.id,action:"required_owner_approval_change",targetId:"standing-mandate:learning-test",approvedAt:new Date(now).toISOString()});
   return {kernel,owner};
@@ -52,8 +52,15 @@ test("autonomous queue requires a mandate, prioritizes value, and consumes faile
     kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
     assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:low.id});
     await enqueue(kernel,5);
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
+    assert.equal(calls,3);
+    for(let index=0;index<7;index++){
+      await enqueue(kernel,6+index);
+      assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
+    }
+    await enqueue(kernel,20);
     assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");
-    assert.equal(calls,2);
+    assert.equal(calls,10);
     await assert.rejects(()=>kernel.runNextAutonomousLearningCycle({...generator,maximumCostUsd:.01}),/zero-cost/);
     const memory=await kernel.recallMemory({query:"Validate catalog rows",scope:"global",categories:["failure"]});
     assert.doesNotMatch(JSON.stringify(memory),/PRIVATE/);
@@ -162,7 +169,7 @@ test("real rejection survives restart and reaches a later free-generator prompt"
 });
 
 
-test("actionable rejection queues one identical-contract follow-up across restart, then stops", async()=>{
+test("actionable rejection iterates through a bounded four-attempt learning root across restart", async()=>{
   const directory=await mkdtemp(join(tmpdir(),"sara-learning-recursive-"));
   try {
     let {kernel}=await setupQueue(directory);
@@ -170,21 +177,21 @@ test("actionable rejection queues one identical-contract follow-up across restar
     let calls=0;
     const generator={id:"recursive-rejection-fixture",external:false,maximumCostUsd:0,async generate(input: Parameters<import("../src/types.ts").CandidateGenerator["generate"]>[0]){
       calls++;
-      if(calls===2) assert.ok(input.memoryContext.memories.some((memory: {source:string})=>memory.source.startsWith(`sara://learning-failure/${sha256(request.objective)}/`)));
+      if(calls>=2) assert.ok(input.memoryContext.memories.some((memory: {source:string})=>memory.source.startsWith(`sara://learning-failure/${sha256(request.objective)}/`)));
       return {schemaVersion:1 as const,skillName:"Rows",summary:"Read rows",source:"export function runSkill(input: unknown): unknown { return (input as string[])[0]; }",tests:[{name:"first",input:["A"],expected:"A"}],limitations:["Fixture, not learned code"]};
     }};
     assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
-    let jobs=(await kernel.getStatus()).jobs;
-    const child=jobs.find(job=>job.learningParentJobId===root.id);
-    assert.ok(child);assert.equal(jobs.length,2);
-    assert.equal(child.learningRootJobId,root.id);
-    for(const key of ["objective","acceptanceCriteria","maximumBudgetUsd","expectedOwnerValue","requiredCapabilities"] as const) assert.deepEqual(child.workCard[key],root.workCard[key]);
-    kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
-    assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:child.id});
-    jobs=(await kernel.getStatus()).jobs;
-    assert.equal(jobs.length,2);assert.equal(jobs.filter(job=>job.learningParentJobId===root.id).length,1);
-    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");
-    assert.equal(calls,2);
+    for(let attempt=2;attempt<=4;attempt++){
+      kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
+      const jobs=(await kernel.getStatus()).jobs;
+      const next=jobs.find(job=>job.status==="authorized" && job.learningRootJobId===root.id);
+      assert.ok(next);assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:next.id});
+    }
+    const jobs=(await kernel.getStatus()).jobs;
+    const chain=jobs.filter(job=>job.id===root.id || job.learningRootJobId===root.id);
+    assert.equal(chain.length,4);assert.equal(chain.filter(job=>Boolean(job.learningParentJobId)).length,3);
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"idle");
+    assert.equal(calls,4);
   } finally {await rm(directory,{recursive:true,force:true});}
 });
 
@@ -227,28 +234,25 @@ test("an evidence-responsive fixture repairs a rejected hypothesis and retains v
   } finally {await rm(directory,{recursive:true,force:true});}
 });
 
-test("metadata rejection queues one identical-contract follow-up across restart, then stops", async()=>{
+test("metadata rejection iterates through a bounded four-attempt learning root", async()=>{
   const directory=await mkdtemp(join(tmpdir(),"sara-learning-metadata-"));
   try {
     let {kernel}=await setupQueue(directory);
     const root=await enqueue(kernel,3);
     let calls=0;
-    const generator={id:"recursive-rejection-fixture",external:false,maximumCostUsd:0,async generate(input: Parameters<import("../src/types.ts").CandidateGenerator["generate"]>[0]){
+    const generator={id:"recursive-metadata-fixture",external:false,maximumCostUsd:0,async generate(input: Parameters<import("../src/types.ts").CandidateGenerator["generate"]>[0]){
       calls++;
-      if(calls===2) assert.ok(input.memoryContext.memories.some(memory=>memory.statement.includes("300 characters or fewer")));
+      if(calls>=2) assert.ok(input.memoryContext.memories.some(memory=>memory.statement.includes("300 characters or fewer")));
       return {schemaVersion:1 as const,skillName:"Rows",summary:"Read rows",source:"export function runSkill(input: unknown): unknown { return (input as string[])[0]; }",tests:[{name:"first",input:["A"],expected:"A"}],limitations:["x".repeat(438)]};
     }};
     assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"failed");
-    let jobs=(await kernel.getStatus()).jobs;
-    const child=jobs.find(job=>job.learningParentJobId===root.id);
-    assert.ok(child);assert.equal(jobs.length,2);
-    assert.equal(child.learningRootJobId,root.id);
-    for(const key of ["objective","acceptanceCriteria","maximumBudgetUsd","expectedOwnerValue","requiredCapabilities"] as const) assert.deepEqual(child.workCard[key],root.workCard[key]);
-    kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken)});
-    assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:child.id});
-    jobs=(await kernel.getStatus()).jobs;
-    assert.equal(jobs.length,2);assert.equal(jobs.filter(job=>job.learningParentJobId===root.id).length,1);
-    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"blocked");
-    assert.equal(calls,2);
+    for(let attempt=2;attempt<=4;attempt++){
+      const next=(await kernel.getStatus()).jobs.find(job=>job.status==="authorized" && job.learningRootJobId===root.id);
+      assert.ok(next);assert.deepEqual(await kernel.runNextAutonomousLearningCycle(generator),{status:"failed",jobId:next.id});
+    }
+    const jobs=(await kernel.getStatus()).jobs;
+    assert.equal(jobs.filter(job=>job.id===root.id || job.learningRootJobId===root.id).length,4);
+    assert.equal((await kernel.runNextAutonomousLearningCycle(generator)).status,"idle");
+    assert.equal(calls,4);
   } finally {await rm(directory,{recursive:true,force:true});}
 });

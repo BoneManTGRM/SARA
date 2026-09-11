@@ -31,7 +31,7 @@ async function setup(maximumRequests=10) {
   const kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(token)});
   const owner=kernel.authenticateOwnerToken(token),now=new Date();
   await kernel.activateStandingMandate(owner,{id:"campaign-learning",ownerId:owner.id,allowedActions:["business_candidate_development"],
-    allowedChannels:["internal"],allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumDailyActions:2,maximumConcurrentActions:1,
+    allowedChannels:["internal"],allowedServiceIds:["skill-learning"],maximumCostPerActionUsd:0,maximumDailyActions:10,maximumConcurrentActions:1,
     startsAt:new Date(now.getTime()-60000).toISOString(),expiresAt:new Date(now.getTime()+86400000).toISOString()},
     {approvalId:"fixture-mandate",ownerId:owner.id,action:"required_owner_approval_change",targetId:"standing-mandate:campaign-learning",approvedAt:now.toISOString()});
   const campaign={...config,maximumRequests};
@@ -55,6 +55,20 @@ test("campaign exact approval, immutable contracts and real gap selection surviv
     const reboot=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(token)});
     assert.equal(await reboot.selectNextLearningObjective(),null);
     assert.equal((await reboot.learningCampaignStatus()).selections.length,1);
+  }finally{await rm(directory,{recursive:true,force:true});}
+});
+
+test("owner can extend a frozen campaign capacity to 100 without replacing its curriculum",async()=>{
+  const {directory,kernel,owner}=await setup();
+  try {
+    const review=await kernel.reviewLearningCampaignCapacity(owner,100);
+    await assert.rejects(()=>kernel.extendLearningCampaignCapacity(owner,100,"0".repeat(64)),/EXACT/);
+    const extended=await kernel.extendLearningCampaignCapacity(owner,100,review.extensionDigest);
+    assert.equal(extended.maximumRequests,100);
+    assert.equal((await kernel.learningCampaignStatus()).campaign?.maximumRequests,100);
+    const reboot=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(token)});
+    assert.equal((await reboot.learningCampaignStatus()).campaign?.maximumRequests,100);
+    await assert.rejects(()=>reboot.reviewLearningCampaignCapacity(owner,10),/must increase/);
   }finally{await rm(directory,{recursive:true,force:true});}
 });
 
@@ -118,21 +132,24 @@ test("two workers reserve at most one dispatch and campaign quota never resets",
     await kernel.configureLearningCampaign(owner,campaign,compileLearningCampaign(campaign).digest);
     assert.equal((await reboot.learningCampaignStatus()).campaign?.remaining,0);
     assert.equal((await reboot.runNextAutonomousLearningCycle(generator)).status,"blocked");assert.equal(calls,1);
-    assert.throws(()=>compileLearningCampaign({...config,maximumRequests:11}));
+    assert.doesNotThrow(()=>compileLearningCampaign({...config,maximumRequests:100}));
+    assert.throws(()=>compileLearningCampaign({...config,maximumRequests:101}));
   }finally{await rm(directory,{recursive:true,force:true});}
 });
 
-test("failed metadata lesson reaches one child after restart, with no third generation",async()=>{
+test("failed metadata lesson iterates through four bounded attempts and then idles",async()=>{
   const {directory,kernel}=await setup();let calls=0;
-  const generator:CandidateGenerator={...echo,async generate(input){calls++;if(calls===2)assert.match(JSON.stringify(input.memoryContext),/300 characters or fewer/);
+  const generator:CandidateGenerator={...echo,async generate(input){calls++;if(calls>=2)assert.match(JSON.stringify(input.memoryContext),/300 characters or fewer/);
     return {...await echo.generate(input),limitations:["x".repeat(438)]};}};
   try {
     assert.equal((await new AutonomousLearningWorker(kernel,generator).tick()).status,"failed");
     const reboot=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(token)});
     assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"failed");
-    assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"blocked");
-    assert.equal(calls,2);assert.equal((await reboot.learningCampaignStatus()).selections.length,1);
-    assert.equal((await reboot.getStatus()).jobs.filter(j=>j.learningCampaignId).length,2);
+    assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"failed");
+    assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"failed");
+    assert.equal((await new AutonomousLearningWorker(reboot,generator).tick()).status,"idle");
+    assert.equal(calls,4);assert.equal((await reboot.learningCampaignStatus()).selections.length,1);
+    assert.equal((await reboot.getStatus()).jobs.filter(j=>j.learningCampaignId).length,4);
   }finally{await rm(directory,{recursive:true,force:true});}
 });
 

@@ -1,4 +1,4 @@
-import { compileLearningCampaign, currentLearningCampaign, campaignAccounting, learningContractDigest, selectLearningGap, type LearningCampaignInput } from "./learning-campaign.ts";
+import { compileLearningCampaign, compileLearningCampaignCapacityExtension, currentLearningCampaign, campaignAccounting, learningContractDigest, LEARNING_DAILY_RESERVATION_LIMIT, LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT, selectLearningGap, type LearningCampaignInput } from "./learning-campaign.ts";
 import { qualifyLearningArtifact, executeLearningArtifact, qualificationEnvironmentDigest } from "./learning-qualification.ts";
 import { maintenanceJobs, maintenanceRequestDigest, validateMaintenanceRequest, type MaintenanceRequest, type MaintenanceJob } from "./website-maintenance.ts";
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
@@ -2187,6 +2187,29 @@ export class SaraKernel {
     });
   }
 
+  async reviewLearningCampaignCapacity(principal: Principal, maximumRequests: number) {
+    if (!this.isVerifiedOwner(principal)) throw new Error("Authenticated owner authority is required to extend learning capacity.");
+    const campaign = currentLearningCampaign((await this.state()).events);
+    if (!campaign) throw new Error("A configured learning campaign is required before capacity can be extended.");
+    return compileLearningCampaignCapacityExtension(campaign, maximumRequests);
+  }
+
+  extendLearningCampaignCapacity(principal: Principal, maximumRequests: number, approvedDigest: string) {
+    return this.serializeMutation(async () => {
+      const campaign = currentLearningCampaign((await this.state()).events);
+      if (!campaign) throw new Error("A configured learning campaign is required before capacity can be extended.");
+      const extension = compileLearningCampaignCapacityExtension(campaign, maximumRequests);
+      if (!this.isVerifiedOwner(principal) || approvedDigest !== extension.extensionDigest) {
+        throw new Error("EXACT_LEARNING_CAPACITY_APPROVAL_REQUIRED");
+      }
+      await this.authorize(principal, { action: "required_owner_approval_change", targetId: `learning-campaign-capacity:${extension.extensionDigest}`, external: false,
+        approval: { approvalId: randomUUID(), action: "required_owner_approval_change", targetId: `learning-campaign-capacity:${extension.extensionDigest}`,
+          ownerId: principal.id, approvedAt: new Date().toISOString() } });
+      await this.#store.append("learning_campaign_capacity_extended", principal, extension);
+      return { id: campaign.id, digest: campaign.digest, maximumRequests: extension.maximumRequests, extensionDigest: extension.extensionDigest };
+    });
+  }
+
   async learningCampaignStatus() {
     const state = await this.state();
     const campaign = currentLearningCampaign(state.events);
@@ -2387,8 +2410,12 @@ export class SaraKernel {
         return data.mutationId === mutation.id && data.candidateDigest === mutation.candidateDigest &&
           data.contractDigest === learningContractDigest(contract) && (data.environmentDigest ?? data.receipt?.environmentDigest) === environmentDigest;
       }).at(-1);
-      return !previous || (previous.type === "learning_qualification_failed" && !job.learningParentJobId &&
-        job.workCard.expectedOwnerValue > 0 && !state.jobs.some(child => child.learningParentJobId === job.id));
+      if (!previous) return true;
+      if (previous.type !== "learning_qualification_failed" || job.workCard.expectedOwnerValue <= 0 ||
+          state.jobs.some(child => child.learningParentJobId === job.id)) return false;
+      const rootJobId = job.learningRootJobId ?? job.id;
+      const rootAttempts = state.jobs.filter(candidate => candidate.id === rootJobId || candidate.learningRootJobId === rootJobId).length;
+      return rootAttempts < LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT;
     });
     if (pending) return this.qualifyLearningJob(pending.id);
     await this.selectNextLearningObjective();
@@ -2478,7 +2505,7 @@ export class SaraKernel {
           b.workCard.expectedOwnerValue - a.workCard.expectedOwnerValue || a.id.localeCompare(b.id))[0];
       if (!job) {
         const dailyReservations = reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length;
-        return ((campaign && campaignAccounting(campaign, state.events).remaining === 0) || dailyReservations >= 2) ? null : undefined;
+        return ((campaign && campaignAccounting(campaign, state.events).remaining === 0) || dailyReservations >= LEARNING_DAILY_RESERVATION_LIMIT) ? null : undefined;
       }
 
       const latestRunningEvent = [...state.events].reverse().find(event => event.type === "job_status_changed" &&
@@ -2586,7 +2613,7 @@ export class SaraKernel {
         });
         return null;
       }
-      if (reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length >= 2) {
+      if (reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length >= LEARNING_DAILY_RESERVATION_LIMIT) {
         const alreadyDeferred = state.events.some(event => event.type === "learning_recovery_deferred" &&
           (event.data as {jobId?:string;date?:string;reason?:string}).jobId === job!.id &&
           (event.data as {date?:string}).date === now.slice(0,10) &&
@@ -2704,8 +2731,11 @@ export class SaraKernel {
       const state = await this.state();
       const parent = state.jobs.find(job => job.id === jobId);
       const independentFailure = error instanceof Error && error.message === "Independent acceptance failed; hidden answers withheld.";
-      if (!parent || !(parent.status === "failed" || (parent.status === "verified" && independentFailure)) || parent.learningParentJobId || parent.workCard.expectedOwnerValue <= 0 ||
+      if (!parent || !(parent.status === "failed" || (parent.status === "verified" && independentFailure)) || parent.workCard.expectedOwnerValue <= 0 ||
         state.jobs.some(job => job.learningParentJobId === jobId)) return;
+      const rootJobId = parent.learningRootJobId ?? parent.id;
+      const rootAttempts = state.jobs.filter(job => job.id === rootJobId || job.learningRootJobId === rootJobId).length;
+      if (rootAttempts >= LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT) return;
       const failure = state.memories.find(memory => memory.id === `learning-failure-${jobId}`);
       const triage = learningFailureTriage(independentFailure ? new Error("Independent acceptance failed; hidden answers withheld.") : error);
       if (!independentFailure && triage.nextAction !== "targeted_repair") return;
@@ -2717,7 +2747,7 @@ export class SaraKernel {
       await this.authorize(SARA_PRINCIPAL,{action:"sandbox_development",targetId:jobId,external:false});
       const workCard = compileWorkCard({...parent.workCard,availableCapabilities:state.capabilities});
       const child: Job = {id:randomUUID(),kind:"self_development",status:"authorized",workCard,
-        learningParentJobId:jobId,learningRootJobId:parent.learningRootJobId ?? jobId,
+        learningParentJobId:jobId,learningRootJobId:rootJobId,
         ...(parent.learningCampaignId ? {learningCampaignId:parent.learningCampaignId,learningCapabilityId:parent.learningCapabilityId,
           learningContractDigest:parent.learningContractDigest,learningSourceJobId:parent.learningSourceJobId} : {})};
       await this.#store.append("job_created",SARA_PRINCIPAL,child);
