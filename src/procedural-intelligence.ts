@@ -21,6 +21,7 @@ export type KnowledgeClass =
   | "AUTHORITY";
 export type LessonNature = "POSITIVE" | "NEGATIVE";
 export type MaterialIdentity = ProcedureApplicabilityIdentity;
+type StringKeyedObject = { [key: string]: unknown };
 
 export interface ProceduralPlaybook {
   id: string;
@@ -138,7 +139,7 @@ interface QualificationFailureRecord {
   createdAt: string;
 }
 
-interface KnowledgeState {
+export interface ProceduralKnowledgeSnapshot {
   schemaVersion: 1;
   generation: number;
   playbooks: ProceduralPlaybook[];
@@ -148,11 +149,8 @@ interface KnowledgeState {
   qualificationFailures: QualificationFailureRecord[];
 }
 
-interface KnowledgeEnvelope {
-  schemaVersion: 1;
-  state: KnowledgeState;
-  digest: string;
-}
+type KnowledgeState = ProceduralKnowledgeSnapshot;
+interface KnowledgeEnvelope { schemaVersion: 1; state: KnowledgeState; digest: string }
 
 const DIRECTORY_NAME = "procedural-intelligence-v1";
 const STATE_FILE = "knowledge.json";
@@ -164,8 +162,16 @@ const BASELINE_REVISION = "96b1f83e0c5e7756696789688552a7028b432cb8";
 const TRUST_STATES = new Set<KnowledgeTrustState>(["DRAFT", "CANDIDATE", "QUALIFIED", "VERIFIED", "SUPERSEDED", "INVALIDATED"]);
 const KNOWLEDGE_CLASSES = new Set<KnowledgeClass>(["PROCEDURAL", "FAILURE_NEGATIVE", "TOOL_ROUTING", "DOMAIN", "REPOSITORY_SYSTEM", "EVIDENCE", "AUTHORITY"]);
 const INVALIDATION_TYPES = new Set<EvidenceInvalidationType>([
-  "SOURCE_CHANGED", "DEPENDENCY_CHANGED", "CONFIGURATION_CHANGED", "ENVIRONMENT_CHANGED", "REQUIREMENT_CHANGED",
-  "EVALUATOR_CHANGED", "POLICY_CHANGED", "AUTHORITY_CHANGED", "EVIDENCE_CORRUPT", "PROCEDURE_SUPERSEDED",
+  "SOURCE_CHANGED",
+  "DEPENDENCY_CHANGED",
+  "CONFIGURATION_CHANGED",
+  "ENVIRONMENT_CHANGED",
+  "REQUIREMENT_CHANGED",
+  "EVALUATOR_CHANGED",
+  "POLICY_CHANGED",
+  "AUTHORITY_CHANGED",
+  "EVIDENCE_CORRUPT",
+  "PROCEDURE_SUPERSEDED",
 ]);
 const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/u;
 const DIGEST = /^[a-f0-9]{64}$/u;
@@ -174,7 +180,7 @@ const BEARER_SECRET = /\bBearer\s+[A-Za-z0-9._~+/-]{8,}/u;
 
 function nowIso(): string { return new Date().toISOString(); }
 function clone<T>(value: T): T { return structuredClone(value); }
-function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function isRecord(value: unknown): value is StringKeyedObject { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function assertDigest(value: string, code: string): void { if (!DIGEST.test(value)) throw new Error(code); }
 function assertFiniteNonnegative(value: number, code: string): void { if (!Number.isFinite(value) || value < 0) throw new Error(code); }
 function identityMatches(expected: MaterialIdentity, current: MaterialIdentity): boolean {
@@ -185,16 +191,13 @@ function identitySpecificity(identity: MaterialIdentity): number {
 }
 function playbookKey(playbook: Pick<ProceduralPlaybook, "id" | "version">): string { return `${playbook.id}@${playbook.version}`; }
 function lessonKey(lesson: Pick<ReusableLesson, "id" | "version">): string { return `${lesson.id}@${lesson.version}`; }
-
 function assertNoRawSecrets(value: unknown): void {
   const text = canonicalJson(value);
   if (RAW_SECRET.test(text) || BEARER_SECRET.test(text)) throw new Error("RAW_SECRET_IN_REUSABLE_KNOWLEDGE");
 }
-
 function assertStringArray(value: unknown, code: string, allowEmpty = true): asserts value is string[] {
   if (!Array.isArray(value) || (!allowEmpty && value.length === 0) || value.some((entry) => typeof entry !== "string" || !entry.trim())) throw new Error(code);
 }
-
 function validateIdentity(identity: MaterialIdentity, code: string): void {
   if (!isRecord(identity)) throw new Error(code);
   for (const [key, value] of Object.entries(identity)) {
@@ -205,17 +208,20 @@ function validateIdentity(identity: MaterialIdentity, code: string): void {
 function validatePlaybook(playbook: ProceduralPlaybook): void {
   if (!isRecord(playbook) || !SAFE_ID.test(playbook.id) || !Number.isSafeInteger(playbook.version) || playbook.version < 1 ||
       !KNOWLEDGE_CLASSES.has(playbook.knowledgeClass) || !SAFE_ID.test(playbook.taskFamily) || !TRUST_STATES.has(playbook.status)) throw new Error("PROCEDURAL_INVALID_PLAYBOOK");
-  const arrays: unknown[] = [playbook.triggers, playbook.nonTriggers, playbook.requiredInputs, playbook.preconditions, playbook.authorityRequired,
-    playbook.prohibitedActions, playbook.tools, playbook.preferredToolOrder, playbook.fallbackToolOrder, playbook.procedure, playbook.decisionBranches,
-    playbook.expectedFailureModes, playbook.negativeLessons, playbook.verificationSteps, playbook.acceptanceCriteria, playbook.evidenceRequired,
-    playbook.rollback, playbook.sideEffects, playbook.sourceEvidence, playbook.environmentAssumptions, playbook.dependencyAssumptions, playbook.supersedes];
+  const arrays: unknown[] = [
+    playbook.triggers, playbook.nonTriggers, playbook.requiredInputs, playbook.preconditions, playbook.authorityRequired,
+    playbook.prohibitedActions, playbook.tools, playbook.preferredToolOrder, playbook.fallbackToolOrder, playbook.procedure,
+    playbook.decisionBranches, playbook.expectedFailureModes, playbook.negativeLessons, playbook.verificationSteps,
+    playbook.acceptanceCriteria, playbook.evidenceRequired, playbook.rollback, playbook.sideEffects, playbook.sourceEvidence,
+    playbook.environmentAssumptions, playbook.dependencyAssumptions, playbook.supersedes,
+  ];
   arrays.forEach((array) => assertStringArray(array, "PROCEDURAL_INVALID_PLAYBOOK_ARRAY"));
   if (!playbook.purpose.trim() || !playbook.provenance?.producerIdentity || !playbook.provenance.source || !playbook.evaluatorIdentity || !playbook.qualificationStatus) throw new Error("PROCEDURAL_INVALID_PLAYBOOK_METADATA");
   if (playbook.costCeilingUsd !== null) assertFiniteNonnegative(playbook.costCeilingUsd, "PROCEDURAL_INVALID_COST_CEILING");
   validateIdentity(playbook.procedureApplicabilityIdentity, "PROCEDURAL_INVALID_APPLICABILITY_IDENTITY");
   validateIdentity(playbook.evidenceReuseIdentity, "PROCEDURAL_INVALID_EVIDENCE_IDENTITY");
   if (!playbook.invalidationConditions.every((type) => INVALIDATION_TYPES.has(type))) throw new Error("PROCEDURAL_INVALID_INVALIDATION_TYPE");
-  if (playbook.status === "VERIFIED" || playbook.status === "QUALIFIED") {
+  if (playbook.status === "QUALIFIED" || playbook.status === "VERIFIED") {
     if (!playbook.sourceEvidence.length) throw new Error("PROCEDURAL_QUALIFICATION_EVIDENCE_REQUIRED");
     assertDigest(playbook.qualificationDigest, "PROCEDURAL_INVALID_QUALIFICATION_DIGEST");
     if (playbook.provenance.producerIdentity === playbook.evaluatorIdentity) throw new Error("INDEPENDENT_EVALUATOR_REQUIRED");
@@ -234,7 +240,7 @@ function validateLesson(lesson: ReusableLesson): void {
   if (!lesson.producerIdentity || !lesson.evaluatorIdentity) throw new Error("PROCEDURAL_INVALID_LESSON_IDENTITY");
   validateIdentity(lesson.applicabilityIdentity, "PROCEDURAL_INVALID_LESSON_APPLICABILITY");
   if (!lesson.invalidationConditions.every((type) => INVALIDATION_TYPES.has(type))) throw new Error("PROCEDURAL_INVALID_INVALIDATION_TYPE");
-  if (lesson.status === "VERIFIED" || lesson.status === "QUALIFIED") {
+  if (lesson.status === "QUALIFIED" || lesson.status === "VERIFIED") {
     if (!lesson.sourceEvidence.length) throw new Error("PROCEDURAL_QUALIFICATION_EVIDENCE_REQUIRED");
     assertDigest(lesson.qualificationDigest, "PROCEDURAL_INVALID_QUALIFICATION_DIGEST");
     if (lesson.producerIdentity === lesson.evaluatorIdentity) throw new Error("INDEPENDENT_EVALUATOR_REQUIRED");
@@ -248,9 +254,7 @@ function validateState(state: KnowledgeState): void {
   if (!isRecord(state) || state.schemaVersion !== 1 || !Number.isSafeInteger(state.generation) || state.generation < 1 ||
       !Array.isArray(state.playbooks) || state.playbooks.length > MAX_PLAYBOOKS || !Array.isArray(state.lessons) || state.lessons.length > MAX_LESSONS ||
       !Array.isArray(state.invalidations) || !Array.isArray(state.outcomes) || !Array.isArray(state.qualificationFailures) ||
-      state.invalidations.length > MAX_AUDIT_RECORDS || state.outcomes.length > MAX_AUDIT_RECORDS || state.qualificationFailures.length > MAX_AUDIT_RECORDS) {
-    throw new Error("PROCEDURAL_STATE_CORRUPT");
-  }
+      state.invalidations.length > MAX_AUDIT_RECORDS || state.outcomes.length > MAX_AUDIT_RECORDS || state.qualificationFailures.length > MAX_AUDIT_RECORDS) throw new Error("PROCEDURAL_STATE_CORRUPT");
   const playbookKeys = new Set<string>();
   for (const playbook of state.playbooks) {
     validatePlaybook(playbook);
@@ -291,24 +295,20 @@ async function syncDirectory(directory: string): Promise<void> {
   const handle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
   try { await handle.sync(); } finally { await handle.close(); }
 }
-
 async function readCommittedState(path: string): Promise<KnowledgeState> {
-  let handle;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const stat = await handle.stat();
     if (!stat.isFile() || stat.nlink !== 1 || stat.size > MAX_STATE_BYTES || (stat.mode & 0o077) !== 0) throw new Error("PROCEDURAL_STATE_FILE_BOUNDARY");
     return decodeState(await handle.readFile("utf8"));
-  } finally {
-    await handle?.close();
-  }
+  } finally { await handle?.close(); }
 }
-
 async function writeStateAtomic(directory: string, path: string, state: KnowledgeState): Promise<void> {
   const bytes = encodeState(state);
   if (Buffer.byteLength(bytes) > MAX_STATE_BYTES) throw new Error("PROCEDURAL_STATE_CAPACITY");
   const temporary = join(directory, `pending-${randomUUID()}.json`);
-  let handle;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     await handle.writeFile(bytes, "utf8");
@@ -322,7 +322,6 @@ async function writeStateAtomic(directory: string, path: string, state: Knowledg
     await unlink(temporary).catch(() => undefined);
   }
 }
-
 async function withFilesystemLock<T>(directory: string, action: () => Promise<T>): Promise<T> {
   const lock = join(directory, "transaction.lock");
   await mkdir(lock, { mode: 0o700 });
@@ -330,7 +329,6 @@ async function withFilesystemLock<T>(directory: string, action: () => Promise<T>
   try { return await action(); }
   finally { await rmdir(lock); await syncDirectory(directory); }
 }
-
 function emptyState(playbooks: readonly ProceduralPlaybook[] = []): KnowledgeState {
   return { schemaVersion: 1, generation: 1, playbooks: clone([...playbooks]), lessons: [], invalidations: [], outcomes: [], qualificationFailures: [] };
 }
@@ -341,7 +339,7 @@ export function transitionTrustState(current: KnowledgeTrustState, next: Knowled
   sourceEvidence: string[];
   qualificationDigest: string;
 }): KnowledgeTrustState {
-  const allowed: Record<KnowledgeTrustState, KnowledgeTrustState[]> = {
+  const allowed: { [K in KnowledgeTrustState]: KnowledgeTrustState[] } = {
     DRAFT: ["CANDIDATE", "INVALIDATED"],
     CANDIDATE: ["QUALIFIED", "INVALIDATED"],
     QUALIFIED: ["VERIFIED", "INVALIDATED"],
@@ -349,7 +347,7 @@ export function transitionTrustState(current: KnowledgeTrustState, next: Knowled
     SUPERSEDED: [],
     INVALIDATED: [],
   };
-  if (!allowed[current]?.includes(next)) throw new Error("ILLEGAL_TRUST_TRANSITION");
+  if (!allowed[current].includes(next)) throw new Error("ILLEGAL_TRUST_TRANSITION");
   if (next === "QUALIFIED" || next === "VERIFIED") {
     if (!evidence.producerIdentity || !evidence.evaluatorIdentity || evidence.producerIdentity === evidence.evaluatorIdentity) throw new Error("INDEPENDENT_EVALUATOR_REQUIRED");
     if (!evidence.sourceEvidence.length) throw new Error("QUALIFICATION_EVIDENCE_REQUIRED");
@@ -372,16 +370,17 @@ export function classifyTaskFamily(description: string, playbooks: readonly Proc
     current.ids.push(playbook.id);
     byFamily.set(playbook.taskFamily, current);
   }
-  const ranked = [...byFamily.entries()].sort((a, b) => b[1].score - a[1].score || a[0].localeCompare(b[0]));
+  const ranked = [...byFamily.entries()].sort((left, right) => right[1].score - left[1].score || left[0].localeCompare(right[0]));
   if (!ranked.length) throw new Error("UNKNOWN_TASK_FAMILY");
-  if (ranked[1] && ranked[1][1].score === ranked[0][1].score) throw new Error("TASK_FAMILY_CONFLICT");
-  return { taskFamily: ranked[0][0], score: ranked[0][1].score, matchedPlaybookIds: ranked[0][1].ids.sort() };
+  const winner = ranked[0];
+  const runner = ranked[1];
+  if (!winner) throw new Error("UNKNOWN_TASK_FAMILY");
+  if (runner && runner[1].score === winner[1].score) throw new Error("TASK_FAMILY_CONFLICT");
+  return { taskFamily: winner[0], score: winner[1].score, matchedPlaybookIds: winner[1].ids.sort() };
 }
 
 export function retrieveVerifiedLessons(lessons: readonly ReusableLesson[], taskFamily: string, identity: MaterialIdentity): ReusableLesson[] {
-  const candidates = lessons
-    .filter((lesson) => lesson.status === "VERIFIED" && lesson.taskFamily === taskFamily && identityMatches(lesson.applicabilityIdentity, identity))
-    .map((lesson) => clone(lesson));
+  const candidates = lessons.filter((lesson) => lesson.status === "VERIFIED" && lesson.taskFamily === taskFamily && identityMatches(lesson.applicabilityIdentity, identity)).map((lesson) => clone(lesson));
   const grouped = new Map<string, ReusableLesson[]>();
   for (const lesson of candidates) {
     const key = lesson.claimKey ?? lesson.id;
@@ -389,8 +388,11 @@ export function retrieveVerifiedLessons(lessons: readonly ReusableLesson[], task
   }
   const selected: ReusableLesson[] = [];
   for (const group of grouped.values()) {
-    group.sort((a, b) => (b.qualificationStrength ?? Math.round(b.confidence * 100)) - (a.qualificationStrength ?? Math.round(a.confidence * 100)) || b.version - a.version || a.id.localeCompare(b.id));
+    group.sort((left, right) =>
+      (right.qualificationStrength ?? Math.round(right.confidence * 100)) - (left.qualificationStrength ?? Math.round(left.confidence * 100)) ||
+      right.version - left.version || left.id.localeCompare(right.id));
     const winner = group[0];
+    if (!winner) continue;
     const runner = group[1];
     if (runner) {
       const winnerStrength = winner.qualificationStrength ?? Math.round(winner.confidence * 100);
@@ -399,20 +401,18 @@ export function retrieveVerifiedLessons(lessons: readonly ReusableLesson[], task
     }
     selected.push(winner);
   }
-  return selected.sort((a, b) => a.id.localeCompare(b.id));
+  return selected.sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function rankPlaybooks(task: ReuseTask, playbooks: readonly ProceduralPlaybook[]): ProceduralPlaybook[] {
   return playbooks
     .filter((playbook) => playbook.status === "VERIFIED" && playbook.taskFamily === task.taskFamily && identityMatches(playbook.procedureApplicabilityIdentity, task.identity))
-    .sort((a, b) =>
-      identitySpecificity(b.procedureApplicabilityIdentity) - identitySpecificity(a.procedureApplicabilityIdentity) ||
-      (b.qualificationStrength ?? 0) - (a.qualificationStrength ?? 0) ||
-      b.sourceEvidence.length - a.sourceEvidence.length ||
-      b.version - a.version ||
-      a.id.localeCompare(b.id));
+    .sort((left, right) =>
+      identitySpecificity(right.procedureApplicabilityIdentity) - identitySpecificity(left.procedureApplicabilityIdentity) ||
+      (right.qualificationStrength ?? 0) - (left.qualificationStrength ?? 0) ||
+      right.sourceEvidence.length - left.sourceEvidence.length ||
+      right.version - left.version || left.id.localeCompare(right.id));
 }
-
 function selectionFor(task: ReuseTask, playbooks: readonly ProceduralPlaybook[]): ProcedureSelection {
   const ranked = rankPlaybooks(task, playbooks);
   const winner = ranked[0];
@@ -460,15 +460,15 @@ export class ProceduralKnowledgeStore {
     const directory = resolve(stateDirectory, DIRECTORY_NAME);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     if (await realpath(directory) !== directory) throw new Error("PROCEDURAL_STATE_DIRECTORY_SYMLINK");
-    const dir = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    const directoryHandle = await open(directory, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     try {
-      const stat = await dir.stat();
+      const stat = await directoryHandle.stat();
       if ((stat.mode & 0o077) !== 0) throw new Error("PROCEDURAL_STATE_DIRECTORY_PERMISSIONS");
-    } finally { await dir.close(); }
-    const path = join(directory, STATE_FILE);
+    } finally { await directoryHandle.close(); }
+    const statePath = join(directory, STATE_FILE);
     let state: KnowledgeState;
     try {
-      state = await readCommittedState(path);
+      state = await readCommittedState(statePath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       const pending = (await readdir(directory)).filter((name) => name.startsWith("pending-") && name.endsWith(".json"));
@@ -476,22 +476,21 @@ export class ProceduralKnowledgeStore {
       state = emptyState(seeds);
       await withFilesystemLock(directory, async () => {
         try {
-          state = await readCommittedState(path);
+          state = await readCommittedState(statePath);
         } catch (inner) {
           if ((inner as NodeJS.ErrnoException).code !== "ENOENT") throw inner;
-          await writeStateAtomic(directory, path, state);
+          await writeStateAtomic(directory, statePath, state);
         }
       });
     }
-    const store = new ProceduralKnowledgeStore(directory, path, state, true);
+    const store = new ProceduralKnowledgeStore(directory, statePath, state, true);
     await store.#mergeReleaseSeeds(seeds);
     return store;
   }
 
-  snapshot(): KnowledgeState { return clone(this.#state); }
-
+  snapshot(): ProceduralKnowledgeSnapshot { return clone(this.#state); }
+  classify(description: string): { taskFamily: string; score: number; matchedPlaybookIds: string[] } { return classifyTaskFamily(description, this.#state.playbooks); }
   select(task: ReuseTask): ProcedureSelection { return selectionFor(task, this.#state.playbooks); }
-
   retrieveLessons(task: ReuseTask): ReusableLesson[] { return retrieveVerifiedLessons(this.#state.lessons, task.taskFamily, task.identity); }
 
   async #mergeReleaseSeeds(seeds: readonly ProceduralPlaybook[]): Promise<void> {
@@ -511,7 +510,7 @@ export class ProceduralKnowledgeStore {
     if (!this.#persistent) {
       const next = clone(this.#state);
       mutator(next);
-      next.generation++;
+      next.generation += 1;
       validateState(next);
       this.#state = next;
       this.#loadedDigest = stateDigest(next);
@@ -523,7 +522,7 @@ export class ProceduralKnowledgeStore {
       if (currentDigest !== this.#loadedDigest) throw new Error("PROCEDURAL_STATE_CONCURRENT_CHANGE");
       const next = clone(current);
       mutator(next);
-      next.generation++;
+      next.generation += 1;
       validateState(next);
       await writeStateAtomic(this.directory, this.statePath, next);
       this.#state = next;
@@ -541,9 +540,7 @@ export class ProceduralKnowledgeStore {
   async assertSelectionCurrent(selection: ProcedureSelection, task: ReuseTask): Promise<void> {
     await this.#refresh();
     const current = this.#state.playbooks.find((playbook) => playbook.id === selection.playbook.id && playbook.version === selection.playbook.version);
-    if (!current || current.status !== "VERIFIED" || sha256(canonicalJson(current)) !== selection.playbookDigest || !identityMatches(current.procedureApplicabilityIdentity, task.identity)) {
-      throw new Error("KNOWLEDGE_CHANGED_BEFORE_EXECUTION");
-    }
+    if (!current || current.status !== "VERIFIED" || sha256(canonicalJson(current)) !== selection.playbookDigest || !identityMatches(current.procedureApplicabilityIdentity, task.identity)) throw new Error("KNOWLEDGE_CHANGED_BEFORE_EXECUTION");
   }
 
   async invalidate(id: string, version: number, type: EvidenceInvalidationType, reason: string): Promise<void> {
@@ -551,16 +548,17 @@ export class ProceduralKnowledgeStore {
     await this.#commit((state) => {
       const playbook = state.playbooks.find((item) => item.id === id && item.version === version);
       const lesson = state.lessons.find((item) => item.id === id && item.version === version);
-      if (!playbook && !lesson) throw new Error("PROCEDURAL_UNKNOWN_KNOWLEDGE");
-      const item = playbook ?? lesson!;
-      if (item.status === "INVALIDATED") return;
-      if (item.status === "SUPERSEDED") throw new Error("ILLEGAL_TRUST_TRANSITION");
-      item.status = transitionTrustState(item.status, "INVALIDATED", {
-        producerIdentity: "invalidation",
-        evaluatorIdentity: "invalidation",
-        sourceEvidence: [],
-        qualificationDigest: "",
-      });
+      if (playbook) {
+        if (playbook.status === "INVALIDATED") return;
+        if (playbook.status === "SUPERSEDED") throw new Error("ILLEGAL_TRUST_TRANSITION");
+        playbook.status = transitionTrustState(playbook.status, "INVALIDATED", { producerIdentity: "invalidation", evaluatorIdentity: "invalidation", sourceEvidence: [], qualificationDigest: "" });
+      } else if (lesson) {
+        if (lesson.status === "INVALIDATED") return;
+        if (lesson.status === "SUPERSEDED") throw new Error("ILLEGAL_TRUST_TRANSITION");
+        lesson.status = transitionTrustState(lesson.status, "INVALIDATED", { producerIdentity: "invalidation", evaluatorIdentity: "invalidation", sourceEvidence: [], qualificationDigest: "" });
+      } else {
+        throw new Error("PROCEDURAL_UNKNOWN_KNOWLEDGE");
+      }
       state.invalidations.push({ targetKind: playbook ? "PLAYBOOK" : "LESSON", targetId: id, targetVersion: version, type, reason, createdAt: nowIso() });
     });
   }
@@ -579,12 +577,7 @@ export class ProceduralKnowledgeStore {
     await this.#commit((state) => {
       const lesson = state.lessons.find((item) => item.id === id && item.version === version);
       if (!lesson) throw new Error("PROCEDURAL_UNKNOWN_LESSON");
-      lesson.status = transitionTrustState(lesson.status, "QUALIFIED", {
-        producerIdentity: lesson.producerIdentity,
-        evaluatorIdentity: evidence.evaluatorIdentity,
-        sourceEvidence: evidence.sourceEvidence,
-        qualificationDigest: evidence.qualificationDigest,
-      });
+      lesson.status = transitionTrustState(lesson.status, "QUALIFIED", { producerIdentity: lesson.producerIdentity, evaluatorIdentity: evidence.evaluatorIdentity, sourceEvidence: evidence.sourceEvidence, qualificationDigest: evidence.qualificationDigest });
       lesson.evaluatorIdentity = evidence.evaluatorIdentity;
       lesson.sourceEvidence = clone(evidence.sourceEvidence);
       lesson.qualificationDigest = evidence.qualificationDigest;
@@ -595,12 +588,7 @@ export class ProceduralKnowledgeStore {
     await this.#commit((state) => {
       const lesson = state.lessons.find((item) => item.id === id && item.version === version);
       if (!lesson) throw new Error("PROCEDURAL_UNKNOWN_LESSON");
-      lesson.status = transitionTrustState(lesson.status, "VERIFIED", {
-        producerIdentity: lesson.producerIdentity,
-        evaluatorIdentity: evidence.evaluatorIdentity,
-        sourceEvidence: evidence.sourceEvidence,
-        qualificationDigest: evidence.qualificationDigest,
-      });
+      lesson.status = transitionTrustState(lesson.status, "VERIFIED", { producerIdentity: lesson.producerIdentity, evaluatorIdentity: evidence.evaluatorIdentity, sourceEvidence: evidence.sourceEvidence, qualificationDigest: evidence.qualificationDigest });
       lesson.evaluatorIdentity = evidence.evaluatorIdentity;
       lesson.sourceEvidence = clone(evidence.sourceEvidence);
       lesson.qualificationDigest = evidence.qualificationDigest;
@@ -623,6 +611,7 @@ export class ProceduralKnowledgeStore {
     validatePlaybook(playbook);
     await this.#commit((state) => {
       if (state.playbooks.some((item) => item.id === playbook.id && item.version === playbook.version)) throw new Error("PROCEDURAL_DUPLICATE_PLAYBOOK");
+      if (state.playbooks.length >= MAX_PLAYBOOKS) throw new Error("PROCEDURAL_STATE_CAPACITY");
       state.playbooks.push(clone(playbook));
     });
   }
@@ -631,12 +620,7 @@ export class ProceduralKnowledgeStore {
     await this.#commit((state) => {
       const playbook = state.playbooks.find((item) => item.id === id && item.version === version);
       if (!playbook) throw new Error("PROCEDURAL_UNKNOWN_PLAYBOOK");
-      playbook.status = transitionTrustState(playbook.status, "QUALIFIED", {
-        producerIdentity: playbook.provenance.producerIdentity,
-        evaluatorIdentity: evidence.evaluatorIdentity,
-        sourceEvidence: evidence.sourceEvidence,
-        qualificationDigest: evidence.qualificationDigest,
-      });
+      playbook.status = transitionTrustState(playbook.status, "QUALIFIED", { producerIdentity: playbook.provenance.producerIdentity, evaluatorIdentity: evidence.evaluatorIdentity, sourceEvidence: evidence.sourceEvidence, qualificationDigest: evidence.qualificationDigest });
       playbook.evaluatorIdentity = evidence.evaluatorIdentity;
       playbook.sourceEvidence = clone(evidence.sourceEvidence);
       playbook.qualificationDigest = evidence.qualificationDigest;
@@ -648,12 +632,7 @@ export class ProceduralKnowledgeStore {
     await this.#commit((state) => {
       const playbook = state.playbooks.find((item) => item.id === id && item.version === version);
       if (!playbook) throw new Error("PROCEDURAL_UNKNOWN_PLAYBOOK");
-      playbook.status = transitionTrustState(playbook.status, "VERIFIED", {
-        producerIdentity: playbook.provenance.producerIdentity,
-        evaluatorIdentity: evidence.evaluatorIdentity,
-        sourceEvidence: evidence.sourceEvidence,
-        qualificationDigest: evidence.qualificationDigest,
-      });
+      playbook.status = transitionTrustState(playbook.status, "VERIFIED", { producerIdentity: playbook.provenance.producerIdentity, evaluatorIdentity: evidence.evaluatorIdentity, sourceEvidence: evidence.sourceEvidence, qualificationDigest: evidence.qualificationDigest });
       playbook.evaluatorIdentity = evidence.evaluatorIdentity;
       playbook.sourceEvidence = clone(evidence.sourceEvidence);
       playbook.qualificationDigest = evidence.qualificationDigest;
@@ -668,11 +647,7 @@ export class ProceduralKnowledgeStore {
   }
 }
 
-export async function buildReuseContext(store: ProceduralKnowledgeStore, task: ReuseTask, order: "PLAYBOOK_FIRST" | "LESSONS_FIRST"): Promise<{
-  selection: ProcedureSelection;
-  lessons: ReusableLesson[];
-  semanticDigest: string;
-}> {
+export async function buildReuseContext(store: ProceduralKnowledgeStore, task: ReuseTask, order: "PLAYBOOK_FIRST" | "LESSONS_FIRST"): Promise<{ selection: ProcedureSelection; lessons: ReusableLesson[]; semanticDigest: string }> {
   let selection: ProcedureSelection;
   let lessons: ReusableLesson[];
   if (order === "PLAYBOOK_FIRST") {
@@ -699,9 +674,7 @@ export async function executeVerifiedProcedure<T>(input: {
 }): Promise<any> {
   let store: ProceduralKnowledgeStore;
   try { store = typeof input.store === "function" ? await input.store() : input.store; }
-  catch (error) {
-    return { mode: "EXISTING_AUTHORIZED_PATH_REQUIRED", authoritativeReuse: false, reason: error instanceof Error ? error.message : "knowledge retrieval unavailable" };
-  }
+  catch (error) { return { mode: "EXISTING_AUTHORIZED_PATH_REQUIRED", authoritativeReuse: false, reason: error instanceof Error ? error.message : "knowledge retrieval unavailable" }; }
 
   const selection = store.select(input.task);
   const lessons = store.retrieveLessons(input.task);
@@ -782,7 +755,6 @@ function releaseSeed(input: {
   const evaluator = input.evaluator ?? "github-actions-release-gate";
   const applicability: MaterialIdentity = { repository: "BoneManTGRM/SARA", ...(input.environment ? { environment: input.environment } : {}) };
   const evidenceIdentity: MaterialIdentity = { ...applicability, sourceRevision: BASELINE_REVISION, evaluator };
-  const qualificationDigest = sha256(canonicalJson({ id: input.id, taskFamily: input.taskFamily, sourceEvidence: input.sourceEvidence, baseline: BASELINE_REVISION }));
   return {
     id: input.id,
     version: 1,
@@ -812,7 +784,7 @@ function releaseSeed(input: {
     provenance: { producerIdentity: "sara-release-engineering", source: "repository-and-release-evidence" },
     sourceEvidence: input.sourceEvidence,
     qualificationStatus: "independently_qualified",
-    qualificationDigest,
+    qualificationDigest: sha256(canonicalJson({ id: input.id, taskFamily: input.taskFamily, sourceEvidence: input.sourceEvidence, baseline: BASELINE_REVISION })),
     evaluatorIdentity: evaluator,
     procedureApplicabilityIdentity: applicability,
     evidenceReuseIdentity: evidenceIdentity,
@@ -838,18 +810,21 @@ export const PROCEDURAL_SEED_PLAYBOOKS: readonly ProceduralPlaybook[] = Object.f
   releaseSeed({ id: "stale-evidence-invalidation", taskFamily: "stale_evidence_invalidation", purpose: "Invalidate only proof affected by a material identity change while preserving reusable procedure knowledge.", triggers: ["stale evidence", "invalidate prior pass"], procedure: ["compare material identity", "type each change", "invalidate affected claims only", "retain procedure when still applicable", "freshly verify changed claims"], sourceEvidence: ["src/coding-repair-memory.ts", "tests/coding-repair-memory.test.ts"], authorityRequired: ["repository_read"] }),
   releaseSeed({ id: "evidence-bound-final-reporting", taskFamily: "evidence_bound_final_reporting", purpose: "Produce final status only from exact current evidence and explicitly mark unknown metrics unknown.", triggers: ["final evidence report", "evidence bound reporting"], procedure: ["bind claims to receipts", "separate measured from unknown", "preserve failed evidence", "state remaining boundary exactly"], sourceEvidence: [".github/workflows/ci.yml", "src/kernel.ts"], authorityRequired: ["runtime_read"] }),
 ]);
-
 for (const seed of PROCEDURAL_SEED_PLAYBOOKS) validatePlaybook(seed);
 
 export async function runProductionProceduralReuseProof(input: {
   stateDirectory: string;
   sourceRevision: string;
   deploymentId: string;
+  grantedAuthorities: string[];
 }): Promise<any> {
+  const store = await ProceduralKnowledgeStore.open(input.stateDirectory);
+  const description = "verify the Railway exact SHA deployment using the verified production procedure";
+  const classification = store.classify(description);
   const task: ReuseTask = {
     taskId: `runtime-proof:${input.deploymentId}`,
-    description: "verify the Railway exact SHA deployment using the verified production procedure",
-    taskFamily: "railway_exact_sha_deployment_verification",
+    description,
+    taskFamily: classification.taskFamily,
     identity: {
       repository: "BoneManTGRM/SARA",
       environment: "railway-production",
@@ -858,17 +833,18 @@ export async function runProductionProceduralReuseProof(input: {
     },
     requestedActions: ["read_runtime_identity"],
   };
-  return executeVerifiedProcedure({
-    store: () => ProceduralKnowledgeStore.open(input.stateDirectory),
+  const result = await executeVerifiedProcedure({
+    store,
     task,
-    grantedAuthorities: ["runtime_read"],
+    grantedAuthorities: input.grantedAuthorities,
     authorizedCostCeilingUsd: 0,
     estimatedCostUsd: 0,
     baselineOperations: ["classify_task", "inspect_source_for_procedure", "derive_procedure", "check_authority_and_prior_evidence", "perform_variable_work", "fresh_verify"],
     variableWork: async () => ({ sourceRevision: input.sourceRevision, deploymentId: input.deploymentId, service: "sara-operator", environment: "railway-production" }),
-    freshVerify: async (result) => ({
-      passed: /^[a-f0-9]{40}$/u.test(result.sourceRevision) && /^[a-zA-Z0-9-]{8,}$/u.test(result.deploymentId) && result.service === "sara-operator" && result.environment === "railway-production",
-      evidence: [`runtime-source-revision:${result.sourceRevision}`, `runtime-deployment-id:${result.deploymentId}`, "runtime-service:sara-operator", "runtime-environment:railway-production"],
+    freshVerify: async (runtime) => ({
+      passed: /^[a-f0-9]{40}$/u.test(runtime.sourceRevision) && /^[a-zA-Z0-9-]{8,}$/u.test(runtime.deploymentId) && runtime.service === "sara-operator" && runtime.environment === "railway-production",
+      evidence: [`runtime-source-revision:${runtime.sourceRevision}`, `runtime-deployment-id:${runtime.deploymentId}`, "runtime-service:sara-operator", "runtime-environment:railway-production"],
     }),
   });
+  return { ...result, classification };
 }
