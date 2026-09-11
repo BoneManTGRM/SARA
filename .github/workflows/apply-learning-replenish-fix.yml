@@ -23,6 +23,8 @@ jobs:
       - run: npm ci
       - run: python3 scripts/apply-learning-replenish-fix.py
       - run: node scripts/build-native-checker.mjs
+      - name: Verify direct SHADOW learning regression first
+        run: node --test --import tsx --test-name-pattern="a fixture-generated verified artifact remains SHADOW after restart without operational authority" tests/autonomous-learning.test.ts
       - run: npm run verify
       - name: Commit verified source change
         run: |
