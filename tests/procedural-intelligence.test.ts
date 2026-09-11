@@ -81,3 +81,52 @@ test("known task family plus verified applicable playbook selects that playbook"
   assert.equal(selected.playbook.version, 1);
   assert.equal(selected.procedureApplicable, true);
 });
+
+test("candidate or otherwise unqualified playbook cannot be reused authoritatively", () => {
+  const selectVerifiedProcedure = (memoryFabric as Record<string, unknown>).selectVerifiedProcedure as (input: unknown) => unknown;
+  assert.throws(() => selectVerifiedProcedure({
+    task: {
+      taskFamily: "github_pr_qualification",
+      identity: {
+        repository: "BoneManTGRM/SARA",
+        environment: "github",
+        requirementDigest: digest("b"),
+        policyDigest: digest("c"),
+      },
+    },
+    playbooks: [verifiedPlaybook({ status: "CANDIDATE", qualificationStatus: "unqualified" })],
+  }), /NO_APPLICABLE_VERIFIED_PLAYBOOK/);
+});
+
+test("procedure can remain applicable while changed source invalidates prior execution evidence", () => {
+  const selectVerifiedProcedure = (memoryFabric as Record<string, unknown>).selectVerifiedProcedure as (input: unknown) => any;
+  const decidePriorEvidenceReuse = (memoryFabric as Record<string, unknown>).decidePriorEvidenceReuse;
+  assert.equal(typeof decidePriorEvidenceReuse, "function", "procedure/evidence reuse separation is not implemented yet");
+
+  const playbook = verifiedPlaybook();
+  const task = {
+    taskFamily: "github_pr_qualification",
+    identity: {
+      repository: "BoneManTGRM/SARA",
+      environment: "github",
+      requirementDigest: digest("b"),
+      policyDigest: digest("c"),
+      sourceRevision: "source-b",
+      evaluator: "github-actions",
+    },
+  };
+  const selected = selectVerifiedProcedure({ task, playbooks: [playbook] });
+  assert.equal(selected.procedureApplicable, true);
+  const evidence = (decidePriorEvidenceReuse as (input: unknown) => any)({
+    expectedIdentity: playbook.evidenceReuseIdentity,
+    currentIdentity: task.identity,
+  });
+  assert.equal(evidence.reusable, false);
+  assert.deepEqual(evidence.invalidations, [{
+    type: "SOURCE_CHANGED",
+    field: "sourceRevision",
+    previous: "source-a",
+    current: "source-b",
+    invalidates: ["prior_execution_pass"],
+  }]);
+});
