@@ -1,5 +1,14 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+
+function pathContains(root: string, target: string): boolean {
+  const relativePath = relative(resolve(root), resolve(target));
+  return relativePath === "" || (
+    relativePath !== ".." &&
+    !relativePath.startsWith(`..${sep}`) &&
+    !isAbsolute(relativePath)
+  );
+}
 
 if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
   const child = spawn(
@@ -28,6 +37,8 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
     const { readProductionStateFingerprint } = await import("../src/production-state-fingerprint.ts");
     const state = await readProductionStateFingerprint(stateDirectory);
     const volumeMount = process.env.RAILWAY_VOLUME_MOUNT_PATH;
+    const persistentVolumeMountMatches = typeof volumeMount === "string" &&
+      volumeMount.length > 0 && pathContains(volumeMount, stateDirectory);
     console.log(JSON.stringify({
       event: "sara_release_state_attestation",
       status: "verified",
@@ -35,8 +46,8 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
       sourceRevision: /^[a-f0-9]{40}$/u.test(sourceRevision) ? sourceRevision : null,
       deploymentId: /^[A-Za-z0-9-]{8,}$/u.test(deploymentId) ? deploymentId : null,
       applicationVersion: process.env.npm_package_version ?? null,
-      stateDirectoryClass: stateDirectory === resolve("/data") ? "persistent_volume" : "configured_other",
-      persistentVolumeMountMatches: volumeMount ? resolve(volumeMount) === stateDirectory : null,
+      stateDirectoryClass: persistentVolumeMountMatches ? "persistent_volume" : "configured_other",
+      persistentVolumeMountMatches,
       workerConfiguration: {
         autonomousLearningEnabled: process.env.SARA_AUTONOMOUS_LEARNING_ENABLED === "true",
         workersPlan: process.env.SARA_WORKERS_PLAN === "free"
