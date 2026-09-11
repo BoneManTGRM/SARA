@@ -1,0 +1,34 @@
+name: Apply bounded learning replenish fix
+
+on:
+  push:
+    branches:
+      - fix/learning-replenish-bounded-20260911
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, '[learning-replenish-applied]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: python3 scripts/apply-learning-replenish-fix.py
+      - run: node scripts/build-native-checker.mjs
+      - run: npm run verify
+      - name: Commit verified source change
+        run: |
+          git config user.name "Reparodynamics"
+          git config user.email "papadenico@yahoo.com"
+          git add src/learning-campaign.ts src/kernel.ts tests/learning-campaign.test.ts
+          git diff --cached --check
+          git commit -m "Replenish bounded learning queue from frozen gaps [learning-replenish-applied]"
+          git push origin HEAD:fix/learning-replenish-bounded-20260911
