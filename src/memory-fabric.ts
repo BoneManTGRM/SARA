@@ -160,3 +160,72 @@ export function recallMemories(memories: readonly MemoryRecord[], input: MemoryR
   };
   return { ...result, contextDigest: sha256(canonicalJson(result)) };
 }
+
+export type ProcedureApplicabilityIdentity = Record<string, string | number | boolean | null | undefined>;
+
+export interface ProcedureSelectionTask {
+  taskFamily: string;
+  identity: ProcedureApplicabilityIdentity;
+}
+
+export interface SelectableVerifiedProcedure {
+  id: string;
+  version: number;
+  taskFamily: string;
+  status: string;
+  procedureApplicabilityIdentity?: ProcedureApplicabilityIdentity;
+  qualificationStatus?: string;
+  qualificationDigest?: string;
+  sourceEvidence?: readonly string[];
+}
+
+export interface VerifiedProcedureSelection<T extends SelectableVerifiedProcedure = SelectableVerifiedProcedure> {
+  playbook: T;
+  procedureApplicable: true;
+  applicabilityReason: string;
+  selectionDigest: string;
+}
+
+function applicabilityMatches(expected: ProcedureApplicabilityIdentity | undefined, actual: ProcedureApplicabilityIdentity): boolean {
+  if (!expected) return true;
+  return Object.entries(expected).every(([key, value]) => value === undefined || actual[key] === value);
+}
+
+export function selectVerifiedProcedure<T extends SelectableVerifiedProcedure>(input: {
+  task: ProcedureSelectionTask;
+  playbooks: readonly T[];
+}): VerifiedProcedureSelection<T> {
+  const candidates = input.playbooks
+    .filter((playbook) => playbook.status === "VERIFIED")
+    .filter((playbook) => playbook.taskFamily === input.task.taskFamily)
+    .filter((playbook) => applicabilityMatches(playbook.procedureApplicabilityIdentity, input.task.identity))
+    .map((playbook) => ({
+      playbook,
+      specificity: Object.values(playbook.procedureApplicabilityIdentity ?? {}).filter((value) => value !== undefined).length,
+      qualificationStrength: playbook.qualificationStatus === "independently_qualified" ? 1 : 0,
+      sourceStrength: playbook.sourceEvidence?.length ?? 0,
+    }))
+    .sort((left, right) =>
+      right.specificity - left.specificity ||
+      right.qualificationStrength - left.qualificationStrength ||
+      right.sourceStrength - left.sourceStrength ||
+      right.playbook.version - left.playbook.version ||
+      left.playbook.id.localeCompare(right.playbook.id)
+    );
+
+  const winner = candidates[0];
+  if (!winner) throw new Error("NO_APPLICABLE_VERIFIED_PLAYBOOK");
+
+  const selectionIdentity = {
+    taskFamily: input.task.taskFamily,
+    playbookId: winner.playbook.id,
+    playbookVersion: winner.playbook.version,
+    applicabilityIdentity: winner.playbook.procedureApplicabilityIdentity ?? {},
+  };
+  return {
+    playbook: winner.playbook,
+    procedureApplicable: true,
+    applicabilityReason: "verified task-family and material applicability identity matched",
+    selectionDigest: sha256(canonicalJson(selectionIdentity)),
+  };
+}
