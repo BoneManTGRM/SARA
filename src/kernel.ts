@@ -2539,7 +2539,8 @@ export class SaraKernel {
       }
 
       const existingReservation = [...reservations].reverse().find(event => (event.data as {jobId:string}).jobId === job!.id);
-      const request: RoutineActionRequest = {id:`learning:${job.id}`,kind:"business_candidate_development",targetId:job.id,
+      const decisionScope = `${state.standingMandate?.digest ?? "no-mandate"}:${now.slice(0,10)}`;
+      const request: RoutineActionRequest = {id:`learning:${job.id}:${decisionScope}`,kind:"business_candidate_development",targetId:job.id,
         channel:"internal",serviceId:"skill-learning",estimatedCostUsd:0,external:generator.external,requestedAt:now,platform:"owner_site"};
       if (existingReservation) {
         const data = existingReservation.data as {jobId:string;mandateDigest:string;campaignId?:string;contractDigest?:string};
