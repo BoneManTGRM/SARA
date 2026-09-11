@@ -52,7 +52,7 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
   } catch {
     console.error(JSON.stringify({
       event: "sara_release_state_attestation",
-      status: "failed_closed",
+      status: "not_verified",
       sourceRevision: /^[a-f0-9]{40}$/u.test(sourceRevision) ? sourceRevision : null,
       deploymentId: /^[A-Za-z0-9-]{8,}$/u.test(deploymentId) ? deploymentId : null,
     }));
