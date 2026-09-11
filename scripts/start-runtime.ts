@@ -1,5 +1,10 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
+
+function pathContains(root: string, target: string): boolean {
+  const relativePath = relative(resolve(root), resolve(target));
+  return relativePath === "" || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
 
 if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
   const child = spawn(
@@ -35,8 +40,8 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
       sourceRevision: /^[a-f0-9]{40}$/u.test(sourceRevision) ? sourceRevision : null,
       deploymentId: /^[A-Za-z0-9-]{8,}$/u.test(deploymentId) ? deploymentId : null,
       applicationVersion: process.env.npm_package_version ?? null,
-      stateDirectoryClass: stateDirectory === resolve("/data") ? "persistent_volume" : "configured_other",
-      persistentVolumeMountMatches: volumeMount ? resolve(volumeMount) === stateDirectory : null,
+      stateDirectoryClass: pathContains("/data", stateDirectory) ? "persistent_volume" : "configured_other",
+      persistentVolumeMountMatches: volumeMount ? pathContains(volumeMount, stateDirectory) : null,
       workerConfiguration: {
         autonomousLearningEnabled: process.env.SARA_AUTONOMOUS_LEARNING_ENABLED === "true",
         workersPlan: process.env.SARA_WORKERS_PLAN === "free"
