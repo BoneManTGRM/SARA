@@ -21,20 +21,19 @@ const contract = (capabilityId: string): LearningContract => ({
   acceptanceTests: identityTests,
   estimatedEffort: 1,
 });
+const passingProposal = () => ({
+  schemaVersion: 1 as const,
+  skillName: "Curriculum continuation fixture",
+  summary: "Deterministic test fixture only.",
+  source: "export function runSkill(input: unknown): unknown { return input; }",
+  tests: [{ name: "producer", input: 1, expected: 1 }],
+  limitations: ["Fixture only; no production-learning claim."],
+});
 const generator: CandidateGenerator = {
   id: "curriculum-continuation-fixture",
   external: false,
   maximumCostUsd: 0,
-  async generate() {
-    return {
-      schemaVersion: 1,
-      skillName: "Curriculum continuation fixture",
-      summary: "Deterministic test fixture only.",
-      source: "export function runSkill(input: unknown): unknown { return input; }",
-      tests: [{ name: "producer", input: 1, expected: 1 }],
-      limitations: ["Fixture only; no production-learning claim."],
-    };
-  },
+  async generate() { return passingProposal(); },
 };
 
 async function setup(contracts: LearningContract[]) {
@@ -60,11 +59,7 @@ async function setup(contracts: LearningContract[]) {
     targetId: "standing-mandate:curriculum-learning",
     approvedAt: new Date(now).toISOString(),
   });
-  const campaign: LearningCampaignInput = {
-    id: "approved-curriculum-continuation",
-    maximumRequests: 100,
-    contracts,
-  };
+  const campaign: LearningCampaignInput = { id: "approved-curriculum-continuation", maximumRequests: 100, contracts };
   await kernel.configureLearningCampaign(owner, campaign, compileLearningCampaign(campaign).digest);
   return { directory, kernel, owner };
 }
@@ -73,9 +68,7 @@ test("idle worker seeds the next frozen curriculum gap and re-enters the bounded
   const { directory, kernel } = await setup([contract("curriculum-only-gap")]);
   try {
     const worker = new AutonomousLearningWorker(kernel, generator);
-    const result = await worker.tick();
-    assert.equal(result.status, "qualified");
-
+    assert.equal((await worker.tick()).status, "qualified");
     const campaign = await kernel.learningCampaignStatus();
     assert.equal(campaign.campaign?.reserved, 1);
     assert.equal(campaign.campaign?.remaining, 99);
@@ -83,7 +76,6 @@ test("idle worker seeds the next frozen curriculum gap and re-enters the bounded
     const selection = campaign.selections[0] as { campaignId: string; capabilityId: string; sourceJobId: string };
     assert.equal(selection.campaignId, "approved-curriculum-continuation");
     assert.equal(selection.capabilityId, "curriculum-only-gap");
-
     const state = await kernel.getStatus();
     const learningJob = state.jobs.find(job => job.learningCampaignId === "approved-curriculum-continuation");
     assert.ok(learningJob);
@@ -94,31 +86,53 @@ test("idle worker seeds the next frozen curriculum gap and re-enters the bounded
     assert.equal(sourceJob.workCard.maximumBudgetUsd, 0);
     assert.equal(sourceJob.workCard.expectedOwnerValue, 1);
     assert.deepEqual(sourceJob.workCard.requiredCapabilities, ["curriculum-only-gap"]);
-
     assert.equal((await worker.tick()).status, "idle");
     assert.equal((await kernel.learningCampaignStatus()).selections.length, 1);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("an actual task-derived gap remains higher priority than curriculum fallback", async () => {
   const { directory, kernel } = await setup([contract("curriculum-first"), contract("task-gap")]);
   try {
     const source = await kernel.createSelfDevelopmentJob(SARA_PRINCIPAL, {
-      objective: "Handle a real authorized task gap.",
-      expectedOwnerValue: 5,
-      requiredCapabilities: ["task-gap"],
-      acceptanceCriteria: ["Preserve the task input."],
-      maximumBudgetUsd: 0,
+      objective: "Handle a real authorized task gap.", expectedOwnerValue: 5, requiredCapabilities: ["task-gap"],
+      acceptanceCriteria: ["Preserve the task input."], maximumBudgetUsd: 0,
     });
     const worker = new AutonomousLearningWorker(kernel, generator);
     assert.equal((await worker.tick()).status, "qualified");
-    const campaign = await kernel.learningCampaignStatus();
-    const selection = campaign.selections[0] as { capabilityId: string; sourceJobId: string };
+    const selection = (await kernel.learningCampaignStatus()).selections[0] as { capabilityId: string; sourceJobId: string };
     assert.equal(selection.capabilityId, "task-gap");
     assert.equal(selection.sourceJobId, source.id);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("terminal failed frozen capability opens a fresh bounded root instead of idling forever", async () => {
+  const { directory, kernel } = await setup([contract("retryable-frozen-gap")]);
+  let calls = 0;
+  const failThenPass: CandidateGenerator = {
+    id: "curriculum-terminal-failure-fixture", external: false, maximumCostUsd: 0,
+    async generate() {
+      calls += 1;
+      if (calls === 1) throw new Error("fixture terminal learning failure");
+      return passingProposal();
+    },
+  };
+  try {
+    const worker = new AutonomousLearningWorker(kernel, failThenPass);
+    assert.equal((await worker.tick()).status, "failed");
+    let campaign = await kernel.learningCampaignStatus();
+    assert.equal(campaign.campaign?.reserved, 1);
+    assert.equal(campaign.selections.length, 1);
+    assert.equal((await worker.tick()).status, "qualified");
+    campaign = await kernel.learningCampaignStatus();
+    assert.equal(campaign.campaign?.reserved, 2);
+    assert.equal(campaign.campaign?.remaining, 98);
+    assert.equal(campaign.selections.length, 2);
+    assert.equal((campaign.selections[0] as { capabilityId: string }).capabilityId, "retryable-frozen-gap");
+    assert.equal((campaign.selections[1] as { capabilityId: string }).capabilityId, "retryable-frozen-gap");
+    const roots = (await kernel.getStatus()).jobs.filter(job => job.learningCampaignId === "approved-curriculum-continuation" && !job.learningParentJobId);
+    assert.equal(roots.length, 2);
+    assert.equal(roots[0]?.status, "failed");
+    assert.equal(roots[1]?.status, "verified");
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
