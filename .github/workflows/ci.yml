@@ -15,4 +15,6 @@ jobs:
           node-version: "22"
       - run: npm ci
       - run: node scripts/build-native-checker.mjs
+      - name: Qualify actual sandboxed browser
+        run: node --import tsx src/digital-capabilities/web/browser-qualification.ts
       - run: npm run verify

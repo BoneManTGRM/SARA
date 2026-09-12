@@ -1,0 +1,378 @@
+{
+  "schemaVersion": 1,
+  "source": "Owner general-purpose digital worker expansion mission",
+  "requiredCapabilities": [
+    {
+      "id": "learned-capability-disable-and-quarantine",
+      "group": "control"
+    },
+    {
+      "id": "autonomy-boundary-checker",
+      "group": "control"
+    },
+    {
+      "id": "self-benchmark-runner",
+      "group": "control"
+    },
+    {
+      "id": "ci-failure-triage",
+      "group": "engineering"
+    },
+    {
+      "id": "pull-request-risk-review",
+      "group": "engineering"
+    },
+    {
+      "id": "test-gap-mapper",
+      "group": "engineering"
+    },
+    {
+      "id": "release-readiness-gate",
+      "group": "engineering"
+    },
+    {
+      "id": "incident-log-triage",
+      "group": "engineering"
+    },
+    {
+      "id": "repository-change-impact-analyzer",
+      "group": "engineering"
+    },
+    {
+      "id": "dependency-change-risk-triage",
+      "group": "engineering"
+    },
+    {
+      "id": "bug-reproduction-planner",
+      "group": "engineering"
+    },
+    {
+      "id": "root-cause-analyzer",
+      "group": "engineering"
+    },
+    {
+      "id": "minimal-fix-selector",
+      "group": "engineering"
+    },
+    {
+      "id": "regression-surface-mapper",
+      "group": "engineering"
+    },
+    {
+      "id": "configuration-drift-detector",
+      "group": "engineering"
+    },
+    {
+      "id": "database-migration-risk-review",
+      "group": "engineering"
+    },
+    {
+      "id": "rollback-plan-generator",
+      "group": "engineering"
+    },
+    {
+      "id": "production-proof-validator",
+      "group": "engineering"
+    },
+    {
+      "id": "stale-evidence-detector",
+      "group": "engineering"
+    },
+    {
+      "id": "cross-repository-change-coordinator",
+      "group": "engineering"
+    },
+    {
+      "id": "failure-clusterer",
+      "group": "recovery"
+    },
+    {
+      "id": "diagnostic-experiment-designer",
+      "group": "recovery"
+    },
+    {
+      "id": "retry-worthiness-classifier",
+      "group": "recovery"
+    },
+    {
+      "id": "recovery-state-reconstructor",
+      "group": "recovery"
+    },
+    {
+      "id": "blocked-work-resolver",
+      "group": "recovery"
+    },
+    {
+      "id": "escalation-quality-controller",
+      "group": "recovery"
+    },
+    {
+      "id": "experience-to-procedure-compiler",
+      "group": "procedures"
+    },
+    {
+      "id": "procedure-effectiveness-scorer",
+      "group": "procedures"
+    },
+    {
+      "id": "memory-conflict-resolver",
+      "group": "procedures"
+    },
+    {
+      "id": "knowledge-expiration-manager",
+      "group": "procedures"
+    },
+    {
+      "id": "failure-pattern-memory",
+      "group": "procedures"
+    },
+    {
+      "id": "solution-reuse-ranker",
+      "group": "procedures"
+    },
+    {
+      "id": "counterexample-seeker",
+      "group": "procedures"
+    },
+    {
+      "id": "confidence-calibrator",
+      "group": "procedures"
+    },
+    {
+      "id": "economic-value-of-work",
+      "group": "business"
+    },
+    {
+      "id": "resource-budget-planner",
+      "group": "business"
+    },
+    {
+      "id": "quote-margin-guard",
+      "group": "business"
+    },
+    {
+      "id": "revenue-opportunity-ranker",
+      "group": "business"
+    },
+    {
+      "id": "website-maintenance-scope-estimator",
+      "group": "business"
+    },
+    {
+      "id": "service-opportunity-generator",
+      "group": "business"
+    },
+    {
+      "id": "market-demand-validator",
+      "group": "business"
+    },
+    {
+      "id": "competitive-offer-analyzer",
+      "group": "business"
+    },
+    {
+      "id": "service-pricing-engine",
+      "group": "business"
+    },
+    {
+      "id": "proposal-compiler",
+      "group": "business"
+    },
+    {
+      "id": "customer-acceptance-verifier",
+      "group": "business"
+    },
+    {
+      "id": "delivery-evidence-pack-compiler",
+      "group": "business"
+    },
+    {
+      "id": "upsell-opportunity-detector",
+      "group": "business"
+    },
+    {
+      "id": "recurring-revenue-converter",
+      "group": "business"
+    },
+    {
+      "id": "customer-retention-planner",
+      "group": "business"
+    },
+    {
+      "id": "profitability-accountant",
+      "group": "business"
+    },
+    {
+      "id": "business-experiment-evaluator",
+      "group": "business"
+    },
+    {
+      "id": "repeatable-service-productizer",
+      "group": "business"
+    },
+    {
+      "id": "support-intake-triage",
+      "group": "secretary"
+    },
+    {
+      "id": "email-thread-action-extractor",
+      "group": "secretary"
+    },
+    {
+      "id": "commitment-tracker",
+      "group": "secretary"
+    },
+    {
+      "id": "follow-up-detector",
+      "group": "secretary"
+    },
+    {
+      "id": "calendar-intent-parser",
+      "group": "secretary"
+    },
+    {
+      "id": "meeting-preparation-compiler",
+      "group": "secretary"
+    },
+    {
+      "id": "daily-owner-brief",
+      "group": "secretary"
+    },
+    {
+      "id": "decision-register",
+      "group": "secretary"
+    },
+    {
+      "id": "inbox-priority-classifier",
+      "group": "secretary"
+    },
+    {
+      "id": "attachment-action-extractor",
+      "group": "secretary"
+    },
+    {
+      "id": "nico-run-health-diagnoser",
+      "group": "nico"
+    },
+    {
+      "id": "nico-scanner-completeness-validator",
+      "group": "nico"
+    },
+    {
+      "id": "nico-specialist-queue-triage",
+      "group": "nico"
+    },
+    {
+      "id": "nico-review-readiness-validator",
+      "group": "nico"
+    },
+    {
+      "id": "nico-export-integrity-verifier",
+      "group": "nico"
+    },
+    {
+      "id": "nico-bilingual-equivalence-checker",
+      "group": "nico"
+    },
+    {
+      "id": "nico-approval-provenance-verifier",
+      "group": "nico"
+    },
+    {
+      "id": "nico-delivery-readiness-gate",
+      "group": "nico"
+    },
+    {
+      "id": "nico-production-proof-runner",
+      "group": "nico"
+    },
+    {
+      "id": "nico-client-status-compiler",
+      "group": "nico"
+    },
+    {
+      "id": "browser-task-planner",
+      "group": "web"
+    },
+    {
+      "id": "website-state-reader",
+      "group": "web"
+    },
+    {
+      "id": "form-completion-planner",
+      "group": "web"
+    },
+    {
+      "id": "web-change-verifier",
+      "group": "web"
+    },
+    {
+      "id": "visual-regression-inspector",
+      "group": "web"
+    },
+    {
+      "id": "checkout-boundary-detector",
+      "group": "web"
+    },
+    {
+      "id": "external-action-risk-classifier",
+      "group": "web"
+    },
+    {
+      "id": "agent-capability-advertisement",
+      "group": "agents"
+    },
+    {
+      "id": "agent-capability-discovery",
+      "group": "agents"
+    },
+    {
+      "id": "agent-task-contract-compiler",
+      "group": "agents"
+    },
+    {
+      "id": "agent-result-verifier",
+      "group": "agents"
+    },
+    {
+      "id": "agent-reputation-ledger",
+      "group": "agents"
+    },
+    {
+      "id": "agent-work-decomposer",
+      "group": "agents"
+    },
+    {
+      "id": "agent-consensus-evaluator",
+      "group": "agents"
+    },
+    {
+      "id": "goal-to-work-queue-compiler",
+      "group": "self-management"
+    },
+    {
+      "id": "priority-rebalancer",
+      "group": "self-management"
+    },
+    {
+      "id": "stop-loss-controller",
+      "group": "self-management"
+    },
+    {
+      "id": "idle-value-selector",
+      "group": "self-management"
+    },
+    {
+      "id": "unfinished-work-reconciler",
+      "group": "self-management"
+    },
+    {
+      "id": "capability-gap-detector",
+      "group": "self-management"
+    },
+    {
+      "id": "capability-obsolescence-detector",
+      "group": "self-management"
+    }
+  ]
+}
