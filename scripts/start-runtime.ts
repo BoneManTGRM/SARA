@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 function pathContains(root: string, target: string): boolean {
@@ -27,7 +28,8 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
 } else {
   const { installOwnerDashboardThemeRuntime } = await import("../src/owner-dashboard-theme-runtime.ts");
   installOwnerDashboardThemeRuntime();
-  await import("../src/main.ts");
+  const { kernel, server } = await import("../src/main.ts");
+  if (!server.listening) await once(server, "listening");
 
   const sourceRevision = process.env.RAILWAY_GIT_COMMIT_SHA ?? "";
   const deploymentId = process.env.RAILWAY_DEPLOYMENT_ID ?? "";
@@ -70,6 +72,15 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
   }
 
   if (/^[a-f0-9]{40}$/u.test(sourceRevision) && /^[A-Za-z0-9-]{8,}$/u.test(deploymentId)) {
+    try {
+      const address = server.address();
+      if (!address || typeof address === "string") throw new Error("TCP_RUNTIME_ADDRESS_REQUIRED");
+      const { runSafeCapabilityRuntimeProof } = await import("../src/digital-capabilities/production-proof.ts");
+      const proof = await runSafeCapabilityRuntimeProof({ kernel, port: address.port, sourceRevision, deploymentId, environment: "PRODUCTION" });
+      console.log(JSON.stringify({ event: "sara_capability_runtime_proof", ...proof }));
+    } catch {
+      console.error(JSON.stringify({ event: "sara_capability_runtime_proof", status: "failed_closed", sourceRevision, deploymentId }));
+    }
     try {
       const { runBoundProductionProceduralReuseProof } = await import("../src/production-procedural-reuse.ts");
       const proof = await runBoundProductionProceduralReuseProof({
