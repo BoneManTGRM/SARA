@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import type {AddressInfo} from 'node:net';
-import {SaraKernel} from '../src/kernel.ts';
+import {legacyLearningRetryFixture} from '../tests/fixtures/legacy-learning-retry.ts';
 import {createSaraServer} from '../src/server.ts';
 import {sha256} from '../src/canonical.ts';
 import {waitForSandboxBrowserEndpoint} from '../src/digital-capabilities/web/sandbox-browser.ts';
@@ -14,10 +14,11 @@ import {installOwnerDashboardThemeRuntime} from '../src/owner-dashboard-theme-ru
 // Isolated product E2E qualification. These credentials belong only to the
 // disposable test kernel. This cannot authenticate a production owner.
 const directory=await mkdtemp(join(tmpdir(),'sara-owner-ui-'));
-const credential='synthetic-isolated-ui-owner';
+const legacy=await legacyLearningRetryFixture();
+const credential=legacy.token;
 installOwnerDashboardThemeRuntime();
-const kernel=await SaraKernel.boot({stateDirectory:join(directory,'state'),ownerTokenSha256:sha256(credential)});
-const server=createSaraServer(kernel,{stateDirectory:join(directory,'state'),ownerTokenSha256:sha256(credential)});
+const kernel=legacy.kernel;
+const server=createSaraServer(kernel,{stateDirectory:legacy.directory,ownerTokenSha256:sha256(credential)});
 await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const chrome=spawn('google-chrome',['--headless=new','--disable-gpu','--disable-background-networking','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${join(directory,'chrome')}`,'about:blank'],{stdio:'ignore',env:{PATH:process.env.PATH,LANG:'en_US.UTF-8'}});
@@ -50,7 +51,8 @@ try{
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
   const goal=width===1280?'Review unfinished work, identify blockers, prioritize obligations, complete the authorized steps, and give me a brief.':'Inspect outstanding tasks and summarize what is stuck';
   await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(goal)};document.querySelector('#owner-work-submit').click()`);
-  await until("document.querySelector('#owner-work-status').textContent==='COMPLETE · VERIFIED_ANALYSIS'");
+  await until("document.querySelector('#owner-work-status').textContent==='BLOCKED · VERIFIED_ANALYSIS'");
+  assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('LEARNING_FRESH_ROOT_RETRY_BUDGET_EXHAUSTED')"),true,'The actual worker boundary must be visible in ordinary activity');
   assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('Recorded cost $0.000000')"),true);
   assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('unfinished-work-reconciler')"),true);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Owner workflow must fit the viewport');
@@ -78,10 +80,11 @@ try{
  const count=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(count,38);
  await evaluate("document.querySelector('#owner-work-submit').click()");await until("!document.querySelector('#owner-work-submit').disabled");
  assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length,count,'Repeated submission must reuse receipts');
- console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:6,executedReceipts:count,durableCommunicationReuse:true,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ assert.equal((await kernel.learningCampaignStatus()).campaign?.reserved,3,'Read-only review must preserve consumed learning reservations');
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:6,executedReceipts:count,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
  socket?.close();chrome.kill('SIGKILL');
  if(chrome.exitCode===null&&chrome.signalCode===null)await Promise.race([new Promise<void>(resolve=>chrome.once('exit',()=>resolve())),delay(1000)]);
- await new Promise<void>(resolve=>server.close(()=>resolve()));await rm(directory,{recursive:true,force:true,maxRetries:3,retryDelay:100});
+ await new Promise<void>(resolve=>server.close(()=>resolve()));await rm(directory,{recursive:true,force:true,maxRetries:3,retryDelay:100});await legacy.cleanup();
 }

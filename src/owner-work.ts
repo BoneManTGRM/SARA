@@ -1,5 +1,6 @@
 import {canonicalJson,sha256} from './canonical.ts';
 import {suppliedReview} from './owner-work-inputs.ts';
+import {learningRetryBudgetBlockers} from './learning-campaign.ts';
 import type {Job,Capability} from './types.ts';
 import type {RevenuePilotJob} from './revenue-pilot.ts';
 import {objectSchema,textSchema,idSchema,snapshotJson,validateSchema,type Json} from './digital-capabilities/schema.ts';
@@ -55,18 +56,22 @@ export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:
  add('solution-reuse-ranker',{taskFamily:workflow,maximumResults:8},[{path:['executionAuthorized'],equals:false}],'Inspect applicable stored procedures before constructing bounded analysis.');
  const briefItems:Json[]=[];
  if(workflow==='unfinished-work'){
+  const retryBlockers=new Map(learningRetryBudgetBlockers(jobs).map(blocker=>[blocker.jobId,blocker]));
   const available=new Set((context.jobCapabilities??[]).filter(c=>c.status==='available').map(c=>c.id));
   const missing=(required:string[],historical:string[])=>context.jobCapabilities?required.filter(id=>!available.has(id)):historical;
   const open=[...jobs.filter(j=>j.status!=='verified').map(j=>({id:j.id,status:j.status,objective:j.workCard.objective,missing:missing(j.workCard.requiredCapabilities,j.workCard.missingCapabilities),obligation:!j.learningCampaignId,sourceId:`kernel:job:${j.id}`,reason:'Existing executor reconciliation and acceptance evidence'})),
    ...revenueJobs.filter(j=>!['delivered','rejected'].includes(j.status)).map(j=>({id:j.id,status:j.status,objective:`${j.plan.serviceId}: ${j.plan.opportunityId}`,missing:missing(j.plan.requiredCapabilities,j.plan.missingCapabilities),obligation:Boolean(j.revenueEvidenceId),sourceId:`kernel:revenue-job:${j.id}`,reason:!j.revenueEvidenceId?'Exact linked payment and fulfillment authority are not recorded.':j.activeLease?'Existing worker holds the role lease; reconcile its receipt before another dispatch.':'Existing revenue executor prerequisites and exact delivery acceptance remain required.'}))];
   if(open.length>100||revenueJobs.length>32){record.blockers.push({subjectId:'work-queue',reason:'Work review exceeds its 100-open-job or 32-accounted-job bound; no records were silently discarded.',missing:['Narrow the work scope.']});return record;}
   if(new Set(open.map(j=>j.id)).size!==open.length){record.blockers.push({subjectId:'work-queue',reason:'Conflicting job identities across existing queues.',missing:['Reconcile exact job identity before execution']});return record;}
-  add('unfinished-work-reconciler',{jobs:open.map(j=>({id:j.id,completed:false,supersededBy:null,externalCompletion:'UNKNOWN',blocked:['failed','blocked','owner_review'].includes(j.status),hasDurableState:true}))},[{path:['newJobsCreated'],equals:0},{path:['historyDeleted'],equals:false}],'Reconcile both existing job queues while retaining unknown external completion and original accounting.');
+  add('unfinished-work-reconciler',{jobs:open.map(j=>({id:j.id,completed:false,supersededBy:null,externalCompletion:'UNKNOWN',blocked:retryBlockers.has(j.id)||['failed','blocked','owner_review'].includes(j.status),hasDurableState:true}))},[{path:['newJobsCreated'],equals:0},{path:['historyDeleted'],equals:false}],'Reconcile both existing job queues while retaining unknown external completion and original accounting.');
   const tasks=open.map(j=>({id:j.id,capabilityId:'unfinished-work-reconciler',dependencies:[],authorityClass:'READ_ONLY',completionCriteria:['Classify existing durable job without dispatching unverified effects'],evidenceRequirements:['Kernel job projection'],input:{jobId:j.id},obligation:j.obligation,score:null,permission:'PERMITTED',prerequisitesSatisfied:true,evidenceSufficient:true}));
   add('priority-rebalancer',{tasks,previousOrder:open.map(j=>j.id),minimumScoreDelta:0,materialFactsChanged:true},[{path:['executionAuthorized'],equals:false}],'Prioritize explicit owner jobs and funded customer obligations ahead of learning and unpaid opportunities. Only review is eligible; ranking grants no fulfillment authority.');
   if(revenueJobs.length)add('profitability-accountant',{authoritativeJobIds:revenueJobs.map(j=>j.id),includeModeledLabor:false},[{path:['basis'],equals:'AUTHORITATIVE_JOB_STATE'},{path:['ledgerChanged'],equals:false}],'Read linked realized revenue and preserved actual role costs from the existing authoritative ledger; quotes and full profitability remain distinct.');
-  for(const j of open){const reason=j.missing.length?`Missing required job capabilities: ${j.missing.join(', ')}.`:`Job remains ${j.status}; ${j.reason}`;
-   record.blockers.push({subjectId:j.id,reason,missing:j.missing.length?j.missing:[j.reason]});
+  for(const j of open){const retry=retryBlockers.get(j.id);
+   const reason=retry?`LEARNING_FRESH_ROOT_RETRY_BUDGET_EXHAUSTED: ${retry.failedRootJobIds.length} failed fresh roots reach the unchanged limit of ${retry.maximumFailedRoots} for this campaign, capability, contract and source job. No further automatic fresh-root attempt is eligible.`:j.missing.length?`Missing required job capabilities: ${j.missing.join(', ')}.`:`Job remains ${j.status}; ${j.reason}`;
+   const missing=retry?[`Retained failed roots: ${retry.failedRootJobIds.join(', ')}. Inspect their evidence and the existing bounded repair path; this review cannot increase the retry limit.`,...j.missing]:j.missing.length?j.missing:[j.reason];
+   record.blockers.push({subjectId:j.id,reason,missing});
+   if(retry)record.fieldProvenance.push({field:`retryBoundary:${j.id}`,kind:'DERIVED',source:`Existing worker rule and durable root jobs: ${retry.failedRootJobIds.join(', ')}`});
    briefItems.push({id:j.id,category:'BLOCKED',summary:`${j.objective.slice(0,900)} — ${reason.slice(0,1000)}`,sourceId:j.sourceId,dueAt:null,status:'OPEN',requiresOwner:false});
   }
  }else{

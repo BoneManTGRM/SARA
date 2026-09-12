@@ -25,3 +25,15 @@ Authority/budget: only existing READ_ONLY/DRAFT_ONLY contracts through the curre
 Failure/recovery: use the existing request identity, audit, plan replay, stop/cancellation and contract-currentness checks. Reused source identity is frozen. Material overflow and ambiguity fail visibly without silently truncating facts. All required source gaps remain BLOCKED even when eligible analysis receipts verify.
 
 Acceptance: actual authenticated owner HTTP requests select the expected recipe and produce exact receipts and visible analysis; unknowns remain unknown, injection cannot create authority, unsupported mixed-domain requests remain restricted, repeated requests do not duplicate execution, retained material is selected only within its original family. RED precedes implementation; full local and exact-head CI/security plus isolated served-browser verification are required before merge. This bounded extension is not full software repair or customer-delivery qualification.
+
+## Exact retry boundary in ordinary work review
+
+Baseline: main `8cd76a03ceb124a698577f7366ae479041008654`, tree `eaafa632932d53f9ddaf67a6464b19206aa8648e`, serving Railway deployment `2e62e2a3-9f94-4a74-a929-8a20560ec5fc`. No newer main changes were found. Owner authentication remains unavailable; no production conversation proof is claimed.
+
+Observed gap: the scheduled learning worker checks the existing three-failed-fresh-root ceiling, but ordinary work review sees only `authorized` status and the kernel execution entrypoint has no equivalent reservation check. The owner must see the actual retry boundary; invoking the kernel through a different supported path must not bypass it.
+
+Contract: reuse one pure predicate for the existing worker, authoritative reservation/dispatch gate, and ordinary work brief. Match exact campaign, capability, frozen contract and source job; exclude child repair attempts. Report actual failed-root identities and the unchanged ceiling. Fresh-root dispatch rechecks current state before a provider call. Preserve existing jobs, consumed reservations, requests, receipts, audit history and all unrelated authority. No higher retry allowance or new standing mandate is authorized.
+
+Failure/recovery: a legacy authorized fresh root that is now over the ceiling remains blocked without spending or generating a replacement. Independently eligible child repair semantics remain unchanged. Interrupted and uncertain external work remains governed by the existing recovery path. Read-only review itself may execute and verify while the underlying job remains blocked.
+
+Acceptance: RED cases for the actual owner brief and direct kernel dispatch on a clearly isolated legacy-state fixture; GREEN uses the same existing limit and exact-subject matching as the scheduler. Verify no new provider calls, reservations, job replacements or audit rewrites. Add exact-identity and child-exemption boundaries. Full local, exact-head CI/security, served-browser and production-state gates remain required; authenticated production owner acceptance remains a separate pending boundary.

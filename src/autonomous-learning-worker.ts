@@ -1,5 +1,5 @@
 import { SARA_PRINCIPAL, type SaraKernel } from "./kernel.ts";
-import { LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY } from "./learning-campaign.ts";
+import { learningRetryBudgetBlockers } from "./learning-campaign.ts";
 import type { CandidateGenerator, Job } from "./types.ts";
 
 /** Existing-runtime queue consumer. It neither creates authority nor promotes code. */
@@ -17,18 +17,7 @@ export class AutonomousLearningWorker {
    * Child repair attempts retain their existing per-root lifecycle.
    */
   private retryBudgetExhausted(jobs: Job[]): boolean {
-    return jobs.some(job => {
-      if (job.status !== "authorized" || !job.learningCampaignId || !job.learningCapabilityId ||
-          !job.learningContractDigest || job.learningParentJobId) return false;
-      const failedRoots = jobs.filter(candidate =>
-        candidate.status === "failed" &&
-        !candidate.learningParentJobId &&
-        candidate.learningCampaignId === job.learningCampaignId &&
-        candidate.learningCapabilityId === job.learningCapabilityId &&
-        candidate.learningContractDigest === job.learningContractDigest &&
-        candidate.learningSourceJobId === job.learningSourceJobId);
-      return failedRoots.length >= LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY;
-    });
+    return learningRetryBudgetBlockers(jobs).length>0;
   }
 
   /**

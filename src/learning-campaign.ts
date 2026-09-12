@@ -19,6 +19,19 @@ export const LEARNING_DAILY_RESERVATION_LIMIT = 20;
 export const LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT = 4;
 export const LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY = 3;
 
+/** One exact-subject retry rule shared by scheduler, dispatch and owner review. */
+export function learningFreshRootRetryBlocker(jobs:readonly Job[],job:Job){
+  if(!job.learningCampaignId||!job.learningCapabilityId||!job.learningContractDigest||job.learningParentJobId)return null;
+  const failedRootJobIds=jobs.filter(candidate=>candidate.status==='failed'&&!candidate.learningParentJobId&&
+    candidate.learningCampaignId===job.learningCampaignId&&candidate.learningCapabilityId===job.learningCapabilityId&&
+    candidate.learningContractDigest===job.learningContractDigest&&candidate.learningSourceJobId===job.learningSourceJobId).map(candidate=>candidate.id).sort();
+  return failedRootJobIds.length>=LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY?
+    {jobId:job.id,failedRootJobIds,maximumFailedRoots:LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY}:null;
+}
+export function learningRetryBudgetBlockers(jobs:readonly Job[]){
+  return jobs.filter(job=>job.status==='authorized').flatMap(job=>{const blocker=learningFreshRootRetryBlocker(jobs,job);return blocker?[blocker]:[];});
+}
+
 /** Owner-frozen data, never a producer-supplied acceptance oracle. */
 export function compileLearningCampaign(input: LearningCampaignInput): LearningCampaign {
   if (!input || typeof input !== "object" || Object.keys(input).sort().join() !== "contracts,id,maximumRequests" ||

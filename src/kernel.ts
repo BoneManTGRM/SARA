@@ -19,7 +19,7 @@ import type { CapabilityInvocation, CapabilityResult, ExecutionContext } from ".
 import { assertLearnedCapabilityActive, compileLearnedCapabilityControl, learnedCapabilityControl,
   learnedControlTarget,
   type LearnedCapabilityControlInput, type LearnedCapabilityControlRequest } from "./capability-control.ts";
-import { compileLearningCampaign, compileLearningCampaignCapacityExtension, currentLearningCampaign, campaignAccounting, learningContractDigest, LEARNING_DAILY_RESERVATION_LIMIT, LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT, selectLearningGap, type LearningCampaignInput } from "./learning-campaign.ts";
+import { learningRetryBudgetBlockers, learningFreshRootRetryBlocker, compileLearningCampaign, compileLearningCampaignCapacityExtension, currentLearningCampaign, campaignAccounting, learningContractDigest, LEARNING_DAILY_RESERVATION_LIMIT, LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT, selectLearningGap, type LearningCampaignInput } from "./learning-campaign.ts";
 import { qualifyLearningArtifact, executeLearningArtifact, qualificationEnvironmentDigest } from "./learning-qualification.ts";
 import { maintenanceJobs, maintenanceRequestDigest, validateMaintenanceRequest, type MaintenanceRequest, type MaintenanceJob } from "./website-maintenance.ts";
 import { KernelBuildQueue } from "./kernel-build-queue.ts";
@@ -3035,6 +3035,7 @@ export class SaraKernel {
     const reservation = await this.serializeMutation(async () => {
       const state = await this.state();
       if (state.emergencyStopped) return null;
+      if (learningRetryBudgetBlockers(state.jobs).length) return null;
       const now = new Date().toISOString();
       const reservations = state.events.filter(event => event.type === "autonomous_learning_reserved");
       const campaign = currentLearningCampaign(state.events);
@@ -3210,6 +3211,7 @@ export class SaraKernel {
                 (event.data as {attempt?:number}).attempt === attempt);
               if (priorStart) throw new Error("LEARNING_PROVIDER_CALL_ALREADY_STARTED");
               const job = current.jobs.find(candidate => candidate.id === reservation.jobId);
+              if (job && learningFreshRootRetryBlocker(current.jobs,job)) throw new Error("LEARNING_FRESH_ROOT_RETRY_BUDGET_EXHAUSTED");
               await this.#store.append("learning_provider_call_started", SARA_PRINCIPAL, {
                 jobId:reservation.jobId,campaignId:job?.learningCampaignId ?? null,contractDigest:job?.learningContractDigest ?? null,
                 attempt,sameReservation:true,
