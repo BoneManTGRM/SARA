@@ -1,5 +1,6 @@
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { platformAutomationPolicy, type CommercialPlatform } from "./platform-policy.ts";
+import {enforceEffectBoundary} from './effect-boundary.ts';
 
 export const ROUTINE_ACTION_KINDS = [
   "opportunity_research",
@@ -220,7 +221,11 @@ export function evaluateRoutineAction(input: {
   if ((input.activeActions ?? 0) >= mandate.maximumConcurrentActions) {
     return finish("owner_approval", "CONCURRENCY_LIMIT", "The standing mandate concurrency limit has been reached.");
   }
-  return finish("automatic", "MANDATE_ALLOWED", "The routine action is inside the active owner-issued standing mandate.");
+  const gate=enforceEffectBoundary({action:request.kind,target:request.targetId,external:request.external,emergencyStopped:input.emergencyStopped,
+    effect:ROUTINE_ACTION_KINDS.includes(request.kind as RoutineActionKind)?'EXTERNAL':'UNKNOWN',
+    decision:{allowed:true,code:'MANDATE_ALLOWED',reason:'The routine action is inside the active owner-issued standing mandate.'},
+    authority:'EXACT_MANDATE',authorityIdentity:mandate.digest,cost:request.estimatedCostUsd,credentials:false});
+  return finish(gate.allowed?'automatic':'deny',gate.code,gate.reason);
 }
 
 export function compileBusinessCandidate(input: BusinessCandidateInput): BusinessCandidate {

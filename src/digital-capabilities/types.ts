@@ -27,6 +27,7 @@ export type ExecutionContext = {
   controls:Json[];policyDecision:{allowed:boolean;code:string;reason:string};
   benchmark:(ids:string[])=>Promise<Json>;
   serviceCapabilityEvidence?:readonly ServiceCapabilityEvidence[];
+  priorCapabilityResults?:readonly CapabilityResult[];
 };
 export type ServiceCapabilityEvidence = {
   id:string;contractDigest:string;qualifiedEnabled:boolean;procedureEvidenceDigests:string[];

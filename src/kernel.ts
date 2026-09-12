@@ -1,4 +1,5 @@
 import { capabilityContract, capabilityContracts, capabilityDefinition, benchmarkCapabilities } from "./digital-capabilities/registry.ts";
+import {enforceEffectBoundary} from './effect-boundary.ts';
 import { serviceCapabilityEvidence } from "./digital-capabilities/service-readiness.ts";
 import { normalizeSuppliedEvidence } from "./digital-capabilities/evidence.ts";
 import { capabilityResult } from "./digital-capabilities/receipt.ts";
@@ -1064,9 +1065,9 @@ export class SaraKernel {
   ): Promise<RevenuePaymentIntent> {
     return this.serializeMutation(async () => {
       await this.authorize(principal, {
-        action: "external_write",
+        action: "sandbox_development",
         targetId: `revenue-payment-intent:${input.id}`,
-        external: true,
+        external: false,
       });
       const state = await this.state();
       const existing = state.revenuePaymentIntents.find((candidate) => candidate.id === input.id);
@@ -1395,7 +1396,7 @@ export class SaraKernel {
   accessRevenueDelivery(id: string, secret: string): Promise<{ job: RevenuePilotJob; delivery: RevenueDelivery }> {
     return this.serializeMutation(async () => {
       await this.authorize(SARA_PRINCIPAL, {
-        action: "external_write",
+        action: "external_read",
         targetId: `revenue-delivery:${id}:download`,
         external: true,
       });
@@ -1602,7 +1603,7 @@ export class SaraKernel {
     job: RevenuePilotJob;
   }> {
     await this.authorize(principal, {
-      action: "external_write",
+      action: "external_read",
       targetId: `revenue-pilot:${input.jobId}:model-worker`,
       external: true,
     });
@@ -1646,6 +1647,17 @@ export class SaraKernel {
 
     let execution;
     try {
+      await this.serializeMutation(async()=>{
+        const current=await this.state();
+        const funded=current.revenuePilotJobs.find(candidate=>candidate.id===job.id);
+        const gate=enforceEffectBoundary({action:'funded_model_generation',target:`${job.id}:${input.leaseId}`,external:true,
+          emergencyStopped:current.emergencyStopped,effect:'EXTERNAL',authority:'EXACT_FUNDED_JOB',
+          authorityIdentity:funded?.revenueEvidenceId??null,cost:input.maximumTaskCostUsd,credentials:true,
+          decision:{allowed:Boolean(funded?.status==='running'&&funded.activeLease?.id===input.leaseId&&Date.parse(funded.activeLease.expiresAt)>Date.now()),
+            code:'FUNDED_JOB_LEASE',reason:'The existing funded job and exact active role lease are required.'}});
+        await this.#store.append('policy_decision',principal,{request:{action:'funded_model_generation',targetId:`${job.id}:${input.leaseId}`,external:true},decision:gate});
+        if(!gate.allowed)throw new PolicyDeniedError(gate,'funded_model_generation');
+      });
       execution = await executeWorkerModelTask(modelPlan, input.prompt, input.clients);
     } catch (error) {
       if (!(error instanceof WorkerModelExecutionError)) throw error;
@@ -2285,6 +2297,7 @@ export class SaraKernel {
             const prior=(event.data as {result:CapabilityResult}).result;
             const {resultDigest,...unsigned}=prior;
             if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError("Referenced capability receipt failed its content digest.");
+            context.priorCapabilityResults=[...(context.priorCapabilityResults??[]),structuredClone(prior)];
             evidence.push({id:sha256(canonicalJson({receiptId:event.id,resultDigest})),sourceId:`kernel:capability:${prior.capability.id}`,
               contentDigest:resultDigest,provenance:"LOCAL",claimedProvenance:null,authoritySource:false,subject:prior.subject,
               capturedAt:event.occurredAt,claims:[`capability:${prior.capability.id}:${prior.status}`],integrity:"KERNEL_RECEIPT",receiptId:event.id});
