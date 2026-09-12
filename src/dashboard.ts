@@ -500,6 +500,9 @@ export const DASHBOARD_HTML = `<!doctype html>
     .commerce-row strong { color: #d9f4ff; overflow-wrap: anywhere; }
     .commerce-row small { color: #7491a3; font: .61rem/1.5 var(--mono); overflow-wrap: anywhere; }
     .commerce-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    .commerce-expense-form { display: grid; gap: 8px; width: 100%; min-width: 0; }
+    .commerce-expense-form input, .commerce-expense-form select { width: 100%; min-width: 0; max-width: 100%; }
+    .commerce-actions details { min-width: 0; max-width: 100%; }
     .commerce-link { color: var(--cyan-soft); overflow-wrap: anywhere; }
 
     .directive-card { min-height: 310px; border-left-color: var(--cyan); background: linear-gradient(120deg, rgba(9,38,61,.88), rgba(6,22,38,.92) 45%, rgba(5,15,27,.96)); }
@@ -1045,6 +1048,24 @@ export const DASHBOARD_HTML = `<!doctype html>
             } catch (error) { setMessage(error.message, true); }
           }));
         }
+        if(job){
+          const costs=document.createElement('details'),summary=document.createElement('summary');summary.textContent='Record an actual expense';costs.append(summary);
+          const form=document.createElement('form');form.className='commerce-expense-form';
+          const category=document.createElement('select');category.setAttribute('aria-label','Expense category');
+          for(const [value,label] of [['DIRECT_EXTERNAL','Execution, evidence, payment fee or delivery cost'],['MODEL_API','Model invoice for unreconciled role receipts'],['ALLOCATION','Allocated hosting or tooling cost'],['REFUND','Refund already issued']]){const option=document.createElement('option');option.value=value;option.textContent=label;category.append(option);}
+          const amount=document.createElement('input');amount.type='number';amount.min='0';amount.step='0.01';amount.required=true;amount.setAttribute('aria-label','Actual cash amount in USD');amount.placeholder='Actual USD amount';
+          const evidence=document.createElement('input');evidence.required=true;evidence.maxLength=128;evidence.setAttribute('aria-label','Invoice or receipt reference');evidence.placeholder='Invoice or receipt reference';
+          const submit=document.createElement('button');submit.type='submit';submit.className='button';submit.textContent='Record incurred cost';
+          const note=document.createElement('p');note.textContent='Records an owner-attested past expense for this exact job. No payment or refund is sent. Unrecorded costs remain unknown.';
+          form.append(category,amount,evidence,submit);costs.append(note,form);actions.append(costs);
+          form.addEventListener('submit',async(event)=>{event.preventDefault();submit.disabled=true;try{
+            const response=await fetch('/api/revenue-pilot/jobs/'+encodeURIComponent(job.id)+'/accounting',{headers:auth(),signal:AbortSignal.timeout(30000)});if(!response.ok)throw new Error('Current job accounting could not be read.');const scope=await response.json();
+            const value=Number(amount.value),reference=evidence.value.trim();
+            if(!window.confirm('Record already-incurred USD '+value.toFixed(2)+' for job '+job.id+' with reference '+reference+'? This attests a financial record; it does not send money.'))return;
+            await ownerPost('/api/revenue-pilot/jobs/'+encodeURIComponent(job.id)+'/accounting',{expectedScopeDigest:scope.scopeDigest,category:category.value,amountUsd:value,evidenceRef:reference});
+            setMessage('Actual expense recorded. Review the earning path to see the updated job contribution.');await loadPrivateState();
+          }catch(error){setMessage(error.message,true);}finally{submit.disabled=false;}});
+        }
         row.append(title, detail, actions);
         container.append(row);
       });
@@ -1210,7 +1231,7 @@ export const DASHBOARD_HTML = `<!doctype html>
         const progress = document.createElement('p'); progress.textContent = 'Workflow: ' + (result.workflow || 'No supported match') + ' · ' + (result.currentStep ? 'Next step: ' + result.currentStep + ' · ' : '') + result.nextAction; article.appendChild(progress);
         for (const receipt of result.receipts) {
           const output = receipt.output || {};
-          const lines = [...(output.commitments || []).map(item => item.statement), ...(output.followUps || []).map(item => item.reason), ...(output.ambiguities || []), ...(output.responseDraft ? [output.responseDraft] : []), ...(output.sections || []).flatMap(section => section.items.map(item => item.summary)), ...(output.basis === 'AUTHORITATIVE_JOB_STATE' ? output.jobs.map(job => job.jobId + ': linked realized revenue $' + (job.realizedRevenueMicroUsd / 1000000).toFixed(6) + '; recorded model and direct costs $' + ((job.modelApiMicroUsd + job.directExternalMicroUsd) / 1000000).toFixed(6)) : []), ...(output.accountingUnknowns || [])];
+          const lines = [...(output.commitments || []).map(item => item.statement), ...(output.followUps || []).map(item => item.reason), ...(output.ambiguities || []), ...(output.responseDraft ? [output.responseDraft] : []), ...(output.sections || []).flatMap(section => section.items.map(item => item.summary)), ...(output.basis === 'AUTHORITATIVE_JOB_STATE' ? output.jobs.map(job => job.jobId + ': linked realized revenue $' + (job.realizedRevenueMicroUsd / 1000000).toFixed(6) + '; recorded model and direct costs $' + ((job.modelApiMicroUsd + job.directExternalMicroUsd) / 1000000).toFixed(6) + '; refunds $' + (job.refundsMicroUsd / 1000000).toFixed(6) + '; allocated costs $' + (job.allocatedMicroUsd / 1000000).toFixed(6) + '; recorded net contribution $' + (job.recordedNetContributionMicroUsd === null ? 'unknown' : (job.recordedNetContributionMicroUsd / 1000000).toFixed(6)) + '; full profit remains unverified') : []), ...(output.accountingUnknowns || [])];
           if (receipt.capability.id === 'bug-reproduction-planner') lines.push('Reproduction plan: ' + output.status + '. Reproduction has not been executed.', ...output.steps.map(step => step.action));
           if (receipt.capability.id === 'root-cause-analyzer') lines.push('Root cause remains unconfirmed. ' + output.nextDiagnostic);
           if (receipt.capability.id === 'quote-margin-guard') lines.push('Quote calculation: ' + output.status + '. Expected cash contribution: ' + (output.contributionMicroUsd === null ? 'unknown' : '$' + (output.contributionMicroUsd / 1000000).toFixed(6)) + '; cash margin: ' + (output.marginPpm === null ? 'unknown' : (output.marginPpm / 10000).toFixed(2) + '%') + '. These are supplied estimates, not realized revenue.');

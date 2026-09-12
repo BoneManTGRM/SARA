@@ -946,6 +946,17 @@ async function handleOwnerRevenueWrite(
     return true;
   }
   const confirmedPaymentApprovalMatch = url.pathname.match(/^\/api\/revenue-pilot\/jobs\/([^/]+)\/approve-fulfillment$/u);
+  const jobAccountingMatch=url.pathname.match(/^\/api\/revenue-pilot\/jobs\/([^/]+)\/accounting$/u);
+  if(jobAccountingMatch&&request.method==='GET'){
+    json(response,200,await kernel.inspectRevenueJobAccounting(owner,decodeURIComponent(jobAccountingMatch[1]!)));return true;
+  }
+  if(jobAccountingMatch&&request.method==='POST'){
+    const body=await readJson(request);
+    const category=boundedText(body.category,3,32,'category');
+    if(!['MODEL_API','DIRECT_EXTERNAL','ALLOCATION','REFUND'].includes(category))throw new Error('Invalid job expense category.');
+    if(typeof body.amountUsd!=='number')throw new Error('Actual cash amount is required.');
+    json(response,200,await kernel.recordRevenueJobExpense(owner,decodeURIComponent(jobAccountingMatch[1]!),{category:category as 'MODEL_API'|'DIRECT_EXTERNAL'|'ALLOCATION'|'REFUND',amountUsd:body.amountUsd,evidenceRef:boundedText(body.evidenceRef,1,128,'evidenceRef'),expectedScopeDigest:boundedText(body.expectedScopeDigest,64,64,'expectedScopeDigest')}));return true;
+  }
   if (request.method === "POST" && confirmedPaymentApprovalMatch) {
     const jobId = decodeURIComponent(confirmedPaymentApprovalMatch[1]!);
     const body = await readJson(request);
