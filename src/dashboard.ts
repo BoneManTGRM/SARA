@@ -680,8 +680,9 @@ export const DASHBOARD_HTML = `<!doctype html>
               <div class="micro-stats">
                 <div class="micro-stat"><span>Owner funded</span><strong id="owner-cost">—</strong></div>
                 <div class="micro-stat"><span>Jobs</span><strong id="jobs">—</strong></div>
-                <div class="micro-stat"><span>Capabilities</span><strong id="capabilities">—</strong></div>
+                <div class="micro-stat"><span>Digital capabilities</span><strong id="capabilities" aria-describedby="capabilities-note">—</strong></div>
               </div>
+              <p class="card-copy" id="capabilities-note">Owner authentication required.</p>
             </div>
           </article>
 
@@ -901,6 +902,8 @@ export const DASHBOARD_HTML = `<!doctype html>
       directiveFields.disabled = !connected;
       document.querySelector('#learning-fields').disabled = !connected;
       if (!connected) {
+        document.querySelector('#capabilities').textContent = '—';
+        document.querySelector('#capabilities-note').textContent = 'Owner authentication required.';
         reviewedLearning = null; reviewedLearningCapacity = null; ownerMandate = null;
         document.querySelector('#learning-contract').value = '';
         document.querySelector('#learning-review').textContent = '';
@@ -1174,6 +1177,32 @@ export const DASHBOARD_HTML = `<!doctype html>
       } catch(error) { setMessage(error.message,true); }
     });
 
+    async function refreshCapabilityInventory(revenueServiceCount) {
+      const count = document.querySelector('#capabilities');
+      const note = document.querySelector('#capabilities-note');
+      count.textContent = '—';
+      note.textContent = 'Loading capability inventory…';
+      try {
+        const response = await fetch('/api/capability-contracts', { headers: auth() });
+        if (response.status === 401) {
+          setConnected(false);
+          throw new Error('Owner token was not accepted.');
+        }
+        if (!response.ok) throw new Error('Inventory unavailable.');
+        const contracts = await response.json();
+        if (!Array.isArray(contracts) || contracts.some((c) => !c || typeof c.id !== 'string'
+          || typeof c.status !== 'string' || typeof c.maturity !== 'string'
+          || typeof c.qualification?.status !== 'string')
+          || new Set(contracts.map((c) => c.id)).size !== contracts.length) throw new Error('Invalid inventory.');
+        count.textContent = String(contracts.filter((c) => c.status === 'ENABLED'
+          && c.maturity === 'QUALIFIED' && c.qualification.status === 'PASSED').length);
+        note.textContent = 'Enabled · ' + contracts.length + ' registered · ' + revenueServiceCount + ' revenue services';
+      } catch (error) {
+        if (body.dataset.owner !== 'connected') throw error;
+        note.textContent = 'Digital capability inventory unavailable. Refresh to retry.';
+      }
+    }
+
     async function loadPrivateState() {
       const response = await fetch('/api/status', { headers: auth() });
       if (!response.ok) {
@@ -1189,7 +1218,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       document.querySelector('#operating-copy').textContent = state.emergencyStopped ? 'Constitutional stop is active. Protected reads and recovery remain available.' : 'The verified kernel is available inside its current authority boundary.';
       document.querySelector('#owner-cost').textContent = money(state.ownerFundedRecurringMonthlyUsd);
       document.querySelector('#jobs').textContent = String(state.jobs.length);
-      document.querySelector('#capabilities').textContent = String(state.capabilities.length);
+      await refreshCapabilityInventory(state.capabilities.length);
       document.querySelector('#compound-reserve').textContent = money(state.availableCompoundReserveUsd);
       document.querySelector('#constitution').textContent = 'Verified · v' + state.constitution.version;
       document.querySelector('#digest').textContent = state.constitution.digest;
