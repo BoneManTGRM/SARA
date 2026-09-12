@@ -17,4 +17,6 @@ jobs:
       - run: node scripts/build-native-checker.mjs
       - name: Qualify actual sandboxed browser
         run: node --import tsx src/digital-capabilities/web/browser-qualification.ts
+      - name: Qualify actual owner conversation on desktop and mobile
+        run: node --import tsx scripts/qualify-owner-conversation-ui.ts
       - run: npm run verify

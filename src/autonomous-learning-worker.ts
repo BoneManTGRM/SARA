@@ -76,6 +76,8 @@ export class AutonomousLearningWorker {
     if (this.running) return {status:"blocked" as const};
     this.running = true;
     try {
+      await this.kernel.resumeOwnerWorkTick();
+      await this.kernel.diagnoseLearningWorkEvent();
       const state = await this.kernel.getStatus();
       if (this.retryBudgetExhausted(state.jobs)) {
         const result = {status:"blocked" as const};

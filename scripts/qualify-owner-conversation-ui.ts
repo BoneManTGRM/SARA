@@ -1,0 +1,67 @@
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {setTimeout as delay} from 'node:timers/promises';
+import type {AddressInfo} from 'node:net';
+import {SaraKernel} from '../src/kernel.ts';
+import {createSaraServer} from '../src/server.ts';
+import {sha256} from '../src/canonical.ts';
+import {waitForSandboxBrowserEndpoint} from '../src/digital-capabilities/web/sandbox-browser.ts';
+
+// Isolated product E2E qualification. These credentials belong only to the
+// disposable test kernel. This cannot authenticate a production owner.
+const directory=await mkdtemp(join(tmpdir(),'sara-owner-ui-'));
+const credential='synthetic-isolated-ui-owner';
+const kernel=await SaraKernel.boot({stateDirectory:join(directory,'state'),ownerTokenSha256:sha256(credential)});
+const server=createSaraServer(kernel,{stateDirectory:join(directory,'state'),ownerTokenSha256:sha256(credential)});
+await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+const origin=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+const chrome=spawn('google-chrome',['--headless=new','--disable-gpu','--disable-background-networking','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${join(directory,'chrome')}`,'about:blank'],{stdio:'ignore',env:{PATH:process.env.PATH,LANG:'en_US.UTF-8'}});
+let launchError:Error|undefined;chrome.on('error',e=>{launchError=e;});
+let socket:WebSocket|undefined;
+try{
+ const endpoint=await waitForSandboxBrowserEndpoint({read:()=>readFile(join(directory,'chrome','DevToolsActivePort'),'utf8'),alive:()=>!launchError&&chrome.exitCode===null&&chrome.signalCode===null,now:()=>performance.now(),pause:delay});
+ socket=new WebSocket(`ws://127.0.0.1:${endpoint.port}${endpoint.path}`);
+ await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Chrome connection timed out')),5000);socket!.addEventListener('open',()=>{clearTimeout(timer);resolve();},{once:true});socket!.addEventListener('error',()=>{clearTimeout(timer);reject(new Error('Chrome connection failed'));},{once:true});});
+ let next=0;const pending=new Map<number,{resolve:(value:any)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();let sessionId:string|undefined;
+ const send=(method:string,params:Record<string,unknown>={},session=sessionId):Promise<any>=>new Promise((resolve,reject)=>{const id=++next;const timer=setTimeout(()=>{pending.delete(id);reject(new Error(`Browser command timed out: ${method}`));},15000);pending.set(id,{resolve,reject,timer});socket!.send(JSON.stringify({id,method,params,...(session?{sessionId:session}:{})}));});
+ socket.addEventListener('message',event=>{const m=JSON.parse(String(event.data));if(m.id){const p=pending.get(m.id);if(!p)return;clearTimeout(p.timer);pending.delete(m.id);m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}else if(m.method==='Fetch.requestPaused'){
+   const url=String(m.params.request.url);void send(url.startsWith(origin+'/')?'Fetch.continueRequest':'Fetch.failRequest',{requestId:m.params.requestId,...(url.startsWith(origin+'/')?{}:{errorReason:'BlockedByClient'})},m.sessionId).catch(()=>{});
+ }});
+ const target=await send('Target.createTarget',{url:'about:blank'});
+ sessionId=(await send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
+ await send('Page.enable');await send('Runtime.enable');await send('Fetch.enable',{patterns:[{urlPattern:'*'}]});
+ const evaluate=async(expression:string)=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error('Owner UI script exception');return r.result.value;};
+ const until=async(expression:string)=>{const deadline=performance.now()+20000;while(performance.now()<deadline){if(await evaluate(expression))return;await delay(100);}throw new Error('Owner UI acceptance timed out');};
+ await send('Page.navigate',{url:origin});await until("Boolean(document.querySelector('#owner-work-text'))");
+ assert.equal(await evaluate("document.querySelector('#owner-work-fields').disabled"),true);
+ assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received').length,0);
+ await evaluate("document.querySelector('#connect').click()");
+ await until("document.querySelector('#owner-dialog').open");
+ await evaluate(`document.querySelector('#token').value=${JSON.stringify(credential)};document.querySelector('#owner-form button[type=submit]').click()`);
+ await until("document.body.dataset.owner==='connected' && !document.querySelector('#owner-work-fields').disabled");
+ const screenshots:string[]=[];
+ for(const width of [1280,390]){
+  await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+  const goal=width===1280?'Review unfinished work, identify blockers, prioritize obligations, complete the authorized steps, and give me a brief.':'Inspect outstanding tasks and summarize what is stuck';
+  await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(goal)};document.querySelector('#owner-work-submit').click()`);
+  await until("document.querySelector('#owner-work-status').textContent==='COMPLETE · VERIFIED_ANALYSIS'");
+  assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('Recorded cost $0.000000')"),true);
+  assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('unfinished-work-reconciler')"),true);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Owner workflow must fit the viewport');
+  await evaluate("document.querySelector('#owner-work-form').scrollIntoView()");
+  const shot=await send('Page.captureScreenshot',{format:'png'});screenshots.push(sha256(Buffer.from(shot.data,'base64')));
+ }
+ const received=(await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received');assert.equal(received.length,2);
+ const count=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(count,10);
+ await evaluate("document.querySelector('#owner-work-submit').click()");await until("!document.querySelector('#owner-work-submit').disabled");
+ assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length,count,'Repeated submission must reuse receipts');
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard',viewports:[1280,390],ordinaryRequests:2,executedReceipts:count,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
+}finally{
+ socket?.close();chrome.kill('SIGKILL');
+ if(chrome.exitCode===null&&chrome.signalCode===null)await Promise.race([new Promise<void>(resolve=>chrome.once('exit',()=>resolve())),delay(1000)]);
+ await new Promise<void>(resolve=>server.close(()=>resolve()));await rm(directory,{recursive:true,force:true,maxRetries:3,retryDelay:100});
+}
