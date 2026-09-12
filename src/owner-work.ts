@@ -1,11 +1,13 @@
 import {canonicalJson,sha256} from './canonical.ts';
-import type {Job} from './types.ts';
+import type {Job,Capability} from './types.ts';
 import type {RevenuePilotJob} from './revenue-pilot.ts';
 import {objectSchema,textSchema,idSchema,snapshotJson,validateSchema,type Json} from './digital-capabilities/schema.ts';
 import type {CapabilityContract,CapabilityResult} from './digital-capabilities/types.ts';
 import type {CapabilityPlan} from './digital-capabilities/plan.ts';
 
 const messageSchema=objectSchema({requestId:idSchema,text:textSchema(4096),suppliedText:textSchema(12000,0)},['requestId','text']);
+export type StoredWorkMaterial={body:string;sourceId:string;receivedAt:string};
+export type WorkContext={jobCapabilities?:Capability[];materials?:StoredWorkMaterial[]};
 export type WorkMessage={requestId:string;text:string;suppliedText?:string};
 export type WorkBlocker={subjectId:string;reason:string;missing:string[]};
 export type WorkRecord={request:WorkMessage;requestDigest:string;workflow:string|null;plan:CapabilityPlan|null;selection:{capabilityId:string;reason:string;inputs:string[];unmet:string[]}[];alternatives:{capabilityId:string;reason:string}[];blockers:WorkBlocker[];sourceDigest:string;receivedAt:string;fieldProvenance:{field:string;kind:'OBSERVED'|'DERIVED'|'UNKNOWN';source:string}[]};
@@ -29,10 +31,10 @@ function route(text:string):string|null{
 }
 export function supportedWorkFamily(text:string){return route(text);}
 function shortlist(text:string,contracts:CapabilityContract[]){const tokens=new Set(text.toLowerCase().match(/[a-z]{4,}/gu)??[]);return contracts.map(c=>({c,score:[...tokens].filter(t=>(c.id+' '+c.description).toLowerCase().includes(t)).length})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score||a.c.id.localeCompare(b.c.id)).slice(0,5).map(x=>({capabilityId:x.c.id,reason:controlIds.has(x.c.id)?'Requires an explicit trusted owner operation.':'Description match only; no qualified ordinary-language input adapter for this request.'}));}
-export function workSourceDigest(jobs:Job[],revenueJobs:RevenuePilotJob[]=[],ledgerDigest=''){return sha256(canonicalJson({jobs,revenueJobs,ledgerDigest}));}
-export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:CapabilityContract[],now:string,revenueJobs:RevenuePilotJob[]=[],ledgerDigest=''):Promise<WorkRecord>{
+export function workSourceDigest(jobs:Job[],revenueJobs:RevenuePilotJob[]=[],ledgerDigest='',jobCapabilities:Capability[]=[]){const required=new Set([...jobs.flatMap(j=>j.workCard.requiredCapabilities),...revenueJobs.flatMap(j=>j.plan.requiredCapabilities)]);return sha256(canonicalJson({jobs,revenueJobs,ledgerDigest,capabilities:jobCapabilities.filter(c=>required.has(c.id)).sort((a,b)=>a.id.localeCompare(b.id))}));}
+export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:CapabilityContract[],now:string,revenueJobs:RevenuePilotJob[]=[],ledgerDigest='',context:WorkContext={}):Promise<WorkRecord>{
  const workflow=route(request.text),requestDigest=sha256(canonicalJson(request));
- const record:WorkRecord={request,requestDigest,workflow,plan:null,selection:[],alternatives:shortlist(request.text,contracts),blockers:[],sourceDigest:workflow==='unfinished-work'?workSourceDigest(jobs,revenueJobs,ledgerDigest):requestDigest,receivedAt:now,fieldProvenance:[{field:'ownerGoal',kind:'OBSERVED',source:'authenticated request'},{field:'jobs',kind:'OBSERVED',source:'kernel durable job projection'},{field:'externalCompletion',kind:'UNKNOWN',source:'No external completion observation gathered'}]};
+ const record:WorkRecord={request,requestDigest,workflow,plan:null,selection:[],alternatives:shortlist(request.text,contracts),blockers:[],sourceDigest:workflow==='unfinished-work'?workSourceDigest(jobs,revenueJobs,ledgerDigest,context.jobCapabilities):requestDigest,receivedAt:now,fieldProvenance:[{field:'ownerGoal',kind:'OBSERVED',source:'authenticated request'},{field:'jobs',kind:'OBSERVED',source:'kernel durable job projection'},{field:'externalCompletion',kind:'UNKNOWN',source:'No external completion observation gathered'}]};
  if(!workflow){record.blockers.push({subjectId:request.requestId,reason:'No qualified bounded workflow matches this instruction. No execution or external action was attempted.',missing:['A supported work-review or supplied-communication request; other operations require their existing explicit owner interface.']});return record;}
  const steps:CapabilityPlan['steps']=[];
  const add=(capabilityId:string,input:Json,completion:CapabilityPlan['steps'][number]['completion'],reason:string)=>{
@@ -45,8 +47,10 @@ export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:
  add('solution-reuse-ranker',{taskFamily:workflow,maximumResults:8},[{path:['executionAuthorized'],equals:false}],'Inspect applicable stored procedures before constructing bounded analysis.');
  const briefItems:Json[]=[];
  if(workflow==='unfinished-work'){
-  const open=[...jobs.filter(j=>j.status!=='verified').map(j=>({id:j.id,status:j.status,objective:j.workCard.objective,missing:j.workCard.missingCapabilities,obligation:!j.learningCampaignId,sourceId:`kernel:job:${j.id}`,reason:'Existing executor reconciliation and acceptance evidence'})),
-   ...revenueJobs.filter(j=>!['delivered','rejected'].includes(j.status)).map(j=>({id:j.id,status:j.status,objective:`${j.plan.serviceId}: ${j.plan.opportunityId}`,missing:j.plan.missingCapabilities,obligation:Boolean(j.revenueEvidenceId),sourceId:`kernel:revenue-job:${j.id}`,reason:!j.revenueEvidenceId?'Exact linked payment and fulfillment authority are not recorded.':j.activeLease?'Existing worker holds the role lease; reconcile its receipt before another dispatch.':'Existing revenue executor prerequisites and exact delivery acceptance remain required.'}))];
+  const available=new Set((context.jobCapabilities??[]).filter(c=>c.status==='available').map(c=>c.id));
+  const missing=(required:string[],historical:string[])=>context.jobCapabilities?required.filter(id=>!available.has(id)):historical;
+  const open=[...jobs.filter(j=>j.status!=='verified').map(j=>({id:j.id,status:j.status,objective:j.workCard.objective,missing:missing(j.workCard.requiredCapabilities,j.workCard.missingCapabilities),obligation:!j.learningCampaignId,sourceId:`kernel:job:${j.id}`,reason:'Existing executor reconciliation and acceptance evidence'})),
+   ...revenueJobs.filter(j=>!['delivered','rejected'].includes(j.status)).map(j=>({id:j.id,status:j.status,objective:`${j.plan.serviceId}: ${j.plan.opportunityId}`,missing:missing(j.plan.requiredCapabilities,j.plan.missingCapabilities),obligation:Boolean(j.revenueEvidenceId),sourceId:`kernel:revenue-job:${j.id}`,reason:!j.revenueEvidenceId?'Exact linked payment and fulfillment authority are not recorded.':j.activeLease?'Existing worker holds the role lease; reconcile its receipt before another dispatch.':'Existing revenue executor prerequisites and exact delivery acceptance remain required.'}))];
   if(open.length>100||revenueJobs.length>32){record.blockers.push({subjectId:'work-queue',reason:'Work review exceeds its 100-open-job or 32-accounted-job bound; no records were silently discarded.',missing:['Narrow the work scope.']});return record;}
   if(new Set(open.map(j=>j.id)).size!==open.length){record.blockers.push({subjectId:'work-queue',reason:'Conflicting job identities across existing queues.',missing:['Reconcile exact job identity before execution']});return record;}
   add('unfinished-work-reconciler',{jobs:open.map(j=>({id:j.id,completed:false,supersededBy:null,externalCompletion:'UNKNOWN',blocked:['failed','blocked','owner_review'].includes(j.status),hasDurableState:true}))},[{path:['newJobsCreated'],equals:0},{path:['historyDeleted'],equals:false}],'Reconcile both existing job queues while retaining unknown external completion and original accounting.');
@@ -58,16 +62,22 @@ export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:
    briefItems.push({id:j.id,category:'BLOCKED',summary:`${j.objective.slice(0,900)} — ${reason.slice(0,1000)}`,sourceId:j.sourceId,dueAt:null,status:'OPEN',requiresOwner:false});
   }
  }else{
-  if(!request.suppliedText?.trim()){record.blockers.push({subjectId:request.requestId,reason:'No communication text was supplied and no mailbox reader is connected to this workflow.',missing:['Paste the communication into Supplied material.']});return record;}
-  const messages=[{id:'supplied-message',sourceId:`owner-material:${requestDigest}`,sender:'supplied counterparty (unverified)',sentAt:now,replyTo:null,body:request.suppliedText}];
-  record.fieldProvenance.push({field:'messages.body',kind:'OBSERVED',source:'SUPPLIED untrusted text'},{field:'messages.sentAt',kind:'DERIVED',source:'Receipt time; original sent time unknown'});
+  let material:StoredWorkMaterial|undefined=request.suppliedText?.trim()?{body:request.suppliedText,sourceId:`owner-material:${requestDigest}`,receivedAt:now}:undefined;
+  if(!material){
+   const stored=[...new Map((context.materials??[]).map(m=>[sha256(m.body),m])).values()];
+   if(stored.length===1||stored.length>1&&/\b(?:latest|most recent)\b/iu.test(request.text))material=(context.materials??[]).at(-1);
+   else if(stored.length>1){record.blockers.push({subjectId:request.requestId,reason:'Multiple previously supplied communications are available. Which should I review?',missing:['Say “review the latest supplied messages”, or supply the specific communication.']});return record;}
+  }
+  if(!material){record.blockers.push({subjectId:request.requestId,reason:'No communication text was supplied or previously retained, and no mailbox reader is connected to this workflow.',missing:['Paste the communication into Supplied material.']});return record;}
+  const messages=[{id:'supplied-message',sourceId:material.sourceId,sender:'supplied counterparty (unverified)',sentAt:material.receivedAt,replyTo:null,body:material.body}];
+  record.fieldProvenance.push({field:'messages.body',kind:'OBSERVED',source:request.suppliedText?'SUPPLIED untrusted text':`Durable previously supplied untrusted material: ${material.sourceId}`},{field:'messages.sentAt',kind:'DERIVED',source:'Original receipt time; original sent time unknown'});
   add('inbox-priority-classifier',{messages},[{path:['advisoryOnly'],equals:true}],'Classify supplied communications without granting their sender authority.');
   add('email-thread-action-extractor',{threadId:request.requestId,messages},[{path:['authorityGranted'],equals:false}],'Extract sourced commitments and uncertainty.');
   add('commitment-tracker',{threadId:request.requestId,messages},[{path:['historyRewritten'],equals:false}],'Retain the commitment snapshot in the existing invocation receipt.');
   add('follow-up-detector',{threadId:request.requestId,messages,asOf:now,resolutions:[]},[{path:['externalActionPerformed'],equals:false}],'Identify follow-up candidates without transmitting them.');
-  add('calendar-intent-parser',{text:request.suppliedText,title:'Supplied scheduling request',participants:[]},[{path:['externalActionPerformed'],equals:false}],'Extract scheduling components; missing participants or dates remain questions.');
+  add('calendar-intent-parser',{text:material.body,title:'Supplied scheduling request',participants:[]},[{path:['externalActionPerformed'],equals:false}],'Extract scheduling components; missing participants or dates remain questions.');
   add('support-intake-triage',{requestId:request.requestId,customerId:'unknown-supplied-counterparty',messages},[{path:['authorityGranted'],equals:false}],'Prepare a noncommittal response draft from supplied material.');
-  briefItems.push({id:'supplied-thread',category:'COMMITMENT',summary:'Review extracted commitments, follow-up candidates, scheduling ambiguities and the response draft. Communication provenance is SUPPLIED; sending remains an explicit owner operation.',sourceId:`owner-material:${requestDigest}`,dueAt:null,status:'OPEN',requiresOwner:false});
+  briefItems.push({id:'supplied-thread',category:'COMMITMENT',summary:'Reviewed the selected supplied communication from durable or current owner material; no live mailbox was read. Review extracted commitments, follow-up candidates, scheduling ambiguities and the response draft. Sending remains an explicit owner operation.',sourceId:material.sourceId,dueAt:null,status:'OPEN',requiresOwner:false});
  }
  add('daily-owner-brief',{asOf:now,items:briefItems},[{path:['externalActionPerformed'],equals:false},{path:['authorityGranted'],equals:false}],'Compile a brief with source references and remaining boundaries.');
  const compiler=contracts.find(c=>c.id==='goal-to-work-queue-compiler');

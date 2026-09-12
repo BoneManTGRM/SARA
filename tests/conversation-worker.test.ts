@@ -76,6 +76,32 @@ test('secretary conversation executes sourced extraction, draft and briefing wit
  assert.equal((await kernel.getStatus()).jobs.length,0);
 }));
 
+test('secretary retrieves previously supplied durable material and asks a focused question for ambiguous sources',()=>fixture(async({request})=>{
+ const goal='Review these communications and prepare a brief.';
+ await request({requestId:'stored-material-one',text:goal,suppliedText:'I will provide the draft by 2026-10-01.'});
+ const reused=await (await request({requestId:'reuse-material',text:goal})).json() as any;
+ assert.equal(reused.status,'COMPLETE');assert.equal(reused.receipts.length,9);assert.ok(reused.fieldProvenance.some((p:any)=>p.source.includes('previously supplied')));
+ await request({requestId:'stored-material-two',text:goal,suppliedText:'I will review the document by 2026-10-03.'});
+ const ambiguous=await (await request({requestId:'ambiguous-material',text:goal})).json() as any;assert.equal(ambiguous.status,'BLOCKED');assert.match(ambiguous.blockers[0].reason,/multiple/i);
+ const latest=await (await request({requestId:'latest-material',text:'Review the latest supplied messages and prepare a brief.'})).json() as any;
+ assert.equal(latest.status,'COMPLETE');assert.ok(JSON.stringify(latest.receipts).includes('2026-10-03'));
+ await request({requestId:'stored-material-repeated',text:goal,suppliedText:'I will provide the draft by 2026-10-01.'});
+ const repeated=await (await request({requestId:'latest-repeated-material',text:'Review the latest supplied messages and prepare a brief.'})).json() as any;
+ assert.ok(JSON.stringify(repeated.receipts).includes('2026-10-01'));assert.ok(!JSON.stringify(repeated.receipts).includes('2026-10-03'),'Latest refers to the latest source, including a repeated body');
+}));
+
+test('current job capability readiness replaces historical missing-capability snapshots and invalidates only relevant work sources',()=>fixture(async({kernel,request})=>{
+ const owner=kernel.authenticateOwnerToken(token);
+ const job=await kernel.createSelfDevelopmentJob(owner,{objective:'Controlled readiness change',expectedOwnerValue:1,requiredCapabilities:['controlled-ready-skill'],acceptanceCriteria:['Verified output'],maximumBudgetUsd:0});
+ const body={requestId:'before-ready',text};await request(body);
+ await kernel.registerCapability(owner,{id:'unrelated-skill',name:'Unrelated synthetic skill',status:'available',evidence:['synthetic-only'],limitations:[]});
+ assert.equal((await (await request(body)).json() as any).verification,'VERIFIED_ANALYSIS','Unrelated registration must not invalidate the work source');
+ await kernel.registerCapability(owner,{id:'controlled-ready-skill',name:'Controlled synthetic skill',status:'available',evidence:['synthetic-only'],limitations:[]});
+ assert.equal((await (await request(body)).json() as any).verification,'HISTORICAL_ANALYSIS');
+ const fresh=await (await request({requestId:'after-ready',text})).json() as any;
+ assert.ok(!fresh.blockers.find((b:any)=>b.subjectId===job.id).missing.includes('controlled-ready-skill'));
+}));
+
 test('restart and concurrent duplicate requests retain frozen inputs and exact receipts',()=>fixture(async({kernel,directory,request})=>{
  const body={requestId:'restart-review-1',text};
  const responses=await Promise.all([request(body),request(body)]);

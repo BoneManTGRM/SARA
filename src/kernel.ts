@@ -2271,14 +2271,15 @@ export class SaraKernel {
       const prior=state.events.find(e=>e.type==='owner_work_received'&&e.actor.id===principal.id&&(e.data as WorkRecord).request.requestId===request.requestId);
       if(prior){const saved=prior.data as WorkRecord;if(saved.requestDigest!==requestDigest)throw new Error('OWNER_WORK_REQUEST_CONFLICT');return structuredClone(saved);}
       await this.authorize(principal,{action:'record_memory',targetId:`owner-work:${request.requestId}`,external:false});
-      const compiled=await compileOwnerWork(request,state.jobs,await capabilityContracts(),new Date().toISOString(),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)));
+      const materials=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord).filter(r=>r.request.suppliedText?.trim()).map(r=>({body:r.request.suppliedText!,sourceId:`owner-material:${r.requestDigest}`,receivedAt:r.receivedAt}));
+      const compiled=await compileOwnerWork(request,state.jobs,await capabilityContracts(),new Date().toISOString(),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),{jobCapabilities:state.capabilities,materials});
       await this.#store.append('owner_work_received',principal,compiled);
       return compiled;
     });
     return this.continueBoundedWork(record);
   }
 
-  private async currentWorkSourceDigest(){const state=await this.state();return workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)));}
+  private async currentWorkSourceDigest(){const state=await this.state();return workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities);}
 
   private async continueBoundedWork(record:WorkRecord,maximumSteps=16) {
     // Only an immutable request admitted by an authenticated owner/bridge can
@@ -2293,7 +2294,7 @@ export class SaraKernel {
     const receipts=state.events.filter(e=>e.type==='digital_capability_executed'&&e.actor.id===SARA_PRINCIPAL.id).map(e=>(e.data as {result:CapabilityResult}).result).filter(r=>requestIds.has(r.requestId));
     const result=workResult(record,execution,receipts);
     if(state.emergencyStopped){result.status='BLOCKED';result.verification='NOT_VERIFIED';result.blockers.push({subjectId:request.requestId,reason:'EMERGENCY_STOP',missing:['Existing trusted stop restoration']});}
-    if(record.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of the changed durable work']});}
+    if(record.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of the changed durable work']});}
     if(await cancelled()){result.status='CANCELLED';result.verification='NOT_VERIFIED';result.outputText='Cancelled. Historical executed-step evidence is preserved.';}
     await this.serializeMutation(async()=>{const current=await this.state();const digest=sha256(canonicalJson(result));
       if(!current.events.some(e=>e.type==='owner_work_result'&&(e.data as {digest:string}).digest===digest))await this.#store.append('owner_work_result',SARA_PRINCIPAL,{digest,result});});
@@ -2311,7 +2312,7 @@ export class SaraKernel {
       if(e.type==='owner_work_result'){const result=(e.data as {result:ReturnType<typeof workResult>}).result;latest.set(result.requestId,result);}}
     const records=new Map(state.events.filter(e=>e.type==='owner_work_received').map(e=>[(e.data as WorkRecord).request.requestId,e.data as WorkRecord]));
     return [...latest.values()].slice(-25).reverse().map(stored=>{const result=structuredClone(stored),record=records.get(result.requestId);
-      if(record?.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';if(!result.blockers.some(b=>b.reason==='WORK_SOURCE_CHANGED'))result.blockers.push({subjectId:result.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of changed durable work']});}
+      if(record?.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';if(!result.blockers.some(b=>b.reason==='WORK_SOURCE_CHANGED'))result.blockers.push({subjectId:result.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of changed durable work']});}
       if(state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===result.requestId)){result.status='CANCELLED';result.verification='NOT_VERIFIED';}
       return result;});
   }

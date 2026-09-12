@@ -57,11 +57,19 @@ try{
   await evaluate("document.querySelector('#owner-work-results').scrollIntoView()");
   const shot=await send('Page.captureScreenshot',{format:'png'});screenshots.push(sha256(Buffer.from(shot.data,'base64')));
  }
- const received=(await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received');assert.equal(received.length,2);
- const count=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(count,10);
+ for(const supplied of [true,false]){
+  const goal=supplied?'Review these communications, identify commitments and prepare a brief.':'Review the latest supplied messages and prepare a brief.';
+  const material=supplied?'I will provide the draft by 2026-10-01. Can we meet on 2026-10-02 at 14:00 UTC for 30 minutes?':'';
+  await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(goal)};document.querySelector('#owner-work-material').value=${JSON.stringify(material)};document.querySelector('#owner-work-submit').click()`);
+  await until("document.querySelector('#owner-work-status').textContent==='COMPLETE · VERIFIED_ANALYSIS'");
+  assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('commitment-tracker')"),true);
+  assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('2026-10-01')"),true);
+ }
+ const received=(await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received');assert.equal(received.length,4);
+ const count=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(count,28);
  await evaluate("document.querySelector('#owner-work-submit').click()");await until("!document.querySelector('#owner-work-submit').disabled");
  assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length,count,'Repeated submission must reuse receipts');
- console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard',viewports:[1280,390],ordinaryRequests:2,executedReceipts:count,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:4,executedReceipts:count,durableCommunicationReuse:true,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
  socket?.close();chrome.kill('SIGKILL');
