@@ -32,17 +32,17 @@ jobs:
           if changed - transport:
               raise SystemExit('Unexpected source change; reconciliation required')
           bundle = json.loads(pathlib.Path('.github/engineering-reviewed.bundle.json').read_text())
-          if bundle['baseSha'] != baseline or bundle['treeSha'] != '7e25508c3985e40901c46d6efe65bd5860fdd673':
+          if bundle['baseSha'] != baseline or bundle['treeSha'] != 'bf3e35ec8580bdd950caee2002104c1b7a9325b3':
               raise SystemExit('Unexpected reviewed identity')
           patch = bz2.decompress(base64.b64decode(bundle['payload'], validate=True))
-          if len(patch) != 158209 or hashlib.sha256(patch).hexdigest() != 'e47920d9aa83ba9ed16a3737aa2b731520a21b91dae52a5cc637b576e211183d':
+          if len(patch) != 112559 or hashlib.sha256(patch).hexdigest() != '5e7c22b48945b80bd2fd3b08261ccffe21db12f827f9e61e7370642c23e7d7c3':
               raise SystemExit('Patch integrity mismatch')
           pathlib.Path('/tmp/sara-engineering-reviewed.patch').write_bytes(patch)
           PY
           git apply --check --index /tmp/sara-engineering-reviewed.patch
           git apply --index /tmp/sara-engineering-reviewed.patch
           git rm .github/engineering-reviewed.bundle.json .github/workflows/engineering-apply-reviewed.yml .github/workflows/engineering-source-snapshot.yml
-          test "$(git write-tree)" = 7e25508c3985e40901c46d6efe65bd5860fdd673
+          test "$(git write-tree)" = bf3e35ec8580bdd950caee2002104c1b7a9325b3
           git diff --cached --check
       - name: Prepare locked development toolchain
         run: |
@@ -52,13 +52,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --import tsx --test tests/engineering-capabilities.test.ts tests/engineering-adversarial.test.ts tests/engineering-runtime.test.ts tests/digital-schema-nullable.test.ts tests/digital-capability-substrate.test.ts tests/digital-capability-boundaries.test.ts tests/digital-capability-runtime-proof.test.ts tests/digital-capability-receipt-integrity.test.ts tests/capability-control-projection.test.ts tests/learned-capability-control.test.ts tests/production-state-fingerprint.test.ts tests/state-backup-restore.test.ts tests/procedural-intelligence.test.ts | tee /tmp/engineering-focused.tap
+          node --import tsx --test tests/engineering-capabilities.test.ts tests/engineering-adversarial.test.ts tests/engineering-runtime.test.ts tests/digital-schema-nullable.test.ts tests/digital-capability-startup-cost.test.ts tests/digital-capability-substrate.test.ts tests/digital-capability-boundaries.test.ts tests/digital-capability-runtime-proof.test.ts tests/digital-capability-receipt-integrity.test.ts tests/capability-control-projection.test.ts tests/learned-capability-control.test.ts tests/production-state-fingerprint.test.ts tests/state-backup-restore.test.ts tests/procedural-intelligence.test.ts | tee /tmp/engineering-focused.tap
           npm run typecheck
       - name: Publish verified exact product commit to the isolated branch
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git write-tree)" = 7e25508c3985e40901c46d6efe65bd5860fdd673
+          test "$(git write-tree)" = bf3e35ec8580bdd950caee2002104c1b7a9325b3
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'Implement seventeen authority-bound engineering capabilities and runtime proof'
