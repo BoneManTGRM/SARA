@@ -21,6 +21,7 @@ export async function serviceCapabilityEvidence(stateDirectory:string, ids:reado
           !decidePriorEvidenceReuse({expectedIdentity:playbook.procedureApplicabilityIdentity,currentIdentity:identity}).reusable ||
           !decidePriorEvidenceReuse({expectedIdentity:playbook.evidenceReuseIdentity,currentIdentity:identity}).reusable) continue;
       const latest = knowledge!.outcomes.filter(outcome=>outcome.playbookId===playbook.id&&outcome.playbookVersion===playbook.version).at(-1);
+      if(knowledge!.outcomes.some(outcome=>outcome.playbookId===playbook.id&&outcome.playbookVersion===playbook.version&&outcome.outcome==='FAILED'))continue;
       if (!latest || latest.outcome !== "VERIFIED" || !latest.freshVerificationEvidence.length) continue;
       procedureEvidenceDigests.push(sha256(canonicalJson({playbook,latest})));
     }

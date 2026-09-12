@@ -761,6 +761,12 @@ async function handleOwnerRevenueWrite(
     const result = await kernel.invokeCapability(owner, await readJson(request) as unknown as import("./digital-capabilities/types.ts").CapabilityInvocation);
     json(response, result.status === "INVALID_INPUT" ? 400 : result.status === "BLOCKED" ? 409 : 200, result); return true;
   }
+  if(url.pathname==='/api/capabilities/evidence/owner-observed'&&request.method==='POST') {
+    json(response,200,await kernel.recordOwnerObservedEvidence(owner,await readJson(request)));return true;
+  }
+  if(url.pathname==='/api/capabilities/plans/run'&&request.method==='POST') {
+    json(response,200,await kernel.executeCapabilityPlan(owner,await readJson(request)));return true;
+  }
   if (url.pathname === "/api/learning/controls" && request.method === "GET") {
     json(response, 200, await kernel.inspectLearnedCapabilityControls()); return true;
   }

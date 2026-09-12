@@ -593,7 +593,13 @@ export class ProceduralKnowledgeStore {
     }
   }
   classify(description: string): { taskFamily: string; score: number; matchedPlaybookIds: string[] } { return classifyTaskFamily(description, this.#state.playbooks); }
-  select(task: ReuseTask): ProcedureSelection { return selectionFor(task, this.#state.playbooks); }
+  select(task: ReuseTask): ProcedureSelection {
+    // A failed verified execution stops reuse of that exact version. History remains
+    // immutable; a later result cannot silently restore it. Qualify a new version.
+    const failedVersions = new Set(this.#state.outcomes.filter((record) => record.outcome === "FAILED")
+      .map((record) => `${record.playbookId}@${record.playbookVersion}`));
+    return selectionFor(task, this.#state.playbooks.filter((playbook) => !failedVersions.has(playbookKey(playbook))));
+  }
   retrieveLessons(task: ReuseTask): ReusableLesson[] { return retrieveVerifiedLessons(this.#state.lessons, task.taskFamily, task.identity); }
 
   async #mergeReleaseSeeds(seeds: readonly ProceduralPlaybook[]): Promise<void> {
@@ -643,7 +649,7 @@ export class ProceduralKnowledgeStore {
   async assertSelectionCurrent(selection: ProcedureSelection, task: ReuseTask): Promise<void> {
     await this.#refresh();
     const current = this.#state.playbooks.find((playbook) => playbook.id === selection.playbook.id && playbook.version === selection.playbook.version);
-    if (!current || current.status !== "VERIFIED" || current.qualificationStatus !== "independently_qualified" || sha256(canonicalJson(current)) !== selection.playbookDigest || !identityMatches(current.procedureApplicabilityIdentity, task.identity)) throw new Error("KNOWLEDGE_CHANGED_BEFORE_EXECUTION");
+    if (!current || this.#state.outcomes.some((record) => record.playbookId === current.id && record.playbookVersion === current.version && record.outcome === "FAILED") || current.status !== "VERIFIED" || current.qualificationStatus !== "independently_qualified" || sha256(canonicalJson(current)) !== selection.playbookDigest || !identityMatches(current.procedureApplicabilityIdentity, task.identity)) throw new Error("KNOWLEDGE_CHANGED_BEFORE_EXECUTION");
   }
 
   async invalidate(id: string, version: number, type: EvidenceInvalidationType, reason: string): Promise<void> {
