@@ -663,6 +663,12 @@ export class SaraKernel {
         memories.push(...structuredClone(data.memories as MemoryRecord[]));
       }
       if (event.type === "ledger_recorded") ledger.push(event.data as LedgerEntry);
+      if(event.type==='revenue_delivery_attempt_started'||event.type==='revenue_delivery_attempt_finished'){
+        const data=event.data as {delivery:RevenueDelivery;job?:RevenuePilotJob};
+        revenueDeliveryMap.set(data.delivery.id,structuredClone(data.delivery));
+        if(data.job)revenuePilotMap.set(data.job.id,structuredClone(data.job));
+      }
+
       if (event.type === "capability_registered") {
         const capability = event.data as Capability;
         capabilityMap.set(capability.id, capability);
@@ -1408,23 +1414,52 @@ export class SaraKernel {
     });
   }
 
-  accessRevenueDelivery(id: string, secret: string): Promise<{ job: RevenuePilotJob; delivery: RevenueDelivery }> {
-    return this.serializeMutation(async () => {
-      await this.authorize(SARA_PRINCIPAL, {
-        action: "external_read",
-        targetId: `revenue-delivery:${id}:download`,
-        external: true,
-      });
-      const state = await this.state();
-      const delivery = state.revenueDeliveries.find((candidate) => candidate.id === id);
-      if (!delivery) throw new Error("Delivery access authentication failed.");
-      const job = state.revenuePilotJobs.find((candidate) => candidate.id === delivery.jobId);
-      if (!job) throw new Error("Delivery job is unavailable.");
-      const downloaded = recordRevenueDeliveryDownload(delivery, secret);
-      const deliveredJob = markRevenuePilotDelivered(job);
-      await this.#store.append("revenue_delivery_snapshot", SARA_PRINCIPAL, downloaded);
-      if (job.status !== "delivered") await this.#store.append("revenue_pilot_snapshot", SARA_PRINCIPAL, deliveredJob);
-      return { job: structuredClone(deliveredJob), delivery: structuredClone(downloaded) };
+  /** Read-only eligibility check before loading any protected artifact. */
+  async inspectRevenueDeliveryAccess(id:string,secret:string){
+    await this.authorize(SARA_PRINCIPAL,{action:'external_read',targetId:`revenue-delivery:${id}:download`,external:true});
+    const state=await this.state(),delivery=state.revenueDeliveries.find(d=>d.id===id);
+    if(!delivery)throw new Error('Delivery access authentication failed.');
+    recordRevenueDeliveryDownload(delivery,secret); // validate; discard the pure candidate
+    const job=state.revenuePilotJobs.find(j=>j.id===delivery.jobId);
+    if(!job)throw new Error('Delivery job is unavailable.');
+    if(job.plan.requiredCapabilities.some(id=>!state.capabilities.some(c=>c.id===id&&c.status==='available')))throw new Error('Delivery capability is unavailable.');
+    const payment=state.revenuePaymentIntents.find(p=>p.jobId===job.id);
+    if(payment&&(payment.status!=='authorized'||payment.revenueEvidenceId!==job.revenueEvidenceId))throw new Error('Delivery payment requires reconciliation.');
+    return {job:structuredClone(job),delivery:structuredClone(delivery)};
+  }
+
+  /** Reserve a bounded attempt only after bytes have been loaded and verified. */
+  beginRevenueDelivery(id:string,secret:string,expectedReportDigest:string,bodyDigest:string){
+    return this.serializeMutation(async()=>{
+      const accessed=await this.inspectRevenueDeliveryAccess(id,secret);
+      if(accessed.delivery.reportDigest!==expectedReportDigest||!SHA256_HEX.test(bodyDigest))throw new Error('Delivery artifact identity changed.');
+      const counted=recordRevenueDeliveryDownload(accessed.delivery,secret);
+      const delivery:RevenueDelivery={...counted,status:accessed.delivery.status,lastDownloadedAt:accessed.delivery.lastDownloadedAt,recipientReceiptVerified:false,lastTransportOutcome:'UNKNOWN'};
+      const attemptId=randomUUID();
+      await this.#store.append('revenue_delivery_attempt_started',SARA_PRINCIPAL,{attemptId,delivery,bodyDigest,reportDigest:expectedReportDigest,recipientReceiptVerified:false});
+      return {...accessed,delivery,attemptId};
+    });
+  }
+
+  /** One atomic result event. An interrupted/crashed attempt remains unconfirmed. */
+  finishRevenueDelivery(attemptId:string,outcome:'COMPLETE'|'INTERRUPTED'){
+    return this.serializeMutation(async()=>{
+      if(!['COMPLETE','INTERRUPTED'].includes(outcome))throw new Error('Invalid transport outcome.');
+      const state=await this.state();
+      const previous=state.events.find(e=>e.type==='revenue_delivery_attempt_finished'&&(e.data as {attemptId:string}).attemptId===attemptId);
+      if(previous)return;
+      const started=state.events.find(e=>e.type==='revenue_delivery_attempt_started'&&(e.data as {attemptId:string}).attemptId===attemptId);
+      if(!started)throw new Error('Delivery attempt is unknown.');
+      const data=started.data as {delivery:RevenueDelivery;bodyDigest:string;reportDigest:string};
+      const current=state.revenueDeliveries.find(d=>d.id===data.delivery.id);
+      const job=state.revenuePilotJobs.find(j=>j.id===data.delivery.jobId);
+      if(!current||!job)throw new Error('Delivery subject is unavailable.');
+      // Completion is server transport only. Preserve a later revocation and all
+      // reserved concurrent downloads; never infer customer receipt/acceptance.
+      const delivery:RevenueDelivery={...current,recipientReceiptVerified:false,lastTransportOutcome:outcome,
+        ...(outcome==='COMPLETE'&&current.status!=='revoked'?{status:'delivered',lastDownloadedAt:new Date().toISOString()}: {})};
+      const completed=outcome==='COMPLETE'&&current.status!=='revoked'&&job.status==='delivery_ready'?markRevenuePilotDelivered(job):job;
+      await this.#store.append('revenue_delivery_attempt_finished',SARA_PRINCIPAL,{attemptId,delivery,job:completed,bodyDigest:data.bodyDigest,reportDigest:data.reportDigest,recipientReceiptVerified:false,customerAcceptanceVerified:false});
     });
   }
 

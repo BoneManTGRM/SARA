@@ -83,6 +83,7 @@ try{
   const goal=width===1280?'Review my authorized opportunities and unfinished work. Complete eligible paid work first, prepare the best supported offer, and tell me exactly what still needs my decision.':'Review my earning path and prepare the best supported offer.';
   await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(goal)};document.querySelector('#owner-work-material').value='';document.querySelector('#owner-work-submit').click()`);
   await until("document.querySelector('#owner-work-status').textContent==='BLOCKED · VERIFIED_ANALYSIS'");
+  await evaluate("document.querySelector('#owner-work-results details').open=true");
   for(const phrase of ['Public Repository Readiness Snapshot','No recorded customer','WAITING FOR AUTHORITY','Excluded:','149.00','profitability-accountant'])assert.equal(await evaluate(`document.querySelector('#owner-work-results').innerText.includes(${JSON.stringify(phrase)})`),true,phrase);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true);
   assert.equal((await kernel.getStatus()).revenuePilotJobs.length,0);
