@@ -476,6 +476,7 @@ export type SaraStatus = {
 
 export class SaraKernel {
   private mutationTail: Promise<void> = Promise.resolve();
+  #nicoObserver?:import('./digital-capabilities/nico/observer.ts').NicoReadObserver;
   readonly #store: KernelEventStore;
   #verificationPool?: KernelVerificationPool;
   #previewVerificationPool?: KernelVerificationPool;
@@ -512,6 +513,7 @@ export class SaraKernel {
 
   static async boot(options: {
     stateDirectory: string;
+    nicoObserver?:import('./digital-capabilities/nico/observer.ts').NicoReadObserver;
     ownerTokenSha256?: string;
     constitutionPath?: string;
     bootstrapRevenueCapabilities?: boolean;
@@ -549,6 +551,7 @@ export class SaraKernel {
         loaded.digest,
         ownerTokenSha256,
       );
+      if(options.nicoObserver)kernel.#nicoObserver=Object.freeze({...options.nicoObserver});
       await store.append("system_booted", SARA_PRINCIPAL, {
         constitutionDigest: loaded.digest,
         constitutionVersion: loaded.constitution.version,
@@ -2338,7 +2341,7 @@ export class SaraKernel {
         authorityContextDigest,constitutionDigest:this.constitutionDigest,mandateDigest,mandateId:state.standingMandate?.id??null,
         evidence:[],currentIdentity:{policyDigest:this.constitutionDigest,authorityContextDigest},
         controls:state.mutations.filter(mutation=>Boolean(mutation.artifactRelativePath)).map(mutation=>snapshotJson(learnedCapabilityControl(state.events,mutation))),
-        policyDecision,benchmark:benchmarkCapabilities};
+        policyDecision,benchmark:benchmarkCapabilities,...(this.isVerifiedOwner(principal)&&this.#nicoObserver?{nicoObserver:this.#nicoObserver}:{})};
       if (!request) return capabilityResult({requestId:"invalid-invocation",capabilityId:"invalid-invocation",inputDigest:sha256(inputError!),context,
         persisted:false,status:"INVALID_INPUT",result:{output:{code:inputError!},unknowns:["The malformed request was not executed or persisted."]}});
       const requestDigest = sha256(canonicalJson(request));
@@ -2466,6 +2469,7 @@ export class SaraKernel {
             const referenceCurrent=await referenceIsCurrent(prior,event.data);
             const referenceValidity={current:referenceCurrent,reason:referenceCurrent?'Unchanged material implementation, authority and dependency identities.':'Historical receipt only; current implementation, authority or dependency identity differs or is unavailable.'};
             context.priorCapabilityResults=[...(context.priorCapabilityResults??[]),{...structuredClone(prior),receiptValidity:referenceValidity}];
+            if(referenceCurrent&&prior.capability.id==='nico-production-proof-runner'&&prior.status==='SUCCEEDED')evidence.push(...prior.evidence.filter(e=>e.integrity==='KERNEL_RECEIPT'&&e.claims.some(c=>c==='nico-run-identity-observed')).map(e=>structuredClone(e)));
             evidence.push({id:sha256(canonicalJson({receiptId:event.id,resultDigest})),sourceId:`kernel:capability:${prior.capability.id}`,
               contentDigest:resultDigest,provenance:"LOCAL",claimedProvenance:null,authoritySource:false,subject:prior.subject,
               capturedAt:event.occurredAt,claims:[`capability:${prior.capability.id}:${referenceCurrent?prior.status:"STALE"}`],integrity:"KERNEL_RECEIPT",receiptId:event.id});
@@ -2482,6 +2486,13 @@ export class SaraKernel {
           const output=procedural?await executeProceduralCapability(request.capabilityId,request.input as Record<string,Json>,context,this.#store.stateDirectory):await definition.execute(request.input as Record<string,Json>,context);
           result=snapshotJson(output) as unknown as import("./digital-capabilities/types.ts").ExecutionOutput;
           validateSchema(contract.outputSchema,result.output);
+          if(procedural&&definition.effect==='INTERNAL_STATE'&&result.output&&typeof result.output==='object'&&!Array.isArray(result.output)&&result.output.persisted===true){
+            // Keep the original observed/source snapshot in the signed output;
+            // replay freshness describes the state committed by this operation.
+            const committed=await ProceduralKnowledgeStore.inspectExisting(this.#store.stateDirectory);
+            context.currentIdentity.proceduralKnowledgeDigest=proceduralDependencyDigest(request.capabilityId,request.input as Record<string,Json>,committed);
+          }
+          if(result.capturedEvidence?.length){if(request.capabilityId!=='nico-production-proof-runner'||!context.nicoObserver)throw new CapabilityInputError('CAPTURE_ADAPTER_REQUIRED');context.evidence=[...context.evidence,...result.capturedEvidence];}
         }
       }catch(error){
         if(!(error instanceof CapabilityInputError))throw error;

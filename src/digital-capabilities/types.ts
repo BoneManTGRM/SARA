@@ -24,6 +24,7 @@ export type ExecutionOutput = {output:Json;capturedEvidence?:readonly EvidenceRe
 export type ExecutionContext = {
   ownerAuthenticated:boolean;emergencyStopped:boolean;authorityContextDigest:string;constitutionDigest:string;
   mandateDigest:string|null;mandateId:string|null;evidence:readonly EvidenceRecord[];currentIdentity:ProcedureApplicabilityIdentity;
+  nicoObserver?:import('./nico/observer.ts').NicoReadObserver;
   controls:Json[];policyDecision:{allowed:boolean;code:string;reason:string};
   benchmark:(ids:string[])=>Promise<Json>;
   serviceCapabilityEvidence?:readonly ServiceCapabilityEvidence[];
