@@ -1,3 +1,8 @@
+import { capabilityContract, capabilityContracts, capabilityDefinition, benchmarkCapabilities } from "./digital-capabilities/registry.ts";
+import { normalizeSuppliedEvidence } from "./digital-capabilities/evidence.ts";
+import { capabilityResult } from "./digital-capabilities/receipt.ts";
+import { CapabilityInputError, arraySchema, digestSchema, idSchema, snapshotJson, validateSchema, type Json } from "./digital-capabilities/schema.ts";
+import type { CapabilityInvocation, CapabilityResult, ExecutionContext } from "./digital-capabilities/types.ts";
 import { assertLearnedCapabilityActive, compileLearnedCapabilityControl, learnedCapabilityControl,
   learnedControlTarget,
   type LearnedCapabilityControlInput, type LearnedCapabilityControlRequest } from "./capability-control.ts";
@@ -2213,6 +2218,89 @@ export class SaraKernel {
   }
 
   /** Separate operational controls preserve promotion and original qualification history. */
+  /** Reviewed built-in contracts share this kernel, policy authority, and append-only audit store. */
+  async inspectCapabilityContracts() { return capabilityContracts(); }
+
+  async invokeCapability(principal: Principal, supplied: CapabilityInvocation): Promise<CapabilityResult> {
+    if (principal.kind === "owner" && !this.isVerifiedOwner(principal)) throw new Error("AUTHENTICATED_OWNER_REQUIRED");
+    if (principal.kind !== "owner" && principal !== SARA_PRINCIPAL) throw new Error("AUTHENTICATED_OWNER_OR_INTERNAL_PRINCIPAL_REQUIRED");
+    // Snapshot before the first asynchronous boundary. Invalid payloads never enter the audit as raw data.
+    let request: CapabilityInvocation | null = null, inputError: string | null = null;
+    try {
+      const value = snapshotJson(supplied) as Record<string, Json>;
+      if (!value || Array.isArray(value) || typeof value !== "object" || Object.keys(value).some(key => !["requestId","capabilityId","input","evidence","evidenceReceiptIds"].includes(key))) throw new CapabilityInputError("INVALID_INVOCATION");
+      validateSchema(idSchema,value.requestId!); validateSchema(idSchema,value.capabilityId!);
+      if (!Object.hasOwn(value,"input")) throw new CapabilityInputError("INPUT_REQUIRED");
+      request = value as unknown as CapabilityInvocation;
+    } catch (error) { inputError = error instanceof CapabilityInputError ? error.code : "INVALID_INVOCATION"; }
+    return this.serializeMutation(async () => {
+      const state = await this.state();
+      const mandateDigest = state.standingMandate ? sha256(canonicalJson(state.standingMandate)) : null;
+      const authorityContextDigest = sha256(canonicalJson({constitutionDigest:this.constitutionDigest,mandateDigest,
+        emergencyStopped:state.emergencyStopped,stopEpoch:state.events.filter(event=>event.type==="emergency_stop_changed").at(-1)?.hash??null}));
+      const policyDecision = evaluatePolicy({constitution:this.#constitution,principal,
+        request:{action:"internal_read",targetId:"digital-capability",external:false},
+        currentOwnerRecurringMonthlyUsd:ownerFundedRecurringMonthly(state.ledger),emergencyStopped:state.emergencyStopped});
+      const context:ExecutionContext = {ownerAuthenticated:this.isVerifiedOwner(principal),emergencyStopped:state.emergencyStopped,
+        authorityContextDigest,constitutionDigest:this.constitutionDigest,mandateDigest,mandateId:state.standingMandate?.id??null,
+        evidence:[],currentIdentity:{policyDigest:this.constitutionDigest,authorityContextDigest},
+        controls:state.mutations.filter(mutation=>Boolean(mutation.artifactRelativePath)).map(mutation=>snapshotJson(learnedCapabilityControl(state.events,mutation))),
+        policyDecision,benchmark:benchmarkCapabilities};
+      if (!request) return capabilityResult({requestId:"invalid-invocation",capabilityId:"invalid-invocation",inputDigest:sha256(inputError!),context,
+        persisted:false,status:"INVALID_INPUT",result:{output:{code:inputError!},unknowns:["The malformed request was not executed or persisted."]}});
+      const requestDigest = sha256(canonicalJson(request));
+      const existing = state.events.find(event=>event.type==="digital_capability_executed" &&
+        (event.data as {requestId:string;actorId:string}).requestId===request!.requestId && (event.data as {actorId:string}).actorId===principal.id);
+      const contract=await capabilityContract(request.capabilityId),definition=capabilityDefinition(request.capabilityId);
+      if(contract)context.currentIdentity={...context.currentIdentity,capabilityId:contract.id,implementationDigest:contract.implementationDigest,contractDigest:contract.contractDigest};
+      if(existing){
+        const stored=existing.data as {requestDigest:string;result:CapabilityResult};
+        if(stored.requestDigest!==requestDigest)throw new Error("CAPABILITY_REQUEST_REPLAY_CONFLICT");
+        const {resultDigest,...unsigned}=stored.result;
+        if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError("Capability receipt digest does not match its content.");
+        const current=stored.result.authority.contextDigest===authorityContextDigest&&stored.result.capability.implementationDigest===contract?.implementationDigest;
+        return {...structuredClone(stored.result),replayed:true,receiptValidity:{current,reason:current?"Unchanged material authority and implementation identity.":"Historical receipt only; current identity differs. Re-evaluate before relying on it."}};
+      }
+      let status:CapabilityResult["status"]="SUCCEEDED",result:import("./digital-capabilities/types.ts").ExecutionOutput;
+      try {
+        context.evidence=normalizeSuppliedEvidence(request.evidence);
+        if(request.evidenceReceiptIds!==undefined){
+          validateSchema(arraySchema(digestSchema,32),request.evidenceReceiptIds);
+          const evidence=[...context.evidence];
+          for(const digest of [...new Set(request.evidenceReceiptIds)]){
+            const event=state.events.find(event=>event.type==="digital_capability_executed" &&
+              (event.data as {result:CapabilityResult}).result.resultDigest===digest &&
+              (context.ownerAuthenticated||event.actor.id===principal.id));
+            if(!event)throw new CapabilityInputError("EVIDENCE_RECEIPT_NOT_FOUND");
+            const prior=(event.data as {result:CapabilityResult}).result;
+            const {resultDigest,...unsigned}=prior;
+            if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError("Referenced capability receipt failed its content digest.");
+            evidence.push({id:sha256(canonicalJson({receiptId:event.id,resultDigest})),sourceId:`kernel:capability:${prior.capability.id}`,
+              contentDigest:resultDigest,provenance:"LOCAL",claimedProvenance:null,authoritySource:false,subject:prior.subject,
+              capturedAt:event.occurredAt,claims:[`capability:${prior.capability.id}:${prior.status}`],integrity:"KERNEL_RECEIPT",receiptId:event.id});
+          }
+          context.evidence=evidence;
+        }
+        if(!definition||!contract){status="BLOCKED";result={output:{code:"UNREGISTERED_CAPABILITY"}};}
+        else if(!policyDecision.allowed||definition.ownerOnly&&!context.ownerAuthenticated){status="BLOCKED";result={output:{code:policyDecision.allowed?"AUTHENTICATED_OWNER_REQUIRED":policyDecision.code}};}
+        else if(contract.qualification.status!=="PASSED"){status="BLOCKED";result={output:{code:"QUALIFICATION_FAILED"}};}
+        else {
+          validateSchema(contract.inputSchema,request.input as Json);
+          const output=await definition.execute(request.input as Record<string,Json>,context);
+          result=snapshotJson(output) as unknown as import("./digital-capabilities/types.ts").ExecutionOutput;
+          validateSchema(contract.outputSchema,result.output);
+        }
+      }catch(error){
+        if(!(error instanceof CapabilityInputError))throw error;
+        status="INVALID_INPUT";result={output:{code:error.code},unknowns:["Request rejected before any external effect."]};
+      }
+      const receipt=capabilityResult({requestId:request.requestId,capabilityId:request.capabilityId,inputDigest:sha256(canonicalJson(request.input)),
+        contract,context,result,status:status==="SUCCEEDED"?result.status??status:status});
+      await this.#store.append("digital_capability_executed",principal,{requestId:request.requestId,actorId:principal.id,requestDigest,result:receipt});
+      return structuredClone(receipt);
+    });
+  }
+
   async inspectLearnedCapabilityControls() {
     const state = await this.state();
     return state.mutations.filter(mutation => Boolean(mutation.artifactRelativePath))

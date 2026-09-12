@@ -754,6 +754,13 @@ async function handleOwnerRevenueWrite(
   owner: OwnerSession,
   options: ServerOptions,
 ): Promise<boolean> {
+  if (url.pathname === "/api/capability-contracts" && request.method === "GET") {
+    json(response, 200, await kernel.inspectCapabilityContracts()); return true;
+  }
+  if (url.pathname === "/api/capabilities/invoke" && request.method === "POST") {
+    const result = await kernel.invokeCapability(owner, await readJson(request) as unknown as import("./digital-capabilities/types.ts").CapabilityInvocation);
+    json(response, result.status === "INVALID_INPUT" ? 400 : result.status === "BLOCKED" ? 409 : 200, result); return true;
+  }
   if (url.pathname === "/api/learning/controls" && request.method === "GET") {
     json(response, 200, await kernel.inspectLearnedCapabilityControls()); return true;
   }
