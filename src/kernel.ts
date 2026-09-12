@@ -2486,6 +2486,12 @@ export class SaraKernel {
           const output=procedural?await executeProceduralCapability(request.capabilityId,request.input as Record<string,Json>,context,this.#store.stateDirectory):await definition.execute(request.input as Record<string,Json>,context);
           result=snapshotJson(output) as unknown as import("./digital-capabilities/types.ts").ExecutionOutput;
           validateSchema(contract.outputSchema,result.output);
+          if(procedural&&definition.effect==='INTERNAL_STATE'&&result.output&&typeof result.output==='object'&&!Array.isArray(result.output)&&result.output.persisted===true){
+            // Keep the original observed/source snapshot in the signed output;
+            // replay freshness describes the state committed by this operation.
+            const committed=await ProceduralKnowledgeStore.inspectExisting(this.#store.stateDirectory);
+            context.currentIdentity.proceduralKnowledgeDigest=proceduralDependencyDigest(request.capabilityId,request.input as Record<string,Json>,committed);
+          }
           if(result.capturedEvidence?.length){if(request.capabilityId!=='nico-production-proof-runner'||!context.nicoObserver)throw new CapabilityInputError('CAPTURE_ADAPTER_REQUIRED');context.evidence=[...context.evidence,...result.capturedEvidence];}
         }
       }catch(error){

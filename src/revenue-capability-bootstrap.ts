@@ -3,7 +3,9 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import type { Capability } from "./types.ts";
 
 export const REVENUE_CAPABILITY_MIGRATION_ID = "revenue-pilot-capabilities" as const;
-export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 5 as const;
+// Version 6 requalifies the existing operator after economic queue integration.
+// The append-only migration preserves version-5 evidence and same-version guards.
+export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 6 as const;
 
 type Definition = {
   id: string;
