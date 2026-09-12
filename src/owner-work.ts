@@ -1,5 +1,6 @@
 import {canonicalJson,sha256} from './canonical.ts';
 import type {ServiceWorkContext} from './owner-service-work.ts';
+import {requestsIsolatedReproduction} from './owner-defect-work.ts';
 import {suppliedReview} from './owner-work-inputs.ts';
 import {learningRetryBudgetBlockers} from './learning-campaign.ts';
 import type {Job,Capability} from './types.ts';
@@ -16,7 +17,7 @@ export type WorkBlocker={subjectId:string;reason:string;missing:string[]};
 export type WorkRecord={serviceIdentity?:string;serviceReview?:ServiceWorkContext["review"];request:WorkMessage;requestDigest:string;workflow:string|null;plan:CapabilityPlan|null;selection:{capabilityId:string;reason:string;inputs:string[];unmet:string[]}[];alternatives:{capabilityId:string;reason:string}[];blockers:WorkBlocker[];sourceDigest:string;receivedAt:string;fieldProvenance:{field:string;kind:'OBSERVED'|'DERIVED'|'UNKNOWN';source:string}[]};
 export function parseWorkMessage(value:unknown):WorkMessage{const input=snapshotJson(value);validateSchema(messageSchema,input);return input as unknown as WorkMessage;}
 const controlIds=new Set(['learned-capability-disable-and-quarantine','self-benchmark-runner','decision-register','experience-to-procedure-compiler','memory-conflict-resolver']);
-const workflowCapabilities=new Set(['bug-reproduction-planner','root-cause-analyzer','quote-margin-guard','proposal-compiler','profitability-accountant','goal-to-work-queue-compiler','solution-reuse-ranker','unfinished-work-reconciler','priority-rebalancer','daily-owner-brief','inbox-priority-classifier','email-thread-action-extractor','commitment-tracker','follow-up-detector','calendar-intent-parser','support-intake-triage']);
+const workflowCapabilities=new Set(['isolated-defect-reproducer','bug-reproduction-planner','root-cause-analyzer','quote-margin-guard','proposal-compiler','profitability-accountant','goal-to-work-queue-compiler','solution-reuse-ranker','unfinished-work-reconciler','priority-rebalancer','daily-owner-brief','inbox-priority-classifier','email-thread-action-extractor','commitment-tracker','follow-up-detector','calendar-intent-parser','support-intake-triage']);
 export function reachability(contracts:CapabilityContract[]){return contracts.map(c=>({id:c.id,contractDigest:c.contractDigest,qualification:c.qualification.status,effectiveStatus:c.status,
  disposition:c.status!=='ENABLED'?'INTENTIONALLY_UNAVAILABLE':controlIds.has(c.id)?'EXPLICIT_OWNER_OPERATION':c.id==='failure-clusterer'?'SUPPORTED_WORK_EVENT':workflowCapabilities.has(c.id)?'ORDINARY_GOAL_EXECUTION':'EXPLICIT_OWNER_OPERATION',
  reason:c.status!=='ENABLED'?'Current qualification or control prevents execution.':controlIds.has(c.id)?'Trusted explicit operation only; never selected from quoted or model text.':c.id==='failure-clusterer'?'One deduplicated failed-learning diagnosis under the existing active mandate, daily action allowance and serialized worker.':workflowCapabilities.has(c.id)?'Bounded work-review, communication, defect-report or quote recipe; schema and authority rechecked before execution.':'Existing authenticated capability API; ordinary-language input gathering not yet qualified for this contract.',
@@ -26,13 +27,13 @@ function route(text:string):string|null{
  // Quoted/forwarded bodies belong in suppliedText and never choose a workflow.
  if(/["“”`]|^\s*>|\b(?:forwarded|email says|page says|quoted)\b/iu.test(text))return null;
  if(/\b(?:send|publish|buy|purchase|transfer|approve|increase.*budget|delete|deploy|merge)\b/iu.test(text))return null;
- if(/\b(?:NICO|repository|deployment|API|agent collaboration|database)\b/iu.test(text))return null;
- if(/\b(?:review|inspect|prepare|complete)\b/iu.test(text)&&/\b(?:paid work|authorized opportunities|earning path|supported offer)\b/iu.test(text))return 'revenue-work';
- const defect=/\b(?:diagnose|analyze|analyse|triage|review|inspect)\b/iu.test(text)&&/\b(?:(?:software )?(?:defect|bug)(?: report)?|failure report)\b/iu.test(text);
+ const defect=(requestsIsolatedReproduction(text)||/\b(?:diagnose|analyze|analyse|triage|review|inspect)\b/iu.test(text))&&/\b(?:(?:software )?(?:defect|bug)(?: report)?|failure report)\b/iu.test(text);
  const quote=/\b(?:review|analyze|analyse|check|calculate|draft|prepare)\b/iu.test(text)&&/\b(?:quote|proposal)\b/iu.test(text);
  if((defect||quote)&&/\b(?:inbox|email|communications?|messages|unfinished work|pending jobs|work queue|obligations)\b/iu.test(text))return null;
  if(defect&&quote)return null;
  if(defect)return 'supplied-defect';
+ if(/\b(?:NICO|repository|deployment|API|agent collaboration|database)\b/iu.test(text))return null;
+ if(/\b(?:review|inspect|prepare|complete)\b/iu.test(text)&&/\b(?:paid work|authorized opportunities|earning path|supported offer)\b/iu.test(text))return 'revenue-work';
  if(/\bsoftware\b/iu.test(text))return null;
  if(quote)return 'supplied-quote';
  const action=/\b(?:review|inspect|check|summarize|summarise|triage|prioritize|prioritise|organize|organise|give|prepare|identify|show|tell|audit|reconcile|complete|finish)\b/iu.test(text);
@@ -107,11 +108,11 @@ export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:
   }
   if(!material){record.blockers.push({subjectId:request.requestId,reason:`No ${materialName} text was supplied or previously retained for this workflow.`,missing:[`Paste the ${materialName} into Supplied material; no external reader is connected to this workflow.`]});return record;}
   if(workflow!=='supplied-communications'){
-   const review=suppliedReview(workflow,material.body,material.sourceId);
+   const review=suppliedReview(workflow,material.body,material.sourceId,requestsIsolatedReproduction(request.text));
    record.fieldProvenance.push(...review.fields);
    for(const step of review.steps)add(step.id,step.input,step.completion,step.reason);
    for(const reason of review.missing)record.blockers.push({subjectId:request.requestId,reason,missing:[reason]});
-   briefItems.push({id:'supplied-review',category:'BLOCKED',summary:`Analyzed the supplied ${materialName}. Review the executed analysis, source facts and remaining requirements below. No external action or independent acceptance is claimed.`,sourceId:material.sourceId,dueAt:null,status:'OPEN',requiresOwner:false});
+   briefItems.push({id:'supplied-review',category:review.missing.length?'BLOCKED':'HEALTH',summary:review.summary??`Analyzed the supplied ${materialName}. Review the executed analysis, source facts and remaining requirements below. No external action or independent acceptance is claimed.`,sourceId:material.sourceId,dueAt:null,status:review.missing.length?'OPEN':'COMPLETE',requiresOwner:false});
   }else{
   const messages=[{id:'supplied-message',sourceId:material.sourceId,sender:'supplied counterparty (unverified)',sentAt:material.receivedAt,replyTo:null,body:material.body}];
   record.fieldProvenance.push({field:'messages.body',kind:'OBSERVED',source:request.suppliedText?'SUPPLIED untrusted text':`Durable previously supplied untrusted material: ${material.sourceId}`},{field:'messages.sentAt',kind:'DERIVED',source:'Original receipt time; original sent time unknown'});
@@ -144,10 +145,12 @@ export function workResult(record:WorkRecord,execution:{status:string;reason:str
  const verified=execution?.status==='COMPLETE'&&integrity&&exact&&coverage;
  const blockers=[...record.blockers,...(execution&&execution.status!=='COMPLETE'?[{subjectId:record.request.requestId,reason:execution.reason,missing:['Resolve the execution boundary before resuming']}]:[])];
  if(execution?.status==='COMPLETE'&&!verified)blockers.push({subjectId:record.request.requestId,reason:'Independent receipt identity or result-coverage verification failed.',missing:['Verified exact result coverage']});
+ const reproduction=receipts.find(r=>r.capability.id==='isolated-defect-reproducer')?.output as Record<string,Json>|undefined;
+ if(reproduction&&reproduction.result!=='FIXTURE_PASSED')blockers.push({subjectId:record.request.requestId,reason:String(reproduction.summary),missing:['Resolve the exact fixture validation or execution failure before a new bounded attempt.']});
  const brief=receipts.find(r=>r.capability.id==='daily-owner-brief');
  return {...(record.serviceReview?{serviceReview:record.serviceReview}:{}),requestId:record.request.requestId,goal:record.request.text,workflow:record.workflow,status:execution?.status==='PAUSED'?'PAUSED':blockers.length?'BLOCKED':verified?'COMPLETE':'PLANNED',verification:verified?'VERIFIED_ANALYSIS':'NOT_VERIFIED',
   currentStep:expected.find(step=>!receipts.some(r=>r.capability.id===step.capabilityId&&r.status==='SUCCEEDED'))?.id??null,nextAction:execution?.status==='PAUSED'?'Existing worker will continue the durable plan.':blockers.length?'Resolve the listed boundary; preserved receipts remain available.':verified?'Review the verified analysis and its source references.':'Submit or refresh to reconcile durable progress.',
   selectedCapabilities:record.selection,rejectedAlternatives:record.alternatives.filter(a=>!record.selection.some(s=>s.capabilityId===a.capabilityId)),fieldProvenance:record.fieldProvenance,sourceDigest:record.sourceDigest,observedAt:record.receivedAt,planId:record.plan?.id??null,execution,receipts,blockers,
-  outputText:verified?(blockers.length?`Executed bounded analysis. ${blockers.length} unresolved requirements remain. No underlying job was represented as completed.`:'Completed the bounded analysis workflow; all required analysis steps have receipts.'):(blockers[0]?.reason??'Work is planned.'),
+  outputText:verified&&record.workflow==='supplied-defect'?receipts.filter(r=>['bug-reproduction-planner','isolated-defect-reproducer'].includes(r.capability.id)).map(r=>String((r.output as Record<string,Json>).summary??'')).join(' '):verified?(blockers.length?`Executed bounded analysis. ${blockers.length} unresolved requirements remain. No underlying job was represented as completed.`:'Completed the bounded analysis workflow; all required analysis steps have receipts.'):(blockers[0]?.reason??'Work is planned.'),
   brief:brief?.output??null,actualCashMicroUsd:receipts.reduce((n,r)=>n+r.cost.actualCashMicroUsd,0),externalActions:0,authorityDelta:0};
 }

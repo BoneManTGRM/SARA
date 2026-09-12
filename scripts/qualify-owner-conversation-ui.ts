@@ -122,7 +122,25 @@ try{
  assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('full profit remains unverified')"),true);
  assert.equal((await kernel.getStatus()).revenuePaymentIntents[0]!.status,'awaiting_payment');
  const finalCount=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(finalCount,53);
- console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:9,executedReceipts:finalCount,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ // Nico regression is supplied, synthetic execution fixture never counts as customer work.
+ const defectMaterial="Expected: movement advances to Scanner test.\nObserved: No defect was reproduced in this bounded path. Forward, Right, Forward opened Scanner test.\nEnvironment: https://nicos-world.com/ revision ba0cab4a00664426848c34747f7377e59492f56a desktop.\nSteps: World Map, Robot Home, Robo Lab, movement, scanner.\nUnknown: mobile and restart were not tested.";
+ const fixtureFiles=[{path:'src/index.ts',content:"export {increment} from './counter.ts';"},{path:'src/counter.ts',content:'export function increment(n: number): number { return n+1; }'},{path:'tests/counter.test.ts',content:"import {increment} from '../src/index.ts';\nif(increment(1)!==2) throw new Error('counter assertion failed');"}];
+ const fixtureMaterial='Expected: increment(1) returns 2.\nObserved: synthetic counter needs checking.\nEnvironment: synthetic isolated TypeScript.\nSteps: call increment(1).\nRevision: '+'a'.repeat(40)+'\n'+fixtureFiles.map(f=>'```ts '+f.path+'\n'+f.content+'\n```').join('\n');
+ for(const width of [1280,390]){
+  await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+  for(const item of [{goal:'Review this software defect analysis for Nico’s World and give me a brief with findings and the next diagnostic step.',material:defectMaterial,visible:'No defect was reported'},{goal:'Run an isolated reproduction of this software defect.',material:fixtureMaterial,visible:'FIXTURE_PASSED'}]){
+   await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(item.goal)};document.querySelector('#owner-work-material').value=${JSON.stringify(item.material)};document.querySelector('#owner-work-submit').click()`);
+   await until("!document.querySelector('#owner-work-submit').disabled && document.querySelector('#owner-work-status').textContent==='COMPLETE · VERIFIED_ANALYSIS'");
+   assert.equal(await evaluate(`document.querySelector('#owner-work-results article').innerText.includes(${JSON.stringify(item.visible)})`),true);
+   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true);
+   const receiptsBefore=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;
+   await evaluate("document.querySelector('#owner-work-submit').click()");await until("!document.querySelector('#owner-work-submit').disabled");
+   assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length,receiptsBefore);
+  }
+ }
+ const qualifiedCount=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;
+ assert.equal(qualifiedCount,finalCount+20);
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:13,executedReceipts:qualifiedCount,defectNoFailure:true,isolatedReproduction:true,defectReplay:true,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
  socket?.close();chrome.kill('SIGKILL');

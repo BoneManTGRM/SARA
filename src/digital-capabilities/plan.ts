@@ -6,7 +6,8 @@ type Step={obligation?:boolean;economicEvidenceId?:string;id:string;capabilityId
 export type CapabilityPlan={id:string;version:number;steps:Step[]};
 // This capability persists only its sourced snapshot in the normal invocation
 // receipt; it cannot alter policy, send messages or write a competing store.
-function boundedEffect(c:CapabilityContract):boolean{return ['PURE','READ_ONLY','DRAFT_ONLY'].includes(c.effect)||(c.id==='commitment-tracker'&&c.effect==='INTERNAL_STATE'&&c.authorityClass==='READ_ONLY');}
+function boundedEffect(c:CapabilityContract):boolean{return (c.id==='isolated-defect-reproducer'&&c.effect==='INTERNAL_STATE'&&c.authorityClass==='REVERSIBLE_AUTHORIZED')||['PURE','READ_ONLY','DRAFT_ONLY'].includes(c.effect)||(c.id==='commitment-tracker'&&c.effect==='INTERNAL_STATE'&&c.authorityClass==='READ_ONLY');}
+function boundedAuthority(c:CapabilityContract):boolean{return ['READ_ONLY','DRAFT_ONLY'].includes(c.authorityClass)||(c.id==='isolated-defect-reproducer'&&c.authorityClass==='REVERSIBLE_AUTHORIZED');}
 export function validatePlan(supplied:unknown):CapabilityPlan {
  const input=snapshotJson(supplied);validateSchema(planSchema,input);const plan=input as unknown as CapabilityPlan;
  const seen=new Set<string>();for(const step of plan.steps){if(seen.has(step.id))throw new CapabilityInputError('DUPLICATE_STEP');seen.add(step.id);}
@@ -24,7 +25,7 @@ export async function executeBoundedPlan(plan:CapabilityPlan,adapter:{contract:(
   if(!ready.length)return finish('BLOCKED',pending[0]!.id,'DEPENDENCY_UNRESOLVED');
   const eligible:{step:Step;score:number|null;contract:CapabilityContract}[]=[];
   for(const candidate of ready){const c=await adapter.contract(candidate.capabilityId);
-   let reason=candidate.dependsOn.some(d=>blocked.some(b=>b.stepId===d))?'FAILED_PREREQUISITE':!c||c.contractDigest!==candidate.contractDigest||c.status!=='ENABLED'||c.qualification.status!=='PASSED'||!boundedEffect(c)||!['READ_ONLY','DRAFT_ONLY'].includes(c.authorityClass)?'CURRENT_QUALIFIED_BOUNDED_CONTRACT_REQUIRED':null;
+   let reason=candidate.dependsOn.some(d=>blocked.some(b=>b.stepId===d))?'FAILED_PREREQUISITE':!c||c.contractDigest!==candidate.contractDigest||c.status!=='ENABLED'||c.qualification.status!=='PASSED'||!boundedEffect(c)||!boundedAuthority(c)?'CURRENT_QUALIFIED_BOUNDED_CONTRACT_REQUIRED':null;
    const score=candidate.economicEvidenceId?await adapter.valuation?.(candidate.economicEvidenceId):null;
    if(candidate.economicEvidenceId&&score===undefined)reason='CURRENT_ECONOMIC_RECEIPT_REQUIRED';
    if(reason){blocked.push({stepId:candidate.id,reason});pending.splice(pending.indexOf(candidate),1);}else eligible.push({step:candidate,score:score??null,contract:c!});
@@ -34,7 +35,7 @@ export async function executeBoundedPlan(plan:CapabilityPlan,adapter:{contract:(
   const {step}=eligible[0]!;pending.splice(pending.indexOf(step),1);
   if(await adapter.stopped())return finish('BLOCKED',step.id,'EMERGENCY_STOP');
   const contract=await adapter.contract(step.capabilityId);
-  if(!contract||contract.contractDigest!==step.contractDigest||contract.status!=='ENABLED'||contract.qualification.status!=='PASSED'||!boundedEffect(contract)||!['READ_ONLY','DRAFT_ONLY'].includes(contract.authorityClass))return finish('BLOCKED',step.id,'CURRENT_QUALIFIED_BOUNDED_CONTRACT_REQUIRED');
+  if(!contract||contract.contractDigest!==step.contractDigest||contract.status!=='ENABLED'||contract.qualification.status!=='PASSED'||!boundedEffect(contract)||!boundedAuthority(contract))return finish('BLOCKED',step.id,'CURRENT_QUALIFIED_BOUNDED_CONTRACT_REQUIRED');
   let input=snapshotJson(step.input);
   if(step.bindings.length){if(!input||typeof input!=='object'||Array.isArray(input))throw new CapabilityInputError('BINDING_OBJECT_REQUIRED');for(const binding of step.bindings){const prior=results.get(binding.stepId);const value=prior?at(prior.output,binding.path):undefined;if(value===undefined)return finish('BLOCKED',step.id,'BINDING_EVIDENCE_MISSING');if(['__proto__','constructor','prototype'].includes(binding.inputKey))throw new CapabilityInputError('UNSAFE_BINDING');input[binding.inputKey]=snapshotJson(value);}}
   const request={requestId:`plan-${sha256(canonicalJson({planId:plan.id,version:plan.version,stepId:step.id}))}`,capabilityId:step.capabilityId,input,evidenceReceiptIds:[...new Set([...step.evidenceReceiptIds,...step.dependsOn.map(id=>results.get(id)!.resultDigest)])]};

@@ -45,10 +45,10 @@ test('owner dashboard renders the current digital registry independently of lega
   await refresh();
   const contracts=await kernel.inspectCapabilityContracts();
   const legacy=(await kernel.getStatus()).capabilities.length;
-  assert.equal(legacy,4);assert.equal(contracts.length,93);
+  assert.equal(legacy,4);assert.equal(contracts.length,94);
   assert.equal(node('#capabilities').textContent,String(contracts.filter(c=>c.status==='ENABLED'&&c.maturity==='QUALIFIED'&&c.qualification.status==='PASSED').length));
   assert.equal(contractReads,1);
-  assert.match(node('#capabilities-note').textContent,/93 registered/);
+  assert.match(node('#capabilities-note').textContent,/94 registered/);
   assert.match(node('#capabilities-note').textContent,/4 revenue services/);
   assert.match(html,/Digital capabilities/);
 
@@ -59,7 +59,7 @@ test('owner dashboard renders the current digital registry independently of lega
   }
   override=new Response('unavailable',{status:503});await refresh();assert.equal(node('#capabilities').textContent,'—');
   override=Response.json([]);await refresh();assert.equal(node('#capabilities').textContent,'0');
-  override=undefined;await refresh();assert.equal(node('#capabilities').textContent,'93');
+  override=undefined;await refresh();assert.equal(node('#capabilities').textContent,'94');
   new Script('setConnected(false)').runInContext(context);assert.equal(node('#capabilities').textContent,'—');
   override=new Response('unauthorized',{status:401});await assert.rejects(refresh,/Owner token/);assert.equal(node('body').dataset.owner,'locked');assert.equal(node('#capabilities').textContent,'—');
   assert.equal((await kernel.getStatus()).capabilities.length,legacy,'Presentation must not change the revenue capability state');

@@ -2330,6 +2330,10 @@ export class SaraKernel {
       await this.authorize(principal,{action:'record_memory',targetId:`owner-work:${request.requestId}`,external:false});
       const materials=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord).filter(r=>r.request.suppliedText?.trim()).map(r=>({body:r.request.suppliedText!,sourceId:`owner-material:${r.requestDigest}`,receivedAt:r.receivedAt,workflow:r.workflow}));
       const compiled=await compileOwnerWork(request,state.jobs,await capabilityContracts(),new Date().toISOString(),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),{jobCapabilities:state.capabilities,materials,service:serviceWorkContext(state,new Date().toISOString())});
+      if(compiled.plan?.steps.some(step=>step.capabilityId==='isolated-defect-reproducer')){
+        if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REPRODUCTION_REQUIRED');
+        await this.authorize(principal,{action:'sandbox_development',targetId:request.requestId,external:false});
+      }
       await this.#store.append('owner_work_received',principal,compiled);
       return compiled;
     });
@@ -2673,6 +2677,15 @@ export class SaraKernel {
         else if(contract.qualification.status!=="PASSED"){status="BLOCKED";result={output:{code:"QUALIFICATION_FAILED"}};}
         else {
           validateSchema(contract.inputSchema,request.input as Json);
+          if(request.capabilityId==='isolated-defect-reproducer'){
+            // The event can only be admitted through verified owner authentication.
+            // Bind worker authority to the exact immutable plan step and input;
+            // a trusted bridge/internal principal does not gain this authority.
+            const admitted=state.events.find(event=>event.type==='owner_work_received'&&event.actor.kind==='owner'&&event.actor.id===this.#constitution.ownerAuthority.ownerIdentity&&(event.data as WorkRecord).plan?.steps.some(step=>step.capabilityId===request!.capabilityId&&`plan-${sha256(canonicalJson({planId:(event.data as WorkRecord).plan!.id,version:(event.data as WorkRecord).plan!.version,stepId:step.id}))}`===request!.requestId&&canonicalJson(step.input)===canonicalJson(request!.input)));
+            const cancelled=admitted&&state.events.some(event=>event.type==='owner_work_cancelled'&&(event.data as {requestId:string}).requestId===(admitted.data as WorkRecord).request.requestId);
+            context.isolatedReproductionAuthorized=!cancelled&&(this.isVerifiedOwner(principal)||Boolean(admitted));
+            if(context.isolatedReproductionAuthorized&&!state.emergencyStopped)await this.authorize(principal,{action:'sandbox_development',targetId:request.requestId,external:false});
+          }
           const procedural=definition.sourceFiles.some(path=>path.startsWith('procedural/'));
           if(procedural&&definition.effect==='INTERNAL_STATE')await this.authorize(principal,{action:'record_memory',targetId:`procedure:${request.capabilityId}`,external:false});
           const output=procedural?await executeProceduralCapability(request.capabilityId,request.input as Record<string,Json>,context,this.#store.stateDirectory):await definition.execute(request.input as Record<string,Json>,context);

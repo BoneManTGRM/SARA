@@ -1,10 +1,11 @@
+import {defectReview} from './owner-defect-work.ts';
 import {sha256} from './canonical.ts';
 import type {Json} from './digital-capabilities/schema.ts';
 import type {CapabilityPlan} from './digital-capabilities/plan.ts';
 
 type ProposedStep={id:string;input:Json;completion:CapabilityPlan['steps'][number]['completion'];reason:string};
 /** Bounded extraction of attributed facts, never policy, evidence grades or commands. */
-export function suppliedReview(kind:string,body:string,sourceId:string){
+export function suppliedReview(kind:string,body:string,sourceId:string,executeReproduction=false){
  const steps:ProposedStep[]=[],missing:string[]=[],fields:{field:string;kind:'OBSERVED'|'DERIVED'|'UNKNOWN';source:string}[]=[];
  const fact=(name:string,labels:string[],maximum=2048):string|null=>{
   const label=labels.join('|');
@@ -22,15 +23,8 @@ export function suppliedReview(kind:string,body:string,sourceId:string){
   fields.push({field:`${name}.microUsd`,kind:'DERIVED',source:`Exact integer conversion of ${sourceId}`});return micro;
  };
  const add=(id:string,input:Json,path:string[],equals:Json,reason:string)=>steps.push({id,input,completion:[{path,equals}],reason});
- if(kind==='supplied-defect'){
-  if(body.length>8192)return {steps,fields,missing:['The defect report exceeds its 8,192-character contract bound. Supply a smaller report without removing the failing observation.']};
-  const expected=fact('expected behavior',['expected','expected behavior','I expected'],4096),observed=fact('observed behavior',['observed','observed behavior','actual','actual behavior'],4096),environment=fact('environment',['environment']),reproduction=fact('reproduction steps',['steps','reproduction steps'],4096);
-  add('bug-reproduction-planner',{report:body,expected:expected??'',observed:observed??'',steps:reproduction?[reproduction]:[],target:'SANDBOX',environment:environment??''},['executionAllowed'],false,'Construct an isolated reproduction plan from attributed report facts; no supplied command is executed.');
-  if(observed)add('root-cause-analyzer',{symptom:observed,observations:[{id:'supplied-observation',role:'SYMPTOM',statement:observed,evidenceRefs:[]}],hypotheses:[]},['rootCauseEstablished'],false,'Separate the reported symptom from an unproven cause; no causal hypothesis or independent evidence is invented.');
-  missing.push('An isolated reproduction execution and its observation are required before a root cause or repair can be verified. This report workflow has no authorized attachment-code executor.',
-   'Change-impact and test-gap analysis require the exact repository revision, affected paths, dependency graph and test observations.',
-   'A minimal-fix decision, risk review, release-readiness and production-proof evaluation require a supplied candidate change and exact-subject evidence. None was inferred from the report.');
- }else{
+ if(kind==='supplied-defect')return defectReview(body,sourceId,executeReproduction);
+ else{
   fields.push({field:'opportunityId',kind:'DERIVED',source:`Unapproved supplied material identity: ${sourceId}`});
   const price=money('price',['price','proposed price']),cost={directCashMicroUsd:money('direct cash cost',['direct cash cost']),modelApiMicroUsd:money('model API cost',['model API cost']),infrastructureMicroUsd:money('infrastructure cost',['infrastructure cost']),toolingMicroUsd:money('tooling cost',['tooling cost']),allocatedMicroUsd:null,modeledLaborMicroUsd:null};
   const risk=money('risk reserve',['risk reserve']);
@@ -43,5 +37,5 @@ export function suppliedReview(kind:string,body:string,sourceId:string){
   missing.push('No exact opportunity approval was retrieved. This supplied draft is not bound to an existing approved opportunity; that identity and its approval evidence remain required.',
    'Scope exclusions, customer responsibilities and payment terms remain unspecified. Capability readiness and customer acceptance require an identified existing work subject and its evidence.');
  }
- return {steps,fields,missing};
+ return {steps,fields,missing,summary:undefined};
 }

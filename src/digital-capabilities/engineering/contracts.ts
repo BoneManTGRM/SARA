@@ -25,7 +25,7 @@ export const engineeringSchemas: Record<string, { input: Schema; output: Schema 
   "bug-reproduction-planner": {
     input: o({ report: t(8192), expected: t(4096, 0), observed: t(4096, 0), steps: a(t(4096), 100), target: e("LOCAL", "SANDBOX", "STAGING", "PRODUCTION"), environment: t(2048, 0) }),
     output: o({ status: statusSchema, reproductionTarget: e("LOCAL", "SANDBOX", "STAGING", "ISOLATED_COPY"), executionAllowed: bool,
-      reportDigest: t(64), missing: texts, steps: a(o({ order: integer(1), action: t(2048) }), 104), acceptance: texts, productionMutationRequired: bool }),
+      observationStatus:e("NO_FAILURE_REPORTED","UNCONFIRMED_OBSERVATION"), nextDiagnostic:t(1024), summary:t(1024), reportDigest: t(64), missing: texts, steps: a(o({ order: integer(1), action: t(2048) }), 104), acceptance: texts, productionMutationRequired: bool }),
   },
   "root-cause-analyzer": {
     input: o({ symptom: t(8192), observations: a(o({ id, role: e("SYMPTOM", "TRIGGER", "DEFECT", "CONDITION", "CASCADE", "COUNTEREXAMPLE"), statement: t(8192), evidenceRefs: idsSchema }), 256),
