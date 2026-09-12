@@ -19,7 +19,8 @@ export function prioritizeTasks(list:Data[]):{eligible:Data[];blocked:Data[]} {
 /** Bounded supported goal families produce work contracts, never invented inputs or authority. */
 export function deriveGoalTasks(goal:string):Data[] {
  const lower=goal.toLowerCase();let ids:string[]=[];
- if(/\b(?:bug|defect|regression|software|ci failure)\b/.test(lower))ids=['bug-reproduction-planner','root-cause-analyzer','diagnostic-experiment-designer','minimal-fix-selector','test-gap-mapper','repository-change-impact-analyzer','pull-request-risk-review','release-readiness-gate','production-proof-validator'];
+ if(/\b(?:triage|inspect|diagnose)\b/.test(lower)&&/\bci(?: failure)?\b/.test(lower))ids=['ci-failure-triage'];
+ else if(/\b(?:bug|defect|regression|software|ci failure)\b/.test(lower))ids=['bug-reproduction-planner','root-cause-analyzer','diagnostic-experiment-designer','minimal-fix-selector','test-gap-mapper','repository-change-impact-analyzer','pull-request-risk-review','release-readiness-gate','production-proof-validator'];
  else if(/\bnico\b/.test(lower))ids=['nico-run-health-diagnoser','nico-scanner-completeness-validator','nico-review-readiness-validator','nico-approval-provenance-verifier','nico-export-integrity-verifier','nico-delivery-readiness-gate'];
  else if(/\b(?:customer|website|service|proposal)\b/.test(lower))ids=['support-intake-triage','website-maintenance-scope-estimator','market-demand-validator','quote-margin-guard','proposal-compiler','customer-acceptance-verifier','delivery-evidence-pack-compiler'];
  else if(/\b(?:inbox|secretary|brief|meeting|email)\b/.test(lower))ids=['inbox-priority-classifier','email-thread-action-extractor','commitment-tracker','follow-up-detector','daily-owner-brief'];

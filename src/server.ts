@@ -764,6 +764,7 @@ async function handleOwnerRevenueWrite(
   if(url.pathname==='/api/capabilities/evidence/owner-observed'&&request.method==='POST') {
     json(response,200,await kernel.recordOwnerObservedEvidence(owner,await readJson(request)));return true;
   }
+  if(url.pathname==='/api/capabilities/goals/run'&&request.method==='POST'){json(response,200,await kernel.executeCapabilityGoal(owner,await readJson(request)));return true;}
   if(url.pathname==='/api/capabilities/plans/run'&&request.method==='POST') {
     json(response,200,await kernel.executeCapabilityPlan(owner,await readJson(request)));return true;
   }

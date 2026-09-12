@@ -30,6 +30,7 @@ export type ExecutionContext = {
   priorCapabilityResults?:readonly CapabilityResult[];
   recoverySnapshot?:import('./troubleshooting/implementations.ts').RecoverySnapshot;
   proceduralKnowledge?:import('../procedural-intelligence.ts').ProceduralKnowledgeSnapshot|null;
+  authoritativeJobAccounting?:import('./economic/accounting.ts').AuthoritativeJobAccounting;
   capabilityReadiness?:readonly {id:string;enabled:boolean;authorityClass:string;version?:string;contractDigest?:string;description?:string}[];
 };
 export type ServiceCapabilityEvidence = {

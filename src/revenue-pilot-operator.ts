@@ -361,9 +361,8 @@ export class RevenuePilotOperator {
         });
       }
     }
-    const job = status.revenuePilotJobs.find((candidate) =>
-      candidate.status === "queued" || candidate.status === "running"
-    );
+    const workOrder=await this.#kernel.orderRevenuePilotWork(SARA_PRINCIPAL);
+    const job = status.revenuePilotJobs.find(candidate=>candidate.id===workOrder[0]);
     if (!job || !job.nextRole) return this.#record({ outcome: "idle", reason: "no_authorized_job" });
     if (job.activeLease && Date.parse(job.activeLease.expiresAt) > now.getTime()) {
       const profile = ROLE_PROFILES[job.activeLease.role];

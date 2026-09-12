@@ -1,12 +1,14 @@
 import { snapshotJson,type Json } from './schema.ts';
 import type { CapabilityResult } from './types.ts';
-const dependencyKeys=['serviceReadinessDigest','proceduralKnowledgeDigest','capabilityReadinessDigest','recoverySnapshotDigest'] as const;
+const dependencyKeys=['serviceReadinessDigest','proceduralKnowledgeDigest','capabilityReadinessDigest','recoverySnapshotDigest','jobAccountingDigest','workSubjectDigest'] as const;
 export function hasReceiptDependencies(subject:CapabilityResult['subject']):boolean{return dependencyKeys.some(key=>subject[key]!==undefined);}
 /** Persist only the identifiers needed to recompute minimum authoritative state.
  * Communication bodies, field values, customer prose and secrets are excluded. */
 export function receiptDependencyInput(input:Record<string,Json>,subject:CapabilityResult['subject'],resolvedReadinessIds?:readonly string[]):Record<string,Json>|undefined {
  if(!hasReceiptDependencies(subject))return undefined;
  const retained:Record<string,Json>={};
+ if(subject.workSubjectDigest!==undefined)retained.workId=input.workId!;
+ if(subject.jobAccountingDigest!==undefined)retained.authoritativeJobIds=input.authoritativeJobIds??[];
  if(subject.serviceReadinessDigest!==undefined){retained.serviceCapabilityIds=Array.isArray(input.capabilities)?input.capabilities.map(x=>(x as Record<string,Json>).id!):input.requiredCapabilityIds??[];}
  if(subject.capabilityReadinessDigest!==undefined){const rows=[...(Array.isArray(input.tasks)?input.tasks:[]),...(Array.isArray(input.encounters)?input.encounters:[])];retained.capabilityReadinessIds=resolvedReadinessIds?[...resolvedReadinessIds].sort():[...new Set([...rows.map(x=>(x as Record<string,Json>).capabilityId!),...(Array.isArray(input.requestedCapabilityIds)?input.requestedCapabilityIds:[])])].sort();}
  if(subject.recoverySnapshotDigest!==undefined)retained.recoveryJobId=input.jobId!;
