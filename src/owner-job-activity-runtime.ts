@@ -117,6 +117,7 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
     function ownerJobStatus(records) {
       const statuses = new Set(records.map((job) => String(job.status || '').toLowerCase()));
       if (statuses.has('running') || statuses.has('active') || statuses.has('verifying')) return 'RUNNING';
+      if (statuses.has('blocked')) return 'BLOCKED';
       if (statuses.has('authorized') || statuses.has('scoped') || statuses.has('new')) return 'QUEUED';
       if (statuses.has('verified') || statuses.has('done') || statuses.has('completed') || statuses.has('qualified')) return 'COMPLETED';
       if (statuses.has('failed')) return 'FAILED';
@@ -125,6 +126,7 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
 
     function ownerJobStep(status) {
       if (status === 'RUNNING') return 'Executing bounded work or verifying evidence.';
+      if (status === 'BLOCKED') return 'Blocked. A dependency, failure, or owner-visible decision must change before work continues.';
       if (status === 'QUEUED') return 'Authorized or scoped and waiting for its next bounded step.';
       if (status === 'COMPLETED') return 'Useful outcome completed and retained.';
       if (status === 'FAILED') return 'Stopped after failure. Failure evidence remains in the immutable audit.';
@@ -147,7 +149,7 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
         groups.get(key).push(job);
       }
       return Array.from(groups.entries()).map(([key, records]) => {
-        records.sort((a, b) => Date.parse(a.createdAt || '') - Date.parse(b.createdAt || ''));
+        records.sort((a, b) => Date.parse((a.workCard && a.workCard.createdAt) || '') - Date.parse((b.workCard && b.workCard.createdAt) || ''));
         const latest = records[records.length - 1] || {};
         const card = latest.workCard || {};
         return {
@@ -161,7 +163,7 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
           criteriaCount: Array.isArray(card.acceptanceCriteria) ? card.acceptanceCriteria.length : 0,
           capabilityId: latest.learningCapabilityId || '',
           campaignId: latest.learningCampaignId || '',
-          createdAt: latest.createdAt || '',
+          createdAt: card.createdAt || '',
         };
       });
     }
@@ -169,9 +171,9 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
     function renderOwnerJobActivity(state) {
       const jobs = Array.isArray(state.jobs) ? state.jobs : [];
       const groups = ownerJobGroups(jobs);
-      const rank = { RUNNING: 0, QUEUED: 1, FAILED: 2, COMPLETED: 3, UNKNOWN: 4 };
+      const rank = { RUNNING: 0, BLOCKED: 1, QUEUED: 2, FAILED: 3, COMPLETED: 4, UNKNOWN: 5 };
       groups.sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || Date.parse(b.createdAt || '') - Date.parse(a.createdAt || ''));
-      const counts = { RUNNING: 0, QUEUED: 0, COMPLETED: 0, FAILED: 0, UNKNOWN: 0 };
+      const counts = { RUNNING: 0, BLOCKED: 0, QUEUED: 0, COMPLETED: 0, FAILED: 0, UNKNOWN: 0 };
       for (const group of groups) counts[group.status] = (counts[group.status] || 0) + 1;
       const learningRecords = jobs.filter((job) => Boolean(job && job.learningCampaignId)).length;
 
@@ -182,10 +184,11 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
       const raw = document.querySelector('#owner-job-raw');
       if (!stateNode || !summary || !current || !list || !raw) return { usefulJobs: groups.length };
 
-      stateNode.textContent = counts.RUNNING > 0 ? 'SARA is working' : counts.QUEUED > 0 ? 'Work is queued' : 'No active execution';
+      stateNode.textContent = counts.RUNNING > 0 ? 'SARA is working' : counts.BLOCKED > 0 ? 'Work is blocked' : counts.QUEUED > 0 ? 'Work is queued' : 'No active execution';
       summary.replaceChildren();
       const summaryItems = [
         [counts.RUNNING + ' running', counts.RUNNING > 0],
+        [counts.BLOCKED + ' blocked', counts.BLOCKED > 0],
         [counts.QUEUED + ' queued', false],
         [counts.COMPLETED + ' completed', false],
         [counts.FAILED + ' failed', counts.FAILED > 0],
@@ -198,14 +201,16 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
         summary.append(chip);
       }
 
-      const active = groups.find((group) => group.status === 'RUNNING') || groups.find((group) => group.status === 'QUEUED');
+      const active = groups.find((group) => group.status === 'RUNNING')
+        || groups.find((group) => group.status === 'BLOCKED')
+        || groups.find((group) => group.status === 'QUEUED');
       current.replaceChildren();
       const currentTitle = document.createElement('span');
       currentTitle.className = 'activity-title';
       currentTitle.textContent = active ? active.objective : 'SARA is idle';
       const currentStep = document.createElement('p');
       currentStep.className = 'activity-copy';
-      currentStep.textContent = active ? ownerJobStep(active.status) : 'No job is currently running or queued.';
+      currentStep.textContent = active ? ownerJobStep(active.status) : 'No job is currently running, blocked, or queued.';
       const currentMeta = document.createElement('p');
       currentMeta.className = 'activity-meta';
       currentMeta.textContent = active
@@ -239,7 +244,7 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
         }
       }
       raw.textContent = jobs.length + ' raw job records · ' + learningRecords + ' learning run records. Repeated learning runs are grouped by campaign, capability, and source objective.';
-      return { usefulJobs: groups.length, running: counts.RUNNING, queued: counts.QUEUED, completed: counts.COMPLETED, failed: counts.FAILED, rawJobs: jobs.length, learningRecords };
+      return { usefulJobs: groups.length, running: counts.RUNNING, blocked: counts.BLOCKED, queued: counts.QUEUED, completed: counts.COMPLETED, failed: counts.FAILED, rawJobs: jobs.length, learningRecords };
     }
 `;
 
