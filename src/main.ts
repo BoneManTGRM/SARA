@@ -1,3 +1,4 @@
+import {createNicoReadObserver} from './digital-capabilities/nico/observer.ts';
 import { WebsiteMaintenanceOperator } from "./website-maintenance.ts";
 import { AutonomousLearningWorker } from "./autonomous-learning-worker.ts";
 import { createCloudflareFreeCandidateGenerator } from "./cloudflare-free-generator.ts";
@@ -106,10 +107,17 @@ if (
 
 const kernelWorkerSetting = process.env.SARA_KERNEL_VERIFICATION_WORKERS ?? "0";
 if (!["0", "1", "2"].includes(kernelWorkerSetting)) throw new Error("Invalid SARA_KERNEL_VERIFICATION_WORKERS");
+if (Boolean(nicoBaseUrl) !== Boolean(nicoOperatorPassword)) {
+  throw new Error("SARA_NICO_BASE_URL and SARA_NICO_OPERATOR_PASSWORD must be configured together.");
+}
+const nicoOperator = nicoBaseUrl && nicoOperatorPassword
+  ? new NicoOperatorClient({ baseUrl: nicoBaseUrl, operatorPassword: nicoOperatorPassword })
+  : null;
 export const kernel = await SaraKernel.boot({
   stateDirectory,
   ownerTokenSha256,
   bootstrapRevenueCapabilities: true,
+  ...(nicoOperator?{nicoObserver:createNicoReadObserver(nicoOperator,{environment:'PRODUCTION'})}:{}),
   selfBuildVerificationWorkers: Number(kernelWorkerSetting) as 0 | 1 | 2,
 });
 await activateApprovedAutonomousPaidMandate({
@@ -143,12 +151,6 @@ if (reparodynamicCodingMode !== "off" && !client) {
 }
 const ownerAssistant = client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
   ? new OwnerAssistant({ modelClient: client, stateDirectory, monthlyBudgetUsd: telegramMonthlyBudgetUsd })
-  : null;
-if (Boolean(nicoBaseUrl) !== Boolean(nicoOperatorPassword)) {
-  throw new Error("SARA_NICO_BASE_URL and SARA_NICO_OPERATOR_PASSWORD must be configured together.");
-}
-const nicoOperator = nicoBaseUrl && nicoOperatorPassword
-  ? new NicoOperatorClient({ baseUrl: nicoBaseUrl, operatorPassword: nicoOperatorPassword })
   : null;
 const activeTelegramMonthlyBudgetUsd = ownerAssistant ? telegramMonthlyBudgetUsd : 0;
 let operator: RevenuePilotOperator | null = null;
