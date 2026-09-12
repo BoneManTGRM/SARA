@@ -16,3 +16,5 @@ jobs:
       - run: npm ci
       - run: node scripts/build-native-checker.mjs
       - run: npm run verify
+      - name: Qualify actual sandboxed browser
+        run: node --import tsx src/digital-capabilities/web/browser-qualification.ts

@@ -1,4 +1,6 @@
 import {nicoDefinitions} from './nico/definitions.ts';
+import {webDefinitions} from './web/definitions.ts';
+import {agentDefinitions} from './agents/definitions.ts';
 import { engineeringDefinitions } from "./engineering/definitions.ts";
 import {troubleshootingDefinitions} from './troubleshooting/definitions.ts';
 import {secretaryDefinitions} from './secretary/definitions.ts';
@@ -13,7 +15,7 @@ import { snapshotJson, validateSchema, type Json } from "./schema.ts";
 import type { CapabilityContract, CapabilityDefinition, ExecutionContext } from "./types.ts";
 
 // Only reviewed, statically imported implementations enter this registry. Customer manifests and learned artifacts cannot register code here.
-const DEFINITIONS:readonly CapabilityDefinition[]=[...foundationDefinitions,...engineeringDefinitions,...troubleshootingDefinitions,...secretaryDefinitions,...economicDefinitions,...businessDefinitions,...proceduralDefinitions,...selfManagementDefinitions,...nicoDefinitions];
+const DEFINITIONS:readonly CapabilityDefinition[]=[...foundationDefinitions,...engineeringDefinitions,...troubleshootingDefinitions,...secretaryDefinitions,...economicDefinitions,...businessDefinitions,...proceduralDefinitions,...selfManagementDefinitions,...nicoDefinitions,...webDefinitions,...agentDefinitions];
 const COMMON_FILES=["goal-plan.ts","economic-scheduling.ts","types.ts","schema.ts","registry.ts","evidence.ts","boundary.ts","receipt.ts","receipt-dependencies.ts","foundation.ts","../kernel.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts","observed-evidence.ts","plan.ts"];
 function freezeReviewed(value:unknown):void {
   if(!value||typeof value!=="object"||Object.isFrozen(value))return;
