@@ -1199,7 +1199,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       const list = document.querySelector('#owner-work-results');
       list.replaceChildren();
       for (const result of results) {
-        const article = document.createElement('article');
+        const article = document.createElement('article'); article.style.overflowWrap = 'anywhere';
         const title = document.createElement('p');
         title.textContent = result.goal + ' — ' + result.status;
         article.appendChild(title);
