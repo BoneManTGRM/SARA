@@ -9,7 +9,7 @@ test('web unknown click, hidden cost, credential access and payment transitions 
 test('web malformed pixels and mismatched image subjects never become visual proof',async()=>{const p={pageId:'page',revision:'r1',width:1,height:1,rgba:[0,0,0,255]};await assert.rejects(()=>invoke('visual-regression-inspector',{before:{...p,width:2},after:p,channelTolerance:0,maximumChangedBasisPoints:0}),/PIXEL_DIMENSION_MISMATCH/);assert.equal((await invoke('visual-regression-inspector',{before:p,after:{...p,pageId:'other'},channelTolerance:0,maximumChangedBasisPoints:0})).status,'SUBJECT_MISMATCH');const r=await invoke('visual-regression-inspector',{before:p,after:{...p,rgba:[1,0,0,255]},channelTolerance:1,maximumChangedBasisPoints:0});assert.equal(r.status,'WITHIN_TOLERANCE');assert.equal(r.semanticEquivalenceProven,false);});
 test('web source URLs reject credentials and script links; field preparations preserve submission boundary',async()=>{await assert.rejects(()=>invoke('website-state-reader',{page:{...page,sourceUrl:'https://name:password@example.com'}}),/UNSAFE_PAGE_SOURCE/);const r=await invoke('website-state-reader',{page:{...page,elements:[...page.elements,{id:'link',role:'LINK',text:'Malicious',href:'javascript:alert(1)',fieldType:null,value:null}]}});assert.equal((r.links as Record<string,Json>[])[0]!.url,null);assert.ok(!JSON.stringify(r).includes('not-output'));const prepared=await invoke('form-completion-planner',{page,values:[{fieldId:'email',value:'synthetic@example.com'}],requiredFieldIds:['email'],submitAction:{...safeAction,action:'SUBMIT',external:true}});assert.equal(prepared.submitAuthorized,false);assert.equal((prepared.submission as Record<string,Json>).allowed,false);});
 test('web dependency cycles and sandbox source mismatch reject before launching browser',async()=>{await assert.rejects(()=>invoke('browser-task-planner',{goal:'Cycle',steps:[{id:'a',action:safeAction,dependsOn:['b']},{id:'b',action:safeAction,dependsOn:['a']}]}),/CYCLIC_BROWSER_PLAN/);await assert.rejects(()=>invoke('website-state-reader',{page,sandboxHtml:'<h1>test</h1>'}),/SANDBOX_SOURCE_IDENTITY_REQUIRED/);});
-import { SandboxBrowser } from '../src/digital-capabilities/web/sandbox-browser.ts';
+import { SandboxBrowser,waitForSandboxBrowserEndpoint } from '../src/digital-capabilities/web/sandbox-browser.ts';
 test('web actual DOM snapshot redacts sensitive textarea descendants and case-insensitive credential field types',async()=>{
  const root={nodeName:'#document',nodeId:1,children:[{nodeName:'INPUT',nodeId:2,attributes:['type','PASSWORD','value','UPPERCASE_PASSWORD_SECRET']},{nodeName:'INPUT',nodeId:3,attributes:['type','HIDDEN','value','HIDDEN_TOKEN_SECRET']},{nodeName:'TEXTAREA',nodeId:4,attributes:['name','api_token'],children:[{nodeName:'#text',nodeId:5,nodeValue:'TEXTAREA_SECRET'}]},{nodeName:'H1',nodeId:6,children:[{nodeName:'#text',nodeId:7,nodeValue:'Ordinary heading'}]}]};
  const browser={send:async()=>({root})} as unknown as SandboxBrowser;
@@ -41,4 +41,16 @@ test('web sandbox stable handles cannot address sensitive, detached or unresolve
  }
  const browser={snapshot:async()=>({elements:[{nodeId:12,backendNodeId:700,name:'INPUT',attributes:{id:'name',type:'text'}}]}),send:async(method:string)=>{assert.equal(method,'DOM.pushNodesByBackendIdsToFrontend');return {nodeIds:[0]};}} as unknown as SandboxBrowser;
  await assert.rejects(()=>SandboxBrowser.prototype.prepareField.call(browser,700,'blocked'),/STALE_SANDBOX_FIELD/);
+});
+test('web browser endpoint readiness waits through delayed and partial Chrome publication',async()=>{
+ for(const partial of [false,true]){let time=0,reads=0;
+  const endpoint=await waitForSandboxBrowserEndpoint({now:()=>time,alive:()=>true,pause:async ms=>{time+=ms;},read:async()=>{reads++;if(time<3000){if(partial)return '43123\n/devtools/browser/12345678-1234-1234';throw new Error('ENOENT');}return '43123\n/devtools/browser/12345678-1234-1234-1234-123456789abc\n';}});
+  assert.deepEqual(endpoint,{port:43123,path:'/devtools/browser/12345678-1234-1234-1234-123456789abc'});assert.ok(time>=3000&&time<=10000);assert.ok(reads>1);
+ }
+});
+test('web browser endpoint readiness has one deadline and fails early if the child exits',async()=>{
+ let time=0,reads=0;
+ await assert.rejects(()=>waitForSandboxBrowserEndpoint({now:()=>time,alive:()=>true,pause:async ms=>{time+=ms;},read:async()=>{reads++;return '70000\n/devtools/browser/12345678-1234-1234-1234-123456789abc';}}),/SANDBOX_BROWSER_ENDPOINT_UNAVAILABLE/);assert.equal(time,10000);assert.ok(reads<=201);
+ time=0;reads=0;
+ await assert.rejects(()=>waitForSandboxBrowserEndpoint({now:()=>time,alive:()=>time<150,pause:async ms=>{time+=ms;},read:async()=>{reads++;return '43123';}}),/SANDBOX_BROWSER_UNAVAILABLE/);assert.equal(time,150);assert.equal(reads,3);
 });

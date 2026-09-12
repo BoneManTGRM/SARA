@@ -11,6 +11,20 @@ async function resolveFrontendNode(send:(method:string,params:Record<string,unkn
  if(!Array.isArray(result.nodeIds)||result.nodeIds.length!==1||!Number.isSafeInteger(result.nodeIds[0])||result.nodeIds[0]<1)throw new CapabilityInputError('STALE_SANDBOX_FIELD');
  return result.nodeIds[0];
 }
+export type BrowserEndpointReadiness={read:()=>Promise<string>;alive:()=>boolean;now:()=>number;pause:(milliseconds:number)=>Promise<void>};
+export async function waitForSandboxBrowserEndpoint(input:BrowserEndpointReadiness):Promise<{port:number;path:string}>{
+ const deadline=input.now()+10000;
+ while(input.now()<deadline){
+  if(!input.alive())throw new Error('SANDBOX_BROWSER_UNAVAILABLE');
+  let file='';try{file=await input.read();}catch{/* Chrome has not published the endpoint file yet. */}
+  if(!input.alive())throw new Error('SANDBOX_BROWSER_UNAVAILABLE');
+  const lines=file.trim().split(/\r?\n/u),port=Number(lines[0]),path=lines[1];
+  const ready=lines.length===2&&/^\d{1,5}$/u.test(lines[0]??'')&&port>0&&port<=65535&&/^\/devtools\/browser\/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/iu.test(path??'');
+  if(ready&&input.now()<deadline)return {port,path:path!};
+  const remaining=deadline-input.now();if(remaining>0)await input.pause(Math.min(50,remaining));
+ }
+ throw new Error('SANDBOX_BROWSER_ENDPOINT_UNAVAILABLE');
+}
 /** Trusted-host adapter. It can only render supplied HTML in a new, credential-free,
  * network-blocked browser context. No user-supplied protocol methods, URLs or scripts. */
 export class SandboxBrowser {
@@ -20,7 +34,7 @@ export class SandboxBrowser {
   if(!['google-chrome','chromium','chromium-browser'].includes(executable))throw new Error('UNAPPROVED_BROWSER_EXECUTABLE');
   const directory=await mkdtemp(join(tmpdir(),'sara-sandbox-browser-'));const child=spawn(executable,['--headless=new','--remote-debugging-port=0',`--user-data-dir=${directory}`,'--no-first-run','--disable-background-networking','--disable-extensions','--disable-component-update','--disable-sync','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost','about:blank'],{stdio:'ignore',env:{PATH:process.env.PATH,LANG:'en_US.UTF-8',HOME:directory}});
   let launchError=false;child.on('error',()=>{launchError=true;});const lifetime=setTimeout(()=>child.kill('SIGKILL'),30000);let socket:WebSocket|undefined;
-  try{let portFile='';for(let attempt=0;attempt<50;attempt++){if(launchError||child.exitCode!==null)throw new Error('SANDBOX_BROWSER_UNAVAILABLE');try{portFile=await readFile(join(directory,'DevToolsActivePort'),'utf8');break;}catch{await delay(50);}}const [port,path]=portFile.trim().split('\n');if(!/^\d{1,5}$/u.test(port??'')||!/^\/devtools\/browser\/[A-Za-z0-9-]+$/u.test(path??''))throw new Error('SANDBOX_BROWSER_ENDPOINT_UNAVAILABLE');socket=new WebSocket(`ws://127.0.0.1:${port}${path}`);await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('SANDBOX_BROWSER_CONNECT_TIMEOUT')),5000);socket!.addEventListener('open',()=>{clearTimeout(timer);resolve();},{once:true});socket!.addEventListener('error',()=>{clearTimeout(timer);reject(new Error('SANDBOX_BROWSER_CONNECTION_FAILED'));},{once:true});});
+  try{const {port,path}=await waitForSandboxBrowserEndpoint({read:()=>readFile(join(directory,'DevToolsActivePort'),'utf8'),alive:()=>!launchError&&child.exitCode===null&&child.signalCode===null,now:()=>performance.now(),pause:milliseconds=>delay(milliseconds)});socket=new WebSocket(`ws://127.0.0.1:${port}${path}`);await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('SANDBOX_BROWSER_CONNECT_TIMEOUT')),5000);socket!.addEventListener('open',()=>{clearTimeout(timer);resolve();},{once:true});socket!.addEventListener('error',()=>{clearTimeout(timer);reject(new Error('SANDBOX_BROWSER_CONNECTION_FAILED'));},{once:true});});
    const pending=new Map<number,{resolve(v:any):void;reject(e:Error):void;timer:ReturnType<typeof setTimeout>}>();let counter=0;const next=()=>++counter;
    socket.addEventListener('message',event=>{let value:any;try{value=JSON.parse(String(event.data));}catch{child.kill('SIGKILL');return;}if(value.id){const wait=pending.get(value.id);if(!wait)return;clearTimeout(wait.timer);pending.delete(value.id);if(value.error)wait.reject(new Error('SANDBOX_BROWSER_PROTOCOL_ERROR'));else wait.resolve(value.result);}});
    const command=(method:string,params:Record<string,unknown>={})=>new Promise<any>((resolve,reject)=>{const id=next(),timer=setTimeout(()=>{pending.delete(id);reject(new Error('SANDBOX_BROWSER_COMMAND_TIMEOUT'));},5000);pending.set(id,{resolve,reject,timer});socket!.send(JSON.stringify({id,method,params}));});

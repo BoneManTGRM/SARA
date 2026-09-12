@@ -56,6 +56,6 @@ Web analysis accepts source-bound snapshots. Optional supplied HTML runs in a fr
 
 ## Qualification and evidence
 
-`docs/digital-worker-mission-inventory.json` enumerates the 93 required IDs independently of the registry. CI runs `npm run verify`, including control, persistence, recovery, adversarial, economic and HTTP tests, followed by `node --import tsx src/digital-capabilities/web/browser-qualification.ts`. CodeQL is separate.
+`docs/digital-worker-mission-inventory.json` enumerates the 93 required IDs independently of the registry. CI requires `node --import tsx src/digital-capabilities/web/browser-qualification.ts` and `npm run verify`, including control, persistence, recovery, adversarial, economic and HTTP tests. The browser prerequisite runs first so environment failures surface before the long suite. CodeQL is separate.
 
 Startup emits release/state attestation and bounded runtime proofs against the exact serving revision. These exercise harmless synthetic analysis and denial paths, preserve the audit prefix and compare protected state before and after. They do not prove customer outcomes or fabricate NICO production behavior. Use actual source-bound acceptance evidence for each real job; deployment success alone never establishes completion.

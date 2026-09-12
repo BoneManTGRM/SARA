@@ -38,3 +38,11 @@ PR #178 head `a58722bf` passed its 1,347 main tests and 14 runtime tests, then r
 Snapshots now expose CDP backend node identity. Field preparation verifies the exact backend node in a current snapshot, retains all sensitive/type restrictions, and resolves a fresh frontend handle with `DOM.pushNodesByBackendIdsToFrontend` immediately before mutation. Screenshot masking uses the same resolution after each preceding redaction. Missing, sensitive, detached and unresolved identities fail closed. The real browser fixture retains the original backend handle across redaction, so the failing acceptance path remains exercised.
 
 `node --import tsx --test tests/web-capabilities.test.ts tests/web-capabilities-kernel.test.ts` passed 12/12. `npm run typecheck` passed. Real Chrome qualification must be rerun in CI against the repaired head; no local browser proof is claimed.
+
+## Bounded Chrome endpoint readiness
+
+PR #178 head `7732dcf` passed 1,349 main tests and 14 runtime tests, then the real browser gate failed while its first Chrome process was still alive: no complete endpoint had been accepted within the previous 2.5-second startup loop. That loop also stopped on the first readable file, including a partial write.
+
+An extracted readiness helper first reproduced the delayed-start failure and invalid-port acceptance in focused RED tests. The integrated helper now uses a single 10-second monotonic deadline, continues through missing, partial and invalid endpoint files, validates the complete browser UUID and TCP port, and immediately fails when the same child exits. It launches no replacement process, retains the existing 30-second overall browser lifetime, and changes no sandbox or network restriction. Injected-clock fixtures cover delayed publication, truncated UUID, invalid port, exact timeout and early child exit.
+
+`node --import tsx --test tests/web-capabilities.test.ts tests/web-capabilities-kernel.test.ts` passed 14/14. `npm run typecheck` passed. Required actual Chrome qualification remains the CI acceptance gate.
