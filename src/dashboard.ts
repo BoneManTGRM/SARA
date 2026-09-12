@@ -786,6 +786,18 @@ export const DASHBOARD_HTML = `<!doctype html>
                 <div class="card-label">Owner directive channel</div>
                 <div class="card-value small">Tell SARA what outcome you need.</div>
                 <p class="card-copy">After owner authentication, a directive becomes a bounded job with explicit evidence and a hard budget. SARA may work autonomously inside that scope; protected actions still require you.</p>
+                <form id="owner-work-form">
+                  <fieldset id="owner-work-fields" disabled>
+                    <label for="owner-work-text">Message SARA</label>
+                    <textarea id="owner-work-text" maxlength="4096" required placeholder="Review unfinished work, identify blockers, prioritize obligations, complete the authorized steps, and give me a brief."></textarea>
+                    <label for="owner-work-material">Supplied material (optional)</label>
+                    <textarea id="owner-work-material" maxlength="12000" placeholder="Paste communication text for a secretary review. Do not include passwords or secrets."></textarea>
+                    <button class="button primary" id="owner-work-submit" type="submit">Run supported work</button>
+                    <button class="button" id="owner-work-refresh" type="button">Refresh work</button>
+                  </fieldset>
+                </form>
+                <p class="card-copy" id="owner-work-status" role="status">Owner authentication required.</p>
+                <div id="owner-work-results" aria-live="polite"></div>
               </div>
               <form class="directive-form" id="directive-form">
                 <fieldset id="directive-fields" disabled>
@@ -896,12 +908,16 @@ export const DASHBOARD_HTML = `<!doctype html>
     }
 
     function setConnected(connected) {
+      ownerWorkEpoch++;
       body.dataset.owner = connected ? 'connected' : 'locked';
       connectButton.textContent = connected ? 'Disconnect' : 'Owner access';
       document.querySelector('#connection-state').textContent = connected ? 'Owner link verified' : 'Owner state locked';
       directiveFields.disabled = !connected;
+      document.querySelector('#owner-work-fields').disabled = !connected;
       document.querySelector('#learning-fields').disabled = !connected;
       if (!connected) {
+        document.querySelector('#owner-work-results').replaceChildren();
+        document.querySelector('#owner-work-status').textContent = 'Owner authentication required.';
         document.querySelector('#capabilities').textContent = '—';
         document.querySelector('#capabilities-note').textContent = 'Owner authentication required.';
         reviewedLearning = null; reviewedLearningCapacity = null; ownerMandate = null;
@@ -1177,6 +1193,70 @@ export const DASHBOARD_HTML = `<!doctype html>
       } catch(error) { setMessage(error.message,true); }
     });
 
+    let ownerWorkPending = null;
+    let ownerWorkEpoch = 0;
+    function renderOwnerWork(results) {
+      const list = document.querySelector('#owner-work-results');
+      list.replaceChildren();
+      for (const result of results) {
+        const article = document.createElement('article');
+        const title = document.createElement('p');
+        title.textContent = result.goal + ' — ' + result.status;
+        article.appendChild(title);
+        const summary = document.createElement('p');
+        summary.textContent = result.outputText + ' · ' + result.verification + ' · Recorded cost $' + (result.actualCashMicroUsd / 1000000).toFixed(6);
+        article.appendChild(summary);
+        const observed = document.createElement('p'); observed.textContent = 'Source observed: ' + result.observedAt; article.appendChild(observed);
+        const progress = document.createElement('p'); progress.textContent = 'Workflow: ' + (result.workflow || 'No supported match') + ' · ' + (result.currentStep ? 'Next step: ' + result.currentStep + ' · ' : '') + result.nextAction; article.appendChild(progress);
+        for (const receipt of result.receipts) {
+          const output = receipt.output || {};
+          const lines = [...(output.commitments || []).map(item => item.statement), ...(output.followUps || []).map(item => item.reason), ...(output.ambiguities || []), ...(output.responseDraft ? [output.responseDraft] : []), ...(output.sections || []).flatMap(section => section.items.map(item => item.summary)), ...(output.basis === 'AUTHORITATIVE_JOB_STATE' ? output.jobs.map(job => job.jobId + ': linked realized revenue $' + (job.realizedRevenueMicroUsd / 1000000).toFixed(6) + '; recorded model and direct costs $' + ((job.modelApiMicroUsd + job.directExternalMicroUsd) / 1000000).toFixed(6)) : []), ...(output.accountingUnknowns || [])];
+          for (const line of lines) { const p = document.createElement('p'); p.textContent = line; article.appendChild(p); }
+        }
+        for (const blocker of result.blockers || []) {
+          const p = document.createElement('p'); p.textContent = blocker.subjectId + ': ' + blocker.reason; article.appendChild(p);
+        }
+        const details = document.createElement('details');
+        const label = document.createElement('summary'); label.textContent = 'Executed steps and evidence (' + result.receipts.length + ')'; details.appendChild(label);
+        for (const receipt of result.receipts) {
+          const p = document.createElement('p'); p.textContent = receipt.capability.id + ' · EXECUTED · ' + receipt.status; details.appendChild(p);
+          const pre = document.createElement('pre'); pre.style.whiteSpace = 'pre-wrap'; pre.style.overflowWrap = 'anywhere'; pre.textContent = JSON.stringify({result: receipt.output, evidence: receipt.resultDigest, cost: receipt.cost}, null, 2); details.appendChild(pre);
+        }
+        article.appendChild(details);
+        list.appendChild(article);
+      }
+    }
+    async function refreshOwnerWork() {
+      if (body.dataset.owner !== 'connected') return;
+      const epoch = ownerWorkEpoch;
+      const response = await fetch('/api/owner/work', {headers: auth(), signal: AbortSignal.timeout(30000)});
+      if (response.status === 401) { setConnected(false); return; }
+      if (!response.ok) { document.querySelector('#owner-work-status').textContent = 'Work history unavailable. Refresh to retry.'; return; }
+      const results = await response.json();
+      if (body.dataset.owner === 'connected' && epoch === ownerWorkEpoch) renderOwnerWork(results);
+    }
+    document.querySelector('#owner-work-refresh').addEventListener('click', () => { refreshOwnerWork().catch(() => { document.querySelector('#owner-work-status').textContent = 'Work history unavailable.'; }); });
+    document.querySelector('#owner-work-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (body.dataset.owner !== 'connected') return;
+      const text = document.querySelector('#owner-work-text').value.trim();
+      const suppliedText = document.querySelector('#owner-work-material').value.trim();
+      const identity = JSON.stringify({text, suppliedText});
+      if (!ownerWorkPending || ownerWorkPending.identity !== identity) ownerWorkPending = {identity, requestId: 'owner-' + crypto.randomUUID()};
+      const epoch = ownerWorkEpoch;
+      const button = document.querySelector('#owner-work-submit'); button.disabled = true;
+      document.querySelector('#owner-work-status').textContent = 'Submitting supported work…';
+      try {
+        const response = await fetch('/api/owner/messages', {method: 'POST', signal: AbortSignal.timeout(30000), headers: {...auth(), 'Content-Type': 'application/json'}, body: JSON.stringify({requestId: ownerWorkPending.requestId, text, ...(suppliedText ? {suppliedText} : {})})});
+        if (response.status === 401) { setConnected(false); return; }
+        const result = await response.json();
+        if (body.dataset.owner !== 'connected' || epoch !== ownerWorkEpoch) return;
+        if (!response.ok) throw new Error(result.error || 'Work request failed.');
+        renderOwnerWork([result]); document.querySelector('#owner-work-status').textContent = result.status + ' · ' + result.verification;
+      } catch (error) { if (body.dataset.owner === 'connected' && epoch === ownerWorkEpoch) document.querySelector('#owner-work-status').textContent = 'Request interrupted. Submit again to reconcile the same request. ' + error.message; }
+      finally { button.disabled = false; }
+    });
+
     async function refreshCapabilityInventory(revenueServiceCount) {
       const count = document.querySelector('#capabilities');
       const note = document.querySelector('#capabilities-note');
@@ -1219,6 +1299,7 @@ export const DASHBOARD_HTML = `<!doctype html>
       document.querySelector('#owner-cost').textContent = money(state.ownerFundedRecurringMonthlyUsd);
       document.querySelector('#jobs').textContent = String(state.jobs.length);
       await refreshCapabilityInventory(state.capabilities.length);
+      await refreshOwnerWork();
       document.querySelector('#compound-reserve').textContent = money(state.availableCompoundReserveUsd);
       document.querySelector('#constitution').textContent = 'Verified · v' + state.constitution.version;
       document.querySelector('#digest').textContent = state.constitution.digest;

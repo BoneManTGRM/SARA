@@ -11,6 +11,7 @@ import { DASHBOARD_HTML } from "./dashboard.ts";
 import { compileExecutorHandoff } from "./handoff.ts";
 import { SaraKernel, SARA_PRINCIPAL } from "./kernel.ts";
 import type { OwnerAssistant } from "./owner-assistant.ts";
+import {supportedWorkFamily} from './owner-work.ts';
 import { PolicyDeniedError } from "./policy.ts";
 import type { RevenuePilotInput } from "./revenue-pilot.ts";
 import { normalizePublicGitHubRepository } from "./founding-pilot.ts";
@@ -757,6 +758,18 @@ async function handleOwnerRevenueWrite(
   if (url.pathname === "/api/capability-contracts" && request.method === "GET") {
     json(response, 200, await kernel.inspectCapabilityContracts()); return true;
   }
+  if(url.pathname==='/api/owner/messages'&&request.method==='POST'){
+    json(response,200,await kernel.executeOwnerMessage(owner,await readJson(request)));return true;
+  }
+  if(url.pathname==='/api/owner/work'&&request.method==='GET'){
+    json(response,200,await kernel.inspectOwnerWork(owner));return true;
+  }
+  if(url.pathname==='/api/owner/work/cancel'&&request.method==='POST'){
+    const body=await readJson(request);json(response,200,await kernel.cancelOwnerWork(owner,boundedText(body.requestId,1,128,'requestId')));return true;
+  }
+  if(url.pathname==='/api/capabilities/reachability'&&request.method==='GET'){
+    json(response,200,await kernel.inspectCapabilityReachability(owner));return true;
+  }
   if (url.pathname === "/api/capabilities/invoke" && request.method === "POST") {
     const result = await kernel.invokeCapability(owner, await readJson(request) as unknown as import("./digital-capabilities/types.ts").CapabilityInvocation);
     json(response, result.status === "INVALID_INPUT" ? 400 : result.status === "BLOCKED" ? 409 : 200, result); return true;
@@ -1212,6 +1225,13 @@ async function handleTelegramBridgeRequest(
     return;
   }
   if (request.method === "POST" && url.pathname === "/api/bridge/actions/luna") {
+    const body = await readJson(request);
+    const requestId = boundedText(body.requestId, 8, 160, "requestId");
+    const text = boundedText(body.text, 3, 1_200, "text");
+    if(supportedWorkFamily(text)){
+      const work=await kernel.executeTelegramWork(SARA_PRINCIPAL,{requestId:'telegram-'+sha256(requestId),text,...(typeof body.suppliedText==='string'?{suppliedText:body.suppliedText}:{})});
+      json(response,200,{...work,outcome:work.status==='COMPLETE'?'succeeded':'blocked',accountedCostUsd:work.actualCashMicroUsd/1_000_000,model:'deterministic-capabilities'});return;
+    }
     if (!options.ownerAssistant) {
       json(response, 503, { error: "Bounded Luna analysis is not configured." });
       return;
@@ -1220,9 +1240,6 @@ async function handleTelegramBridgeRequest(
       json(response, 423, { error: "Emergency stop is active. No paid request was made." });
       return;
     }
-    const body = await readJson(request);
-    const requestId = boundedText(body.requestId, 8, 160, "requestId");
-    const text = boundedText(body.text, 3, 1_200, "text");
     json(response, 200, await options.ownerAssistant.analyze({ requestId, text }));
     return;
   }

@@ -13,6 +13,7 @@ import {validatePlan,executeBoundedPlan} from './digital-capabilities/plan.ts';
 import { serviceCapabilityEvidence } from "./digital-capabilities/service-readiness.ts";
 import { normalizeSuppliedEvidence } from "./digital-capabilities/evidence.ts";
 import { capabilityResult } from "./digital-capabilities/receipt.ts";
+import {parseWorkMessage,compileOwnerWork,workSourceDigest,workResult,reachability,type WorkRecord} from './owner-work.ts';
 import { CapabilityInputError, arraySchema, digestSchema, idSchema, snapshotJson, validateSchema, type Json } from "./digital-capabilities/schema.ts";
 import type { CapabilityInvocation, CapabilityResult, ExecutionContext } from "./digital-capabilities/types.ts";
 import { assertLearnedCapabilityActive, compileLearnedCapabilityControl, learnedCapabilityControl,
@@ -2247,6 +2248,129 @@ export class SaraKernel {
   /** Reviewed built-in contracts share this kernel, policy authority, and append-only audit store. */
   async inspectCapabilityContracts() { return capabilityContracts(); }
 
+  async inspectCapabilityReachability(principal:Principal) {
+    if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    return reachability(await capabilityContracts());
+  }
+
+  async executeOwnerMessage(principal:Principal,supplied:unknown) {
+    if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    return this.receiveBoundedWork(principal,supplied);
+  }
+
+  /** The authenticated Telegram bridge grants only the existing local read/draft scope. */
+  async executeTelegramWork(principal:Principal,supplied:unknown) {
+    if(principal!==SARA_PRINCIPAL)throw new Error('TRUSTED_BRIDGE_PRINCIPAL_REQUIRED');
+    return this.receiveBoundedWork(principal,supplied);
+  }
+
+  private async receiveBoundedWork(principal:Principal,supplied:unknown) {
+    const request=parseWorkMessage(supplied),requestDigest=sha256(canonicalJson(request));
+    const record=await this.serializeMutation(async()=>{
+      const state=await this.state();
+      const prior=state.events.find(e=>e.type==='owner_work_received'&&e.actor.id===principal.id&&(e.data as WorkRecord).request.requestId===request.requestId);
+      if(prior){const saved=prior.data as WorkRecord;if(saved.requestDigest!==requestDigest)throw new Error('OWNER_WORK_REQUEST_CONFLICT');return structuredClone(saved);}
+      await this.authorize(principal,{action:'record_memory',targetId:`owner-work:${request.requestId}`,external:false});
+      const materials=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord).filter(r=>r.request.suppliedText?.trim()).map(r=>({body:r.request.suppliedText!,sourceId:`owner-material:${r.requestDigest}`,receivedAt:r.receivedAt}));
+      const compiled=await compileOwnerWork(request,state.jobs,await capabilityContracts(),new Date().toISOString(),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),{jobCapabilities:state.capabilities,materials});
+      await this.#store.append('owner_work_received',principal,compiled);
+      return compiled;
+    });
+    return this.continueBoundedWork(record);
+  }
+
+  private async currentWorkSourceDigest(){const state=await this.state();return workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities);}
+
+  private async continueBoundedWork(record:WorkRecord,maximumSteps=16) {
+    // Only an immutable request admitted by an authenticated owner/bridge can
+    // reach this path. Workers retain their own identity, never mint an owner.
+    const request=record.request;
+    const cancelled=async()=>Boolean((await this.state()).events.find(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===request.requestId));
+    const sourceChanged=async()=>record.workflow==='unfinished-work'&&record.sourceDigest!==await this.currentWorkSourceDigest();
+    const interrupted=async()=>await cancelled()||await sourceChanged();
+    const execution=record.plan&&!(await this.state()).emergencyStopped&&!(await interrupted())?await this.runCapabilityPlan(SARA_PRINCIPAL,record.plan,maximumSteps,interrupted):null;
+    const state=await this.state();
+    const requestIds=new Set(record.plan?.steps.map(s=>`plan-${sha256(canonicalJson({planId:record.plan!.id,version:record.plan!.version,stepId:s.id}))}`)??[]);
+    const receipts=state.events.filter(e=>e.type==='digital_capability_executed'&&e.actor.id===SARA_PRINCIPAL.id).map(e=>(e.data as {result:CapabilityResult}).result).filter(r=>requestIds.has(r.requestId));
+    const result=workResult(record,execution,receipts);
+    if(state.emergencyStopped){result.status='BLOCKED';result.verification='NOT_VERIFIED';result.blockers.push({subjectId:request.requestId,reason:'EMERGENCY_STOP',missing:['Existing trusted stop restoration']});}
+    if(record.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of the changed durable work']});}
+    if(await cancelled()){result.status='CANCELLED';result.verification='NOT_VERIFIED';result.outputText='Cancelled. Historical executed-step evidence is preserved.';}
+    await this.serializeMutation(async()=>{const current=await this.state();const digest=sha256(canonicalJson(result));
+      if(!current.events.some(e=>e.type==='owner_work_result'&&(e.data as {digest:string}).digest===digest))await this.#store.append('owner_work_result',SARA_PRINCIPAL,{digest,result});});
+    return result;
+  }
+
+  async inspectOwnerWork(principal:Principal) {
+    if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    const state=await this.state(),latest=new Map<string,ReturnType<typeof workResult>>();
+    for(const e of state.events){
+      if(e.type==='owner_work_received'){const record=e.data as WorkRecord;
+        const ids=new Set(record.plan?.steps.map(s=>`plan-${sha256(canonicalJson({planId:record.plan!.id,version:record.plan!.version,stepId:s.id}))}`)??[]);
+        const receipts=state.events.filter(event=>event.type==='digital_capability_executed'&&event.actor.id===SARA_PRINCIPAL.id).map(event=>(event.data as {result:CapabilityResult}).result).filter(r=>ids.has(r.requestId));
+        latest.set(record.request.requestId,workResult(record,null,receipts));}
+      if(e.type==='owner_work_result'){const result=(e.data as {result:ReturnType<typeof workResult>}).result;latest.set(result.requestId,result);}}
+    const records=new Map(state.events.filter(e=>e.type==='owner_work_received').map(e=>[(e.data as WorkRecord).request.requestId,e.data as WorkRecord]));
+    return [...latest.values()].slice(-25).reverse().map(stored=>{const result=structuredClone(stored),record=records.get(result.requestId);
+      if(record?.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';if(!result.blockers.some(b=>b.reason==='WORK_SOURCE_CHANGED'))result.blockers.push({subjectId:result.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of changed durable work']});}
+      if(state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===result.requestId)){result.status='CANCELLED';result.verification='NOT_VERIFIED';}
+      return result;});
+  }
+
+  async cancelOwnerWork(principal:Principal,requestId:string) {
+    if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    validateSchema(idSchema,requestId);
+    await this.serializeMutation(async()=>{const state=await this.state();
+      if(!state.events.some(e=>e.type==='owner_work_received'&&(e.data as WorkRecord).request.requestId===requestId))throw new Error('OWNER_WORK_NOT_FOUND');
+      if(!state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===requestId))await this.#store.append('owner_work_cancelled',principal,{requestId});});
+    return {requestId,status:'CANCELLED'};
+  }
+
+  /** Consumed by the existing runtime worker. Never selects new idle goals. */
+  async resumeOwnerWorkTick() {
+    const state=await this.state();if(state.emergencyStopped)return {status:'BLOCKED',reason:'EMERGENCY_STOP'};
+    const records=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord);
+    for(const record of records){
+      if(!record.plan)continue;
+      if(state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===record.request.requestId))continue;
+      const latest=state.events.filter(e=>e.type==='owner_work_result'&&(e.data as {result:{planId:string}}).result.planId===record.plan!.id).at(-1);
+      if(latest){const result=(latest.data as {result:ReturnType<typeof workResult>}).result;
+        // A blocked/completed result requires new facts or an explicit owner
+        // retry. A crash before acknowledgment remains resumable and idempotent.
+        if(result.execution?.status!=='PAUSED')continue;
+      }
+      return this.continueBoundedWork(record,4);
+    }
+    return {status:'IDLE',reason:'NO_INTERRUPTED_OWNER_WORK'};
+  }
+
+  /** Diagnose at most one already failed learning job per existing worker tick. */
+  async diagnoseLearningWorkEvent() {
+    const state=await this.state();
+    const mandate=state.standingMandate;
+    const request:RoutineActionRequest={id:'learning-failure-diagnosis',kind:'business_candidate_development',targetId:'learning-recovery',channel:'internal',serviceId:'skill-learning',estimatedCostUsd:0,external:false,requestedAt:new Date().toISOString(),platform:'owner_site'};
+    if(evaluateRoutineAction({mandate,request,emergencyStopped:state.emergencyStopped}).outcome!=='automatic')return {status:'BLOCKED',reason:'ACTIVE_LEARNING_MANDATE_REQUIRED'};
+    const failed=state.jobs.filter(j=>j.learningCampaignId&&j.status==='failed');
+    for(const job of failed){
+      const event=state.events.filter(e=>e.type==='job_status_changed'&&(e.data as {jobId:string;status:string}).jobId===job.id&&(e.data as {status:string}).status==='failed').at(-1);
+      if(!event)continue;
+      const requestId=`learning-diagnose-${event.hash}`;
+      if(state.events.some(e=>e.type==='digital_capability_executed'&&(e.data as {requestId:string}).requestId===requestId))continue;
+      // Status is observed; absent original error text is not reconstructed.
+      const failure={id:event.id,sourceId:job.id,subsystem:'learning',code:null,message:'Durable learning job entered failed state. Original failure cause requires inspection.',frames:[]};
+      const current=await this.state();
+      if(current.standingMandate?.digest!==mandate?.digest||evaluateRoutineAction({mandate:current.standingMandate,request:{...request,requestedAt:new Date().toISOString()},emergencyStopped:current.emergencyStopped}).outcome!=='automatic')return {status:'BLOCKED',reason:'LEARNING_AUTHORITY_CHANGED'};
+      try {
+        const receipt=await this.invokeCapability(SARA_PRINCIPAL,{requestId,capabilityId:'failure-clusterer',input:{failures:[failure]}},this.capabilityAuthorityDigest(current),{...request,id:requestId});
+        return {status:receipt.status,sourceEventId:event.id,resultDigest:receipt.resultDigest,actualCashMicroUsd:receipt.cost.actualCashMicroUsd};
+      } catch(error) {
+        if(error instanceof EventStoreIntegrityError)throw error;
+        return {status:'BLOCKED',reason:error instanceof Error?error.message:'EVENT_DIAGNOSIS_BLOCKED',sourceEventId:event.id};
+      }
+    }
+    return {status:'IDLE',reason:'NO_NEW_LEARNING_FAILURE_EVENT'};
+  }
+
   private capabilityAuthorityDigest(state:KernelState):string {
     const mandateDigest=state.standingMandate?sha256(canonicalJson(state.standingMandate)):null;
     return sha256(canonicalJson({constitutionDigest:this.constitutionDigest,mandateDigest,emergencyStopped:state.emergencyStopped,stopEpoch:state.events.filter(e=>e.type==='emergency_stop_changed').at(-1)?.hash??null}));
@@ -2280,6 +2404,10 @@ export class SaraKernel {
 
   async executeCapabilityPlan(principal:Principal,supplied:unknown,maximumSteps=16) {
     if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    return this.runCapabilityPlan(principal,supplied,maximumSteps);
+  }
+
+  private async runCapabilityPlan(principal:Principal,supplied:unknown,maximumSteps=16,cancelled?:()=>Promise<boolean>) {
     const plan=validatePlan(supplied),planDigest=sha256(canonicalJson(plan));
     await this.serializeMutation(async()=>{
       const state=await this.state();const existing=state.events.find(e=>e.type==='capability_plan_registered'&&(e.data as {id:string;version:number}).id===plan.id&&(e.data as {version:number}).version===plan.version);
@@ -2287,7 +2415,7 @@ export class SaraKernel {
       await this.authorize(principal,{action:'sandbox_development',targetId:`capability-plan:${plan.id}:${plan.version}`,external:false});
       await this.#store.append('capability_plan_registered',principal,{id:plan.id,version:plan.version,planDigest,plan});
     });
-    const result=await executeBoundedPlan(plan,{contract:capabilityContract,invoke:request=>this.invokeCapability(principal,request),stopped:async()=>(await this.state()).emergencyStopped,valuation:async digest=>{
+    const result=await executeBoundedPlan(plan,{contract:capabilityContract,invoke:request=>this.invokeCapability(principal,request),stopped:async()=>(await this.state()).emergencyStopped||Boolean(await cancelled?.()),valuation:async digest=>{
       const state=await this.state(),event=state.events.find(e=>e.type==='digital_capability_executed'&&(e.data as {result:CapabilityResult}).result.resultDigest===digest);
       if(!event)return undefined;
       // Reuse the same bounded transitive freshness gate as normal evidence consumers.
@@ -2318,7 +2446,7 @@ export class SaraKernel {
     });
   }
 
-  async invokeCapability(principal: Principal, supplied: CapabilityInvocation): Promise<CapabilityResult> {
+  async invokeCapability(principal: Principal, supplied: CapabilityInvocation, expectedAuthorityContextDigest?:string, requiredMandateRequest?:RoutineActionRequest): Promise<CapabilityResult> {
     if (principal.kind === "owner" && !this.isVerifiedOwner(principal)) throw new Error("AUTHENTICATED_OWNER_REQUIRED");
     if (principal.kind !== "owner" && principal !== SARA_PRINCIPAL) throw new Error("AUTHENTICATED_OWNER_OR_INTERNAL_PRINCIPAL_REQUIRED");
     // Snapshot before the first asynchronous boundary. Invalid payloads never enter the audit as raw data.
@@ -2334,6 +2462,11 @@ export class SaraKernel {
       const state = await this.state();
       const mandateDigest = state.standingMandate ? sha256(canonicalJson(state.standingMandate)) : null;
       const authorityContextDigest = this.capabilityAuthorityDigest(state);
+      if(expectedAuthorityContextDigest!==undefined&&authorityContextDigest!==expectedAuthorityContextDigest)throw new Error('CAPABILITY_AUTHORITY_CHANGED_BEFORE_DISPATCH');
+      if(requiredMandateRequest&&evaluateRoutineAction({mandate:state.standingMandate,request:{...requiredMandateRequest,requestedAt:new Date().toISOString()},emergencyStopped:state.emergencyStopped}).outcome!=='automatic')throw new Error('CAPABILITY_CURRENT_MANDATE_REQUIRED');
+      // Synchronous internal analysis runs under this same exclusive store lock.
+      // Reuse the existing durable decision counter; no separate event allowance.
+      if(requiredMandateRequest)await this.authorizeAutonomousRoutine(principal,state,{...requiredMandateRequest,requestedAt:new Date().toISOString()});
       const policyDecision = evaluatePolicy({constitution:this.#constitution,principal,
         request:{action:"internal_read",targetId:"digital-capability",external:false},
         currentOwnerRecurringMonthlyUsd:ownerFundedRecurringMonthly(state.ledger),emergencyStopped:state.emergencyStopped});

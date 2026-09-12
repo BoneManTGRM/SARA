@@ -23,9 +23,9 @@ test('owner dashboard renders the current digital registry independently of lega
   const html=await (await fetch(base)).text();
   assert.equal(html,DASHBOARD_HTML,'The HTTP route must serve the exact reviewed dashboard source');
   const nodes=new Map<string,any>();
-  const node=(selector:string):any=>{if(!nodes.has(selector))nodes.set(selector,{textContent:'—',dataset:{},style:{},classList:{add(){},remove(){}},addEventListener(){},querySelector:node});return nodes.get(selector);};
+  const node=(selector:string):any=>{if(!nodes.has(selector))nodes.set(selector,{textContent:'—',dataset:{},style:{},classList:{add(){},remove(){}},addEventListener(){},replaceChildren(){},querySelector:node});return nodes.get(selector);};
   const storage=new Map<string,string>();let contractReads=0,override:Response|undefined;
-  const context=createContext({document:{body:node('body'),querySelector:node},sessionStorage:{getItem:(key:string)=>storage.get(key)??null,removeItem:(key:string)=>storage.delete(key)},window:{},fetch:async(path:string,options?:RequestInit)=>{
+  const context=createContext({AbortSignal,document:{body:node('body'),querySelector:node},sessionStorage:{getItem:(key:string)=>storage.get(key)??null,removeItem:(key:string)=>storage.delete(key)},window:{},fetch:async(path:string,options?:RequestInit)=>{
    if(path==='/api/capability-contracts'){contractReads++;if(override)return override.clone();}
    return fetch(base+path,options);
   }});

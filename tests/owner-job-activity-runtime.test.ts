@@ -30,3 +30,10 @@ test("owner live activity transformation is idempotent and owner-page only", () 
   const publicPage = "<html><head><title>SARA public</title></head><body></body></html>";
   assert.equal(applyOwnerJobActivityPanel(publicPage), publicPage);
 });
+
+test('production activity retains one authenticated conversation result view inside existing live activity',()=>{
+  const html=applyOwnerJobActivityPanel(DASHBOARD_HTML),start=html.indexOf('<section class="chapter owner-job-activity"'),end=html.indexOf('</section>',start);
+  assert.match(html.slice(start,end),/id="owner-work-results"/);
+  assert.equal(html.split('id="owner-work-results"').length-1,1);
+  assert.match(html,/href="#owner-work-results"/);
+});

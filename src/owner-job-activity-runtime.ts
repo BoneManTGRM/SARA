@@ -275,9 +275,14 @@ export function applyOwnerJobActivityPanel(html: string): string {
     return html;
   }
 
+  const workAnchor = '<div id="owner-work-results" aria-live="polite"></div>';
+  const activityPanel = html.includes(workAnchor)
+    ? OWNER_JOB_ACTIVITY_PANEL.replace('      </section>', '        <div class="activity-panel"><span class="activity-title">Conversation work and evidence</span>' + workAnchor + '</div>\n      </section>')
+    : OWNER_JOB_ACTIVITY_PANEL;
   return html
+    .replace(workAnchor, '<a class="button" href="#owner-work-results">View conversation work and evidence</a>')
     .replace('</head>', `${OWNER_JOB_ACTIVITY_STYLE}</head>`)
-    .replace(PANEL_ANCHOR, `${OWNER_JOB_ACTIVITY_PANEL}\n${PANEL_ANCHOR}`)
+    .replace(PANEL_ANCHOR, `${activityPanel}\n${PANEL_ANCHOR}`)
     .replace(JOB_LABEL_ANCHOR, '<div class="micro-stat"><span>Useful jobs</span><strong id="jobs">—</strong></div>')
     .replace(SCRIPT_ANCHOR, `${OWNER_JOB_ACTIVITY_SCRIPT}\n${SCRIPT_ANCHOR}`)
     .replace(JOB_COUNT_ANCHOR, "      const ownerJobActivity = renderOwnerJobActivity(state);\n      document.querySelector('#jobs').textContent = String(ownerJobActivity.usefulJobs);");
