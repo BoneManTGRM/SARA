@@ -78,19 +78,29 @@ export function triageIncident(input: Data): ExecutionOutput {
     causalOrderEstablished: false }, parsed.some(item => item.epoch === null) ? ["Missing, invalid, or timezone-free timestamps cannot establish global chronology."] : []);
 }
 
+/** A caller-reported absence is never upgraded to an independent passing test. */
+export function observationStatus(observed:string):'NO_FAILURE_REPORTED'|'UNCONFIRMED_OBSERVATION' {
+  // Only the leading attributed observation can state absence. Quoted commands
+  // or a later “no defect” phrase cannot suppress a reported symptom.
+  return /^(?:No (?:defect|failure|bug) (?:was |has been )?(?:reproduced|observed|reported)|(?:The )?(?:bounded )?(?:test|path|walkthrough) passed)\b/iu.test(observed.trim())
+    && !/\b(?:but|however|crash(?:ed|es)?|failed|AssertionError|ERR_ASSERTION)\b/iu.test(observed)
+    ? 'NO_FAILURE_REPORTED':'UNCONFIRMED_OBSERVATION';
+}
 export function planReproduction(input: Data): ExecutionOutput {
   const missing: string[] = [];
   for (const field of ["expected", "observed", "environment"] as const) if (!String(input[field] ?? "").trim()) missing.push(field);
   if (!strings(input.steps!).length) missing.push("reproduction-steps");
+  const observation=observationStatus(String(input.observed??'')),noFailure=observation==='NO_FAILURE_REPORTED';
+  const nextDiagnostic=noFailure?'Ask for a specific failing symptom and its page, action, expected result and observed result before investigating a repair. The supplied passing path does not cover untested paths.':'Run a bounded isolated fixture for the reported behavior, preserving the exact source revision, input and actual outcome before asserting a cause.';
   const target = input.target === "PRODUCTION" ? "ISOLATED_COPY" : input.target;
-  const steps = [
+  const steps = noFailure?[{order:1,action:nextDiagnostic}]:[
     { order: 1, action: "Create an isolated fixture with no production credentials or customer side effects." },
     { order: 2, action: "Pin the supplied environment and record expected versus observed behavior." },
     ...strings(input.steps!).map((step, index) => ({ order: index + 3, action: `Reproduce supplied step ${index + 1} in the isolated fixture; source digest ${digest(step)}.` })),
     { order: strings(input.steps!).length + 3, action: "Capture the smallest failing assertion, input digest and revision; remove unrelated setup only while the failure remains." },
   ];
   return suppliedAnalysis({ status: missing.length ? "INCOMPLETE_EVIDENCE" : "READY", reproductionTarget: target!,
-    executionAllowed: false, reportDigest: digest(input.report), missing, steps, acceptance: [
+    executionAllowed: false, observationStatus:observation, nextDiagnostic, summary:noFailure?'No defect was reported in the supplied bounded path. This is supplied evidence; SARA has not independently retested the site.':'Analyzed the supplied behavior report. Reproduction and root cause remain unverified.', reportDigest: digest(input.report), missing, steps, acceptance: noFailure?["Preserve the supplied passing path and untested scope without inventing a defect or repair."]:[
       "Original symptom fails in isolation before a fix.", "The same assertion passes after the fix.", "Previously working adjacent behavior remains verified.",
     ], productionMutationRequired: false }, missing.map(field => `Missing ${field}.`));
 }
