@@ -8,6 +8,7 @@ import {createContext,Script} from 'node:vm';
 import {sha256} from '../src/canonical.ts';
 import {SaraKernel} from '../src/kernel.ts';
 import {createSaraServer} from '../src/server.ts';
+import {DASHBOARD_HTML} from '../src/dashboard.ts';
 
 // Execute the served owner script and its real HTTP reads. The DOM stand-in only
 // supplies elements; it does not implement capability counting or fetching.
@@ -20,6 +21,7 @@ test('owner dashboard renders the current digital registry independently of lega
  try {
   const base=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const html=await (await fetch(base)).text();
+  assert.equal(html,DASHBOARD_HTML,'The HTTP route must serve the exact reviewed dashboard source');
   const nodes=new Map<string,any>();
   const node=(selector:string):any=>{if(!nodes.has(selector))nodes.set(selector,{textContent:'—',dataset:{},style:{},classList:{add(){},remove(){}},addEventListener(){},querySelector:node});return nodes.get(selector);};
   const storage=new Map<string,string>();let contractReads=0,override:Response|undefined;
@@ -27,7 +29,12 @@ test('owner dashboard renders the current digital registry independently of lega
    if(path==='/api/capability-contracts'){contractReads++;if(override)return override.clone();}
    return fetch(base+path,options);
   }});
-  const script=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/giu)][0]![1]!;
+  // Execute only the authored module after checking HTTP delivery equality.
+  // This is an exact source delimiter, not an HTML parser or sanitizer.
+  const start=DASHBOARD_HTML.indexOf('<script>');
+  const end=DASHBOARD_HTML.indexOf('</script>',start);
+  assert.ok(start>=0&&end>start);
+  const script=DASHBOARD_HTML.slice(start+'<script>'.length,end);
   new Script(script).runInContext(context);
   assert.equal(contractReads,0,'Locked dashboard must not request protected inventory');
   // Other panels have their own tests; retain the actual authentication, HTTP,
