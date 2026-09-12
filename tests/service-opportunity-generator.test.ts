@@ -10,6 +10,8 @@ import {
   type ServiceOpportunityGeneratorInput,
 } from "../src/digital-capabilities/service-opportunity.ts";
 
+const trustedEvidence = () => input().capabilities.map(c => ({id:c.id,contractDigest:c.contractDigest,qualifiedEnabled:true,procedureEvidenceDigests:[sha256("isolated-procedure-proof")]}));
+
 const digest = (value: string) => sha256(value);
 
 function input(): ServiceOpportunityGeneratorInput {
@@ -59,7 +61,7 @@ function input(): ServiceOpportunityGeneratorInput {
 }
 
 test("compiles capability-backed public signals into an owner-review service candidate", () => {
-  const result = compileServiceOpportunities(input());
+  const result = compileServiceOpportunities(input(), trustedEvidence());
   assert.equal(result.candidates.length, 1);
   const candidate = result.candidates[0]!;
   assert.equal(candidate.decision, "OWNER_REVIEW");
@@ -82,7 +84,7 @@ test("compiles capability-backed public signals into an owner-review service can
 test("keeps a single-source idea in evidence-required status", () => {
   const candidateInput = input();
   candidateInput.demandSignals = candidateInput.demandSignals.slice(0, 1);
-  const candidate = compileServiceOpportunities(candidateInput).candidates[0]!;
+  const candidate = compileServiceOpportunities(candidateInput, trustedEvidence()).candidates[0]!;
   assert.equal(candidate.decision, "EVIDENCE_REQUIRED");
   assert.equal(candidate.observedComparablePriceRangeUsd, null);
   assert.ok(candidate.evidenceGaps.some((gap) => gap.includes("distinct public source hosts")));
@@ -91,7 +93,7 @@ test("keeps a single-source idea in evidence-required status", () => {
 test("does not treat failed or quarantined capabilities as delivery capacity", () => {
   const candidateInput = input();
   candidateInput.capabilities[1]!.status = "QUARANTINED";
-  const candidate = compileServiceOpportunities(candidateInput).candidates[0]!;
+  const candidate = compileServiceOpportunities(candidateInput, trustedEvidence()).candidates[0]!;
   assert.equal(candidate.decision, "EVIDENCE_REQUIRED");
   assert.deepEqual(candidate.qualifiedCapabilityIds, ["public-repository-inventory"]);
   assert.ok(candidate.evidenceGaps.some((gap) => gap.includes("documentation-clarity-analysis")));
@@ -101,7 +103,7 @@ test("rejects candidates outside supplied delivery cost and time ceilings", () =
   const candidateInput = input();
   candidateInput.maximumDeliveryMinutes = 60;
   candidateInput.maximumCashMicroUsd = 100_000;
-  const candidate = compileServiceOpportunities(candidateInput).candidates[0]!;
+  const candidate = compileServiceOpportunities(candidateInput, trustedEvidence()).candidates[0]!;
   assert.equal(candidate.decision, "REJECTED");
   assert.equal(candidate.disqualifyingRisks.length, 2);
   assert.match(candidate.safestNextStep, /Do not offer/);
@@ -110,7 +112,7 @@ test("rejects candidates outside supplied delivery cost and time ceilings", () =
 test("is deterministic under input reordering, deduplicates exact signals, and does not mutate", () => {
   const firstInput = input();
   const snapshot = structuredClone(firstInput);
-  const first = compileServiceOpportunities(firstInput);
+  const first = compileServiceOpportunities(firstInput, trustedEvidence());
   assert.deepEqual(firstInput, snapshot);
 
   const reordered = input();
@@ -120,7 +122,7 @@ test("is deterministic under input reordering, deduplicates exact signals, and d
     reordered.demandSignals[0]!,
     structuredClone(reordered.demandSignals[0]!),
   ];
-  assert.equal(canonicalJson(compileServiceOpportunities(reordered)), canonicalJson(first));
+  assert.equal(canonicalJson(compileServiceOpportunities(reordered, trustedEvidence())), canonicalJson(first));
 });
 
 test("fails closed on non-public or credential-bearing evidence URLs", () => {
@@ -131,7 +133,7 @@ test("fails closed on non-public or credential-bearing evidence URLs", () => {
   ]) {
     const candidateInput = input();
     candidateInput.demandSignals[0]!.sourceUrl = sourceUrl;
-    assert.throws(() => compileServiceOpportunities(candidateInput), /public HTTPS/);
+    assert.throws(() => compileServiceOpportunities(candidateInput, trustedEvidence()), /PUBLIC_HTTPS_URL_REQUIRED/);
   }
 });
 
@@ -151,7 +153,7 @@ test("runs through SARA's common capability boundary with zero external authorit
     assert.equal(result.authority.required, "DRAFT_ONLY");
     assert.equal(result.authority.authorizationTokenIssued, false);
     assert.equal(result.cost.actualCashMicroUsd, 0);
-    assert.equal(output.candidates[0]?.decision, "OWNER_REVIEW");
+    assert.equal(output.candidates[0]?.decision, "EVIDENCE_REQUIRED");
     assert.deepEqual(after.realizedProfit, before.realizedProfit);
     assert.deepEqual(after.revenuePilotJobs, before.revenuePilotJobs);
     assert.deepEqual(after.revenuePaymentIntents, before.revenuePaymentIntents);

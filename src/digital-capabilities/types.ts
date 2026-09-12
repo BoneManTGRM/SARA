@@ -26,6 +26,10 @@ export type ExecutionContext = {
   mandateDigest:string|null;mandateId:string|null;evidence:readonly EvidenceRecord[];currentIdentity:ProcedureApplicabilityIdentity;
   controls:Json[];policyDecision:{allowed:boolean;code:string;reason:string};
   benchmark:(ids:string[])=>Promise<Json>;
+  serviceCapabilityEvidence?:readonly ServiceCapabilityEvidence[];
+};
+export type ServiceCapabilityEvidence = {
+  id:string;contractDigest:string;qualifiedEnabled:boolean;procedureEvidenceDigests:string[];
 };
 export type FrozenCase = {name:string;input:Json;context?:Partial<ExecutionContext>;check:(result:ExecutionOutput)=>boolean};
 export type CapabilityDefinition = {

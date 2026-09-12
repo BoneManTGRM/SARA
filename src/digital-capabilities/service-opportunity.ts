@@ -1,5 +1,6 @@
 import { canonicalJson, sha256 } from "../canonical.ts";
 import {
+  CapabilityInputError,
   arraySchema,
   digestSchema,
   enumSchema,
@@ -12,7 +13,7 @@ import {
   type Json,
   type Schema,
 } from "./schema.ts";
-import type { CapabilityDefinition, ExecutionOutput } from "./types.ts";
+import type { CapabilityDefinition, ExecutionOutput, ExecutionContext, ServiceCapabilityEvidence } from "./types.ts";
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const DATE = /^\d{4}-\d{2}-\d{2}$/u;
@@ -54,6 +55,7 @@ export type ServiceOpportunityCandidate = {
   requiredCapabilityIds: string[];
   qualifiedCapabilityIds: string[];
   capabilityContractDigests: string[];
+  procedureEvidenceDigests: string[];
   evidenceUrls: string[];
   evidenceObservedDates: string[];
   distinctSourceHostCount: number;
@@ -116,6 +118,7 @@ export const serviceOpportunityOutputSchema: Schema = objectSchema({
     requiredCapabilityIds: arraySchema(idSchema, 32, 1),
     qualifiedCapabilityIds: arraySchema(idSchema, 32),
     capabilityContractDigests: arraySchema(digestSchema, 32),
+    procedureEvidenceDigests: arraySchema(digestSchema, 32),
     evidenceUrls: arraySchema(textSchema(2_048, 12), 200, 1),
     evidenceObservedDates: arraySchema(textSchema(10, 10), 200, 1),
     distinctSourceHostCount: integerSchema(1, 200),
@@ -144,7 +147,7 @@ function publicHttpsUrl(value: string): URL {
   try {
     url = new URL(value);
   } catch {
-    throw new Error("Demand evidence requires a canonical public HTTPS URL.");
+    throw new CapabilityInputError("PUBLIC_HTTPS_URL_REQUIRED");
   }
   const hostname = url.hostname.toLowerCase();
   if (
@@ -158,7 +161,7 @@ function publicHttpsUrl(value: string): URL {
     /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(hostname) ||
     hostname.includes(":")
   ) {
-    throw new Error("Demand evidence requires a canonical public HTTPS URL.");
+    throw new CapabilityInputError("PUBLIC_HTTPS_URL_REQUIRED");
   }
   return url;
 }
@@ -170,7 +173,7 @@ function validDate(value: string): boolean {
 }
 
 function normalizedSignal(signal: PublicDemandSignalInput): PublicDemandSignalInput & { publisher: string } {
-  if (!validDate(signal.observedAt)) throw new Error("Demand evidence observedAt must be a real ISO calendar date.");
+  if (!validDate(signal.observedAt)) throw new CapabilityInputError("VALID_OBSERVATION_DATE_REQUIRED");
   const url = publicHttpsUrl(signal.sourceUrl);
   const requiredCapabilityIds = [...new Set(signal.requiredCapabilityIds)].sort();
   return {
@@ -190,16 +193,16 @@ function normalizedSignal(signal: PublicDemandSignalInput): PublicDemandSignalIn
  * deterministic SHADOW service candidates. It performs no network access and
  * grants no authority to publish, contact, contract, spend, or execute work.
  */
-export function compileServiceOpportunities(raw: ServiceOpportunityGeneratorInput): ServiceOpportunityGeneratorOutput {
+export function compileServiceOpportunities(raw: ServiceOpportunityGeneratorInput, trustedEvidence: readonly ServiceCapabilityEvidence[] = []): ServiceOpportunityGeneratorOutput {
   const input = snapshotJson(raw) as unknown as ServiceOpportunityGeneratorInput;
   validateSchema(serviceOpportunityInputSchema, input as unknown as Json);
 
   const capabilities = new Map<string, ServiceCapabilityInput>();
   for (const capability of [...input.capabilities].sort((a, b) => a.id.localeCompare(b.id))) {
-    if (!SAFE_ID.test(capability.id)) throw new Error("Capability IDs must be safe identifiers.");
+    if (!SAFE_ID.test(capability.id)) throw new CapabilityInputError("INVALID_CAPABILITY_ID");
     const existing = capabilities.get(capability.id);
     if (existing && canonicalJson(existing) !== canonicalJson(capability)) {
-      throw new Error(`Conflicting capability evidence for ${capability.id}.`);
+      throw new CapabilityInputError("CONFLICTING_CAPABILITY_EVIDENCE");
     }
     capabilities.set(capability.id, structuredClone(capability));
   }
@@ -228,7 +231,8 @@ export function compileServiceOpportunities(raw: ServiceOpportunityGeneratorInpu
     const qualified = requiredCapabilityIds
       .map((id) => capabilities.get(id))
       .filter((capability): capability is ServiceCapabilityInput =>
-        capability?.qualificationStatus === "PASSED" && capability.status === "ENABLED")
+        capability?.qualificationStatus === "PASSED" && capability.status === "ENABLED" &&
+        trustedEvidence.some(evidence => evidence.id === capability.id && evidence.contractDigest === capability.contractDigest && evidence.qualifiedEnabled && evidence.procedureEvidenceDigests.length > 0))
       .sort((a, b) => a.id.localeCompare(b.id));
     const qualifiedIds = qualified.map(({ id }) => id);
     const missing = requiredCapabilityIds.filter((id) => !qualifiedIds.includes(id));
@@ -252,7 +256,7 @@ export function compileServiceOpportunities(raw: ServiceOpportunityGeneratorInpu
     const evidenceGaps: string[] = [];
     const disqualifyingRisks: string[] = [];
     if (publishers.length < 2) evidenceGaps.push("Provide observations from at least two distinct public source hosts; host diversity does not by itself prove publisher independence.");
-    if (missing.length) evidenceGaps.push(`Missing qualified enabled capabilities: ${missing.join(", ")}.`);
+    if (missing.length) evidenceGaps.push(`Missing current kernel-qualified capabilities with demonstrated procedure evidence: ${missing.join(", ")}.`);
     if (observedPrices.length < 2) evidenceGaps.push("Provide comparable-price observations from at least two distinct public source hosts before considering a price; host diversity does not prove independence.");
     if (estimatedDeliveryMinutes > input.maximumDeliveryMinutes) {
       disqualifyingRisks.push(`Estimated delivery time exceeds the supplied ${input.maximumDeliveryMinutes}-minute ceiling.`);
@@ -281,6 +285,7 @@ export function compileServiceOpportunities(raw: ServiceOpportunityGeneratorInpu
       requiredCapabilityIds,
       qualifiedCapabilityIds: qualifiedIds,
       capabilityContractDigests: qualified.map(({ contractDigest }) => contractDigest),
+      procedureEvidenceDigests: qualified.flatMap(capability => trustedEvidence.find(evidence => evidence.id === capability.id && evidence.contractDigest === capability.contractDigest)?.procedureEvidenceDigests.slice(0, 1) ?? []),
       evidenceUrls,
       evidenceObservedDates,
       distinctSourceHostCount: publishers.length,
@@ -342,18 +347,18 @@ const qualificationInput: ServiceOpportunityGeneratorInput = {
   maximumCandidates: 3,
 };
 
-function executeServiceOpportunity(input: Record<string, Json>): ExecutionOutput {
-  const output = compileServiceOpportunities(input as unknown as ServiceOpportunityGeneratorInput);
+function executeServiceOpportunity(input: Record<string, Json>, context: ExecutionContext): ExecutionOutput {
+  const output = compileServiceOpportunities(input as unknown as ServiceOpportunityGeneratorInput, context.serviceCapabilityEvidence);
   return {
     output: output as unknown as Json,
-    observed: output.candidates.flatMap((candidate) => candidate.evidenceUrls.map((sourceUrl) => ({ sourceUrl }))),
+    observed: output.candidates.flatMap((candidate) => candidate.evidenceUrls.map((sourceUrl) => ({ sourceUrl, provenance: "SUPPLIED", externalStateObserved: false }))),
     inferred: output.candidates.map((candidate) => ({ candidateId: candidate.id, decision: candidate.decision })),
     unknowns: [
       "Public signals do not prove customer demand, willingness to pay, legal suitability, or delivery success.",
       "Any publication, outreach, contract, payment, or work requires its separate existing authority gate.",
     ],
     confidence: {
-      level: "MEDIUM",
+      level: "UNASSESSED",
       basis: "Deterministic compilation of supplied capability contracts and public observations; market truth remains unverified.",
     },
   };
@@ -365,10 +370,10 @@ export const serviceOpportunityDefinition: CapabilityDefinition = {
   description: "Compile verified capability contracts and supplied public demand observations into zero-cost SHADOW service candidates without outreach or commercial authority.",
   inputSchema: serviceOpportunityInputSchema,
   outputSchema: serviceOpportunityOutputSchema,
-  effect: "PURE",
+  effect: "READ_ONLY",
   authorityClass: "DRAFT_ONLY",
   resources: ["supplied-input", "kernel-read-only-projection"],
-  sourceFiles: ["service-opportunity.ts"],
+  sourceFiles: ["service-opportunity.ts", "service-readiness.ts", "../procedural-intelligence.ts"],
   qualificationRequirements: [
     "frozen-contract",
     "malformed-input",
@@ -381,6 +386,7 @@ export const serviceOpportunityDefinition: CapabilityDefinition = {
   cases: [
     {
       name: "qualified-signals-stop-at-owner-review",
+      context: {serviceCapabilityEvidence:[{id:"verified-analysis",contractDigest:"a".repeat(64),qualifiedEnabled:true,procedureEvidenceDigests:["b".repeat(64)]}]},
       input: qualificationInput as unknown as Json,
       check: (result) => {
         const output = result.output as unknown as ServiceOpportunityGeneratorOutput;
@@ -388,6 +394,11 @@ export const serviceOpportunityDefinition: CapabilityDefinition = {
           output.candidates[0]?.recommendedPriceUsd === null &&
           output.mayContactCustomers === false && output.mayExecuteWork === false;
       },
+    },
+    {
+      name: "supplied-labels-are-not-capability-proof",
+      input: qualificationInput as unknown as Json,
+      check: result => (result.output as unknown as ServiceOpportunityGeneratorOutput).candidates[0]?.decision === "EVIDENCE_REQUIRED",
     },
     {
       name: "single-publisher-remains-evidence-required",

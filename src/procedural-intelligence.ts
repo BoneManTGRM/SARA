@@ -581,6 +581,17 @@ export class ProceduralKnowledgeStore {
   }
 
   snapshot(): ProceduralKnowledgeSnapshot { return clone(this.#state); }
+  /** Inspect existing committed knowledge without initializing or merging seeds. */
+  static async inspectExisting(stateDirectory: string): Promise<ProceduralKnowledgeSnapshot | null> {
+    const directory = resolve(stateDirectory, DIRECTORY_NAME);
+    try {
+      if (await realpath(directory) !== directory) throw new Error("PROCEDURAL_STATE_DIRECTORY_SYMLINK");
+      return clone(await readCommittedState(join(directory, STATE_FILE)));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
   classify(description: string): { taskFamily: string; score: number; matchedPlaybookIds: string[] } { return classifyTaskFamily(description, this.#state.playbooks); }
   select(task: ReuseTask): ProcedureSelection { return selectionFor(task, this.#state.playbooks); }
   retrieveLessons(task: ReuseTask): ReusableLesson[] { return retrieveVerifiedLessons(this.#state.lessons, task.taskFamily, task.identity); }

@@ -82,6 +82,20 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
       console.error(JSON.stringify({ event: "sara_capability_runtime_proof", status: "failed_closed", sourceRevision, deploymentId }));
     }
     try {
+      const { runSafeEngineeringRuntimeProof } = await import("../src/digital-capabilities/engineering/runtime-proof.ts");
+      const proof = await runSafeEngineeringRuntimeProof({ kernel, sourceRevision, deploymentId, environment: "PRODUCTION" });
+      console.log(JSON.stringify({ event: "sara_engineering_runtime_proof", ...proof }));
+    } catch {
+      console.error(JSON.stringify({ event: "sara_engineering_runtime_proof", status: "failed_closed", sourceRevision, deploymentId }));
+    }
+    try {
+      const { runSafeServiceRuntimeProof } = await import("../src/digital-capabilities/service-runtime-proof.ts");
+      const proof = await runSafeServiceRuntimeProof({ kernel, sourceRevision, deploymentId, environment: "PRODUCTION" });
+      console.log(JSON.stringify({ event: "sara_service_runtime_proof", ...proof }));
+    } catch {
+      console.error(JSON.stringify({ event: "sara_service_runtime_proof", status: "failed_closed", sourceRevision, deploymentId }));
+    }
+    try {
       const { runBoundProductionProceduralReuseProof } = await import("../src/production-procedural-reuse.ts");
       const proof = await runBoundProductionProceduralReuseProof({
         stateDirectory,

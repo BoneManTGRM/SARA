@@ -23,7 +23,7 @@ The output reports observed price range only. `recommendedPriceUsd` is always `n
 
 ## Falsifiable acceptance criteria
 
-1. Two source-host-diverse observations plus qualified enabled capabilities produce one deterministic `OWNER_REVIEW` candidate.
+1. Two source-host-diverse supplied observations plus kernel-confirmed current qualified capabilities and demonstrated matching procedures produce one deterministic `OWNER_REVIEW` candidate.
 2. A single source host, missing/disabled capability, or missing price evidence remains `EVIDENCE_REQUIRED`.
 3. Delivery time or cash cost beyond the supplied ceiling produces `REJECTED`.
 4. Reordered inputs and exact duplicate observations produce byte-equivalent canonical output without mutating input.
@@ -33,3 +33,14 @@ The output reports observed price range only. `recommendedPriceUsd` is always `n
 ## Revenue hypothesis
 
 This capability can reduce speculative service building by requiring public problem, price, capability, and cost evidence before an idea reaches owner review. If it produces no candidate that survives manual source verification, or if source review takes longer than the avoided speculative work, it should be simplified or retired. It does not establish that any proposed service will sell.
+
+
+## Continuation: trusted capability and procedure evidence
+
+Reconciled main is `dbf9d45d77785d4de1ef4956fe8bec123a59a5ce` after engineering PR173. The original candidate trusted caller-supplied qualification labels. A regression demonstrated that an invented capability produced OWNER_REVIEW. The updated compiler defaults to EVIDENCE_REQUIRED unless the kernel supplies current registered qualification and exact contract identity plus demonstrated independently qualified procedure evidence from the existing PR166 store.
+
+The read-only projection neither initializes procedural state nor adds seeds. The latest matching procedure outcome must be VERIFIED, with fresh verification evidence; invalidated, superseded, stale, absent, or failed procedures do not supply service readiness. Contract and procedure evidence digests are retained. A changed prerequisite makes an old idempotent receipt explicitly historical instead of rewriting it. No model call or external lookup is added.
+
+Focused qualification covers forged labels, actual contracts without procedures, a demonstrated procedure through the existing execution engine, stale contract refusal, restart/copied-state restore, later failed verification, unchanged replay, malformed inputs and corrupt procedural state. `sara_service_runtime_proof` exercises an unsupported synthetic service through the production kernel; it does not claim real customer demand or successful paid delivery.
+
+The built-in compiler is qualified read-only/draft logic after its gates pass. Generated service ideas remain candidates and do not grant commercial authority. This repairs one business capability; it does not complete the remaining expansion waves.

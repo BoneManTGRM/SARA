@@ -2,6 +2,7 @@
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type Schema = {
   type: "object" | "array" | "string" | "number" | "integer" | "boolean" | "null" | "json";
+  nullable?: boolean;
   properties?: Record<string, Schema>; required?: string[]; additionalProperties?: boolean;
   items?: Schema; minItems?: number; maxItems?: number; minLength?: number; maxLength?: number;
   minimum?: number; maximum?: number; enum?: Json[]; pattern?: string;
@@ -63,6 +64,7 @@ export function snapshotJson(value: unknown, maximumBytes = 262_144): Json {
 
 export function validateSchema(schema: Schema, value: Json, path = "$"): void {
   const fail = (code: string): never => { throw new CapabilityInputError(code, path); };
+  if (value === null && schema.nullable === true) return;
   if (schema.enum && !schema.enum.some(candidate => candidate === value)) fail("ENUM_MISMATCH");
   if (schema.type === "json") return;
   if (schema.type === "null") { if (value !== null) fail("TYPE_MISMATCH"); return; }
