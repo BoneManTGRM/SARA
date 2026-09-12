@@ -9,11 +9,13 @@ import {SaraKernel} from '../src/kernel.ts';
 import {createSaraServer} from '../src/server.ts';
 import {sha256} from '../src/canonical.ts';
 import {waitForSandboxBrowserEndpoint} from '../src/digital-capabilities/web/sandbox-browser.ts';
+import {installOwnerDashboardThemeRuntime} from '../src/owner-dashboard-theme-runtime.ts';
 
 // Isolated product E2E qualification. These credentials belong only to the
 // disposable test kernel. This cannot authenticate a production owner.
 const directory=await mkdtemp(join(tmpdir(),'sara-owner-ui-'));
 const credential='synthetic-isolated-ui-owner';
+installOwnerDashboardThemeRuntime();
 const kernel=await SaraKernel.boot({stateDirectory:join(directory,'state'),ownerTokenSha256:sha256(credential)});
 const server=createSaraServer(kernel,{stateDirectory:join(directory,'state'),ownerTokenSha256:sha256(credential)});
 await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -37,6 +39,7 @@ try{
  const until=async(expression:string)=>{const deadline=performance.now()+20000;while(performance.now()<deadline){if(await evaluate(expression))return;await delay(100);}throw new Error('Owner UI acceptance timed out');};
  await send('Page.navigate',{url:origin});await until("Boolean(document.querySelector('#owner-work-text'))");
  assert.equal(await evaluate("document.querySelector('#owner-work-fields').disabled"),true);
+ assert.equal(await evaluate("Boolean(document.querySelector('#owner-work-results').closest('.owner-job-activity'))"),true,'Qualify the actual production activity transform');
  assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received').length,0);
  await evaluate("document.querySelector('#connect').click()");
  await until("document.querySelector('#owner-dialog').open");
@@ -51,7 +54,7 @@ try{
   assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('Recorded cost $0.000000')"),true);
   assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('unfinished-work-reconciler')"),true);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Owner workflow must fit the viewport');
-  await evaluate("document.querySelector('#owner-work-form').scrollIntoView()");
+  await evaluate("document.querySelector('#owner-work-results').scrollIntoView()");
   const shot=await send('Page.captureScreenshot',{format:'png'});screenshots.push(sha256(Buffer.from(shot.data,'base64')));
  }
  const received=(await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received');assert.equal(received.length,2);

@@ -18,7 +18,7 @@ This document records demonstrated scope. It is not a declaration that the full 
 
 See [work card](conversation-worker.md) and [complete reachability matrix](conversation-reachability.md).
 
-The owner dashboard's existing directive card now includes **Message SARA**, optional **Supplied material**, **Run supported work**, and **Refresh work**. Authentication uses the existing **Owner access** dialog. The existing authenticated Telegram Luna bridge selects the same two bounded families before its separate analysis-only fallback.
+The existing production live-activity panel displays conversation results and evidence. The owner dashboard's directive card now includes **Message SARA**, optional **Supplied material**, **Run supported work**, and **Refresh work**. Authentication uses the existing **Owner access** dialog. The existing authenticated Telegram Luna bridge selects the same two bounded families before its separate analysis-only fallback.
 
 Qualified local request examples:
 
@@ -50,11 +50,11 @@ Provenance: LOCAL / UNIT_TEST using disposable real kernels and HTTP servers, no
 
 `node --import tsx --test tests/conversation-worker.test.ts tests/dashboard-capability-inventory.test.ts tests/capability-plan.test.ts`: 18 passing, 0 failing on the local candidate before commit. These include duplicate and concurrent requests, crash after durable execution before acknowledgment, copied-state replay, immutable audit-prefix preservation, cancellation, stop between steps, quarantine, failed qualification, revoked mandate, injection, current source binding, exact accounting and protected routes.
 
-`npm run verify` on the final local candidate exited 0: **1,368 passing tests, 0 failures; 14 passing HTTP checks; strict typecheck, demo and all required deterministic integration proofs passed**. No paid provider calls were made by the new path. Exact-head CI/security and production UI remain separate gates.
+`npm run verify` on the final local candidate exited 0: **1,369 passing tests, 0 failures; 14 passing HTTP checks; strict typecheck, demo and all required deterministic integration proofs passed**. No paid provider calls were made by the new path. Exact-head CI/security and production UI remain separate gates.
 
 ## Required higher-grade proof
 
-The CI workflow requires `node --import tsx scripts/qualify-owner-conversation-ui.ts`: actual served dashboard, disposable authenticated kernel, sandboxed Chrome, desktop and mobile, real form submission and real receipts. This is ISOLATED evidence, not PRODUCTION.
+The CI workflow requires `node --import tsx scripts/qualify-owner-conversation-ui.ts`: actual served dashboard, disposable authenticated kernel, sandboxed Chrome, the existing production theme/activity transform, desktop and mobile, real form submission and real receipts. This is ISOLATED evidence, not PRODUCTION.
 
 Actual owner-facing production acceptance requires the deployed revision, an existing authenticated owner session, an ordinary harmless multi-step request, visible receipts and completion, exact recorded cost, and state/authority preservation. Internal startup probes cannot substitute. No production credential or authentication bypass is created.
 
@@ -66,3 +66,5 @@ Actual owner-facing production acceptance requires the deployed revision, an exi
 - The complete matrix classifies all 93 current contracts; ordinary support is explicitly limited to the connected recipes.
 
 Consequential authority delta: **none**. No budgets, mandates, protected controls, revenue attestations, NICO approval, customer commitments or outbound communications were added.
+
+Production-layout RED/GREEN: a focused transformation test first proved the result view was outside existing activity. The corrected runtime transform retains exactly one protected result view inside activity and an anchor from the message form. The real-browser gate now installs the same response transform as production. `npm run verify` then exited 0 with 1,369 tests and 14 HTTP checks.
