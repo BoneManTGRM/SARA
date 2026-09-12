@@ -1,6 +1,10 @@
 import { engineeringDefinitions } from "./engineering/definitions.ts";
 import {troubleshootingDefinitions} from './troubleshooting/definitions.ts';
+import {secretaryDefinitions} from './secretary/definitions.ts';
+import {economicDefinitions} from './economic/definitions.ts';
+import {businessDefinitions} from './business/definitions.ts';
 import {proceduralDefinitions} from './procedural/definitions.ts';
+import {selfManagementDefinitions} from './self-management/definitions.ts';
 import { readFile } from "node:fs/promises";
 import { canonicalJson, sha256 } from "../canonical.ts";
 import { BASE_QUALIFICATION_CONTEXT, foundationDefinitions } from "./foundation.ts";
@@ -8,8 +12,8 @@ import { snapshotJson, validateSchema, type Json } from "./schema.ts";
 import type { CapabilityContract, CapabilityDefinition, ExecutionContext } from "./types.ts";
 
 // Only reviewed, statically imported implementations enter this registry. Customer manifests and learned artifacts cannot register code here.
-const DEFINITIONS:readonly CapabilityDefinition[]=[...foundationDefinitions,...engineeringDefinitions,...troubleshootingDefinitions,...proceduralDefinitions];
-const COMMON_FILES=["receipt-dependencies.ts","types.ts","schema.ts","registry.ts","evidence.ts","observed-evidence.ts","plan.ts","boundary.ts","receipt.ts","foundation.ts","../kernel.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts"];
+const DEFINITIONS:readonly CapabilityDefinition[]=[...foundationDefinitions,...engineeringDefinitions,...troubleshootingDefinitions,...secretaryDefinitions,...economicDefinitions,...businessDefinitions,...proceduralDefinitions,...selfManagementDefinitions];
+const COMMON_FILES=["goal-plan.ts","economic-scheduling.ts","types.ts","schema.ts","registry.ts","evidence.ts","boundary.ts","receipt.ts","receipt-dependencies.ts","foundation.ts","../kernel.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts","observed-evidence.ts","plan.ts"];
 function freezeReviewed(value:unknown):void {
   if(!value||typeof value!=="object"||Object.isFrozen(value))return;
   for(const descriptor of Object.values(Object.getOwnPropertyDescriptors(value)))if("value" in descriptor)freezeReviewed(descriptor.value);

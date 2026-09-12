@@ -13,8 +13,8 @@ export function capabilityResult(input:{requestId:string;capabilityId:string;inp
     authority:{required:contract?.authorityClass??"PROHIBITED" as const,available:input.status!=="BLOCKED"&&context.policyDecision.allowed,
       contextDigest:context.authorityContextDigest,mandateDigest:context.mandateDigest,authorizationTokenIssued:false as const},
     cost:{actualCashMicroUsd:0 as const,modelApiMicroUsd:0 as const,allocatedCashMicroUsd:0 as const,modeledLaborMicroUsd:null,
-      costBasis:"DETERMINISTIC_LOCAL_COMPUTATION_NO_EXTERNAL_CALL" as const},
-    persistentChanges:input.persisted===false?[]:["append-only capability execution receipt; no external state changed"],subject:context.currentIdentity,
+      costBasis:(contract?.id==='nico-production-proof-runner'&&result.observed?.some(o=>o&&typeof o==='object'&&!Array.isArray(o)&&o.basis==='ACTUAL_NICO_GET_RUN')?'BOUNDED_EXTERNAL_READ_NO_PAID_MODEL':'DETERMINISTIC_LOCAL_COMPUTATION_NO_EXTERNAL_CALL') as CapabilityResult['cost']['costBasis']},
+    persistentChanges:input.persisted===false?[]:["append-only capability execution receipt; no external state changed",...(contract?.effect==='INTERNAL_STATE'&&contract?.id==='experience-to-procedure-compiler'&&input.status==='SUCCEEDED'&&result.output&&typeof result.output==='object'&&!Array.isArray(result.output)&&result.output.persisted===true?['existing procedural knowledge candidate record (idempotent)']:[]),...(contract?.effect==='INTERNAL_STATE'&&contract?.id==='memory-conflict-resolver'&&input.status==='SUCCEEDED'&&result.output&&typeof result.output==='object'&&!Array.isArray(result.output)&&result.output.persisted===true?['existing procedural knowledge supersession history (idempotent)']:[])],subject:context.currentIdentity,
   };
   return {...unsigned,resultDigest:sha256(canonicalJson(unsigned))};
 }

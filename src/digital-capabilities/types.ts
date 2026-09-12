@@ -20,7 +20,7 @@ export type CapabilityContract = {
   idempotency:string;failureClasses:string[];implementationDigest:string;contractDigest:string;
   qualification:{status:"PASSED"|"FAILED";passed:number;failed:number;scope:string;evidenceDigest:string};
 };
-export type ExecutionOutput = {output:Json;observed?:Json[];inferred?:Json[];unknowns?:string[];confidence?:{level:"HIGH"|"MEDIUM"|"LOW"|"UNASSESSED";basis:string};status?:"SUCCEEDED"|"BLOCKED"|"INCOMPLETE_EVIDENCE"};
+export type ExecutionOutput = {output:Json;capturedEvidence?:readonly EvidenceRecord[];observed?:Json[];inferred?:Json[];unknowns?:string[];confidence?:{level:"HIGH"|"MEDIUM"|"LOW"|"UNASSESSED";basis:string};status?:"SUCCEEDED"|"BLOCKED"|"INCOMPLETE_EVIDENCE"};
 export type ExecutionContext = {
   ownerAuthenticated:boolean;emergencyStopped:boolean;authorityContextDigest:string;constitutionDigest:string;
   mandateDigest:string|null;mandateId:string|null;evidence:readonly EvidenceRecord[];currentIdentity:ProcedureApplicabilityIdentity;
@@ -30,7 +30,8 @@ export type ExecutionContext = {
   priorCapabilityResults?:readonly CapabilityResult[];
   recoverySnapshot?:import('./troubleshooting/implementations.ts').RecoverySnapshot;
   proceduralKnowledge?:import('../procedural-intelligence.ts').ProceduralKnowledgeSnapshot|null;
-  capabilityReadiness?:readonly {id:string;enabled:boolean;authorityClass:string}[];
+  authoritativeJobAccounting?:import('./economic/accounting.ts').AuthoritativeJobAccounting;
+  capabilityReadiness?:readonly {id:string;enabled:boolean;authorityClass:string;version?:string;contractDigest?:string;description?:string}[];
 };
 export type ServiceCapabilityEvidence = {
   id:string;contractDigest:string;qualifiedEnabled:boolean;procedureEvidenceDigests:string[];
@@ -49,7 +50,7 @@ export type CapabilityResult = {
   selectionReason:string;inputDigest:string;output:Json;observed:Json[];inferred:Json[];unknowns:string[];
   confidence:{level:"HIGH"|"MEDIUM"|"LOW"|"UNASSESSED";basis:string};evidence:EvidenceRecord[];
   authority:{required:AuthorityClass;available:boolean;contextDigest:string;mandateDigest:string|null;authorizationTokenIssued:false};
-  cost:{actualCashMicroUsd:0;modelApiMicroUsd:0;allocatedCashMicroUsd:0;modeledLaborMicroUsd:null;costBasis:"DETERMINISTIC_LOCAL_COMPUTATION_NO_EXTERNAL_CALL"};
+  cost:{actualCashMicroUsd:0;modelApiMicroUsd:0;allocatedCashMicroUsd:0;modeledLaborMicroUsd:null;costBasis:"DETERMINISTIC_LOCAL_COMPUTATION_NO_EXTERNAL_CALL"|"BOUNDED_EXTERNAL_READ_NO_PAID_MODEL"};
   persistentChanges:string[];subject:ProcedureApplicabilityIdentity;resultDigest:string;
   replayed?:boolean;receiptValidity?:{current:boolean;reason:string};
 };

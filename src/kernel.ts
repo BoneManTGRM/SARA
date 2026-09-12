@@ -1,3 +1,7 @@
+import {compileGoalExecution} from './digital-capabilities/goal-plan.ts';
+import {jobEconomicSubjectDigest,currentJobEconomics,compareJobEconomics} from './digital-capabilities/economic-scheduling.ts';
+import {deriveGoalTasks} from './digital-capabilities/self-management/definitions.ts';
+import {buildAuthoritativeJobAccounting} from './digital-capabilities/economic/accounting.ts';
 import {hasReceiptDependencies,receiptDependencyInput} from './digital-capabilities/receipt-dependencies.ts';
 import { capabilityContract, capabilityContracts, capabilityDefinition, benchmarkCapabilities } from "./digital-capabilities/registry.ts";
 import {enforceEffectBoundary} from './effect-boundary.ts';
@@ -2240,6 +2244,37 @@ export class SaraKernel {
   /** Reviewed built-in contracts share this kernel, policy authority, and append-only audit store. */
   async inspectCapabilityContracts() { return capabilityContracts(); }
 
+  private capabilityAuthorityDigest(state:KernelState):string {
+    const mandateDigest=state.standingMandate?sha256(canonicalJson(state.standingMandate)):null;
+    return sha256(canonicalJson({constitutionDigest:this.constitutionDigest,mandateDigest,emergencyStopped:state.emergencyStopped,stopEpoch:state.events.filter(e=>e.type==='emergency_stop_changed').at(-1)?.hash??null}));
+  }
+
+  /** Prioritize only already funded/authorized work; no score authorizes a job. */
+  async orderRevenuePilotWork(principal:Principal):Promise<string[]> {
+    if(principal!==SARA_PRINCIPAL&&!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_OR_INTERNAL_PRINCIPAL_REQUIRED');
+    return this.serializeMutation(async()=>{
+      const state=await this.state();if(state.emergencyStopped)return [];
+      const contract=await capabilityContract('economic-value-of-work');
+      const values=currentJobEconomics({events:state.events,jobs:state.jobs,revenueJobs:state.revenuePilotJobs,authorityContextDigest:this.capabilityAuthorityDigest(state),contractDigest:contract?.contractDigest??''});
+      const eligible=state.revenuePilotJobs.filter(j=>['queued','running'].includes(j.status)&&Boolean(j.revenueEvidenceId));
+      const order=[...eligible].sort((a,b)=>Number(b.status==='running')-Number(a.status==='running')||compareJobEconomics(a.id,b.id,values)||eligible.indexOf(a)-eligible.indexOf(b)).map(j=>j.id);
+      if(values.size){const evidence=order.flatMap(id=>values.has(id)?[{jobId:id,resultDigest:values.get(id)!.resultDigest}]:[]),digest=sha256(canonicalJson({queue:'revenue',order,evidence}));
+        if(!state.events.some(e=>e.type==='economic_queue_prioritized'&&(e.data as {digest:string}).digest===digest))await this.#store.append('economic_queue_prioritized',SARA_PRINCIPAL,{queue:'revenue',order,evidence,digest,authorityGranted:false});}
+      return order;
+    });
+  }
+
+  async executeCapabilityGoal(principal:Principal,supplied:unknown) {
+    if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    const compiled=await compileGoalExecution(supplied,capabilityContract);
+    const goalReceipt=await this.invokeCapability(principal,{requestId:`goal-${sha256(canonicalJson(compiled.request))}`,capabilityId:'goal-to-work-queue-compiler',input:compiled.goalInput});
+    if(goalReceipt.status!=='SUCCEEDED'||goalReceipt.receiptValidity?.current===false||!compiled.plan)return {status:'INCOMPLETE_EVIDENCE',goalReceiptDigest:goalReceipt.resultDigest,missingCapabilityInputs:compiled.missing,reason:compiled.reason,execution:null};
+    // The compiler's exact reviewed contracts enter the existing durable plan
+    // executor. Its normal authority, idempotency and completion gates remain.
+    const execution=await this.executeCapabilityPlan(principal,compiled.plan,Number(compiled.request.maximumSteps??16));
+    return {status:execution.status,goalReceiptDigest:goalReceipt.resultDigest,missingCapabilityInputs:[],reason:execution.reason,execution};
+  }
+
   async executeCapabilityPlan(principal:Principal,supplied:unknown,maximumSteps=16) {
     if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
     const plan=validatePlan(supplied),planDigest=sha256(canonicalJson(plan));
@@ -2249,7 +2284,19 @@ export class SaraKernel {
       await this.authorize(principal,{action:'sandbox_development',targetId:`capability-plan:${plan.id}:${plan.version}`,external:false});
       await this.#store.append('capability_plan_registered',principal,{id:plan.id,version:plan.version,planDigest,plan});
     });
-    const result=await executeBoundedPlan(plan,{contract:capabilityContract,invoke:request=>this.invokeCapability(principal,request),stopped:async()=>(await this.state()).emergencyStopped},maximumSteps);
+    const result=await executeBoundedPlan(plan,{contract:capabilityContract,invoke:request=>this.invokeCapability(principal,request),stopped:async()=>(await this.state()).emergencyStopped,valuation:async digest=>{
+      const state=await this.state(),event=state.events.find(e=>e.type==='digital_capability_executed'&&(e.data as {result:CapabilityResult}).result.resultDigest===digest);
+      if(!event)return undefined;
+      // Reuse the same bounded transitive freshness gate as normal evidence consumers.
+      const freshness=await this.invokeCapability(principal,{requestId:`plan-value-${sha256(canonicalJson({planDigest,digest}))}`,capabilityId:'autonomy-boundary-checker',input:{action:'read_supplied',target:`economic-receipt:${digest}`,estimatedCashMicroUsd:0,reversibility:'NONE',external:false},evidenceReceiptIds:[digest]});
+      if(freshness.status!=='SUCCEEDED'||freshness.receiptValidity?.current===false||!freshness.evidence.some(e=>e.contentDigest===digest&&e.claims.includes('capability:economic-value-of-work:SUCCEEDED')))return undefined;
+      const receipt=(event.data as {result:CapabilityResult}).result,{resultDigest,...unsigned}=receipt;
+      if(resultDigest!==sha256(canonicalJson(unsigned)))throw new EventStoreIntegrityError('Economic receipt integrity failure.');
+      const contract=await capabilityContract('economic-value-of-work');
+      if(receipt.capability.id!=='economic-value-of-work'||receipt.status!=='SUCCEEDED'||receipt.capability.contractDigest!==contract?.contractDigest)return undefined;
+      const score=(receipt.output as {comparableScoreMicroUsd:unknown}).comparableScoreMicroUsd;
+      return score===null?null:typeof score==='number'&&Number.isSafeInteger(score)?score:undefined;
+    }},maximumSteps);
     await this.serializeMutation(async()=>{const state=await this.state(),digest=sha256(canonicalJson(result));if(!state.events.some(e=>e.type==='capability_plan_progress'&&(e.data as {digest:string}).digest===digest))await this.#store.append('capability_plan_progress',principal,{digest,result});});
     return result;
   }
@@ -2283,8 +2330,7 @@ export class SaraKernel {
     return this.serializeMutation(async () => {
       const state = await this.state();
       const mandateDigest = state.standingMandate ? sha256(canonicalJson(state.standingMandate)) : null;
-      const authorityContextDigest = sha256(canonicalJson({constitutionDigest:this.constitutionDigest,mandateDigest,
-        emergencyStopped:state.emergencyStopped,stopEpoch:state.events.filter(event=>event.type==="emergency_stop_changed").at(-1)?.hash??null}));
+      const authorityContextDigest = this.capabilityAuthorityDigest(state);
       const policyDecision = evaluatePolicy({constitution:this.#constitution,principal,
         request:{action:"internal_read",targetId:"digital-capability",external:false},
         currentOwnerRecurringMonthlyUsd:ownerFundedRecurringMonthly(state.ledger),emergencyStopped:state.emergencyStopped});
@@ -2304,11 +2350,12 @@ export class SaraKernel {
         context.proceduralKnowledge=await ProceduralKnowledgeStore.inspectExisting(this.#store.stateDirectory);
         try{validateSchema(contract.inputSchema,request.input as Json);context.currentIdentity.proceduralKnowledgeDigest=proceduralDependencyDigest(request.capabilityId,request.input as Record<string,Json>,context.proceduralKnowledge);}catch(error){if(!(error instanceof CapabilityInputError))throw error;}
       }
-      if(definition?.sourceFiles.some(path=>path.startsWith('self-management/'))&&contract){
-        try{validateSchema(contract.inputSchema,request.input as Json);const input=request.input as {tasks?:Array<{capabilityId:string}>;encounters?:Array<{capabilityId:string}>};
-          const ids=[...new Set([...(input.tasks??[]),...(input.encounters??[])].map(t=>t.capabilityId))].sort();
+      if(definition?.sourceFiles.some(path=>path.startsWith('self-management/')||path.startsWith('agents/'))&&contract){
+        try{validateSchema(contract.inputSchema,request.input as Json);const input=request.input as {goal?:string;tasks?:Array<{capabilityId:string}>;encounters?:Array<{capabilityId:string}>;requestedCapabilityIds?:string[]};
+          const goalTasks=request.capabilityId==='goal-to-work-queue-compiler'&&!(input.tasks?.length)?deriveGoalTasks(input.goal??''):[];
+          const ids=[...new Set([...[...(input.tasks??[]),...(input.encounters??[]),...goalTasks].map(t=>String(t.capabilityId)),...(input.requestedCapabilityIds??[])])].sort();
           context.capabilityReadiness=[];
-          for(const id of ids){const c=await capabilityContract(id);if(c)context.capabilityReadiness=[...context.capabilityReadiness,{id,enabled:c.status==='ENABLED'&&c.qualification.status==='PASSED',authorityClass:c.authorityClass}];}
+          for(const id of ids){const c=await capabilityContract(id);if(c)context.capabilityReadiness=[...context.capabilityReadiness,{id,enabled:c.status==='ENABLED'&&c.qualification.status==='PASSED',authorityClass:c.authorityClass,version:c.version,contractDigest:c.contractDigest,description:c.description}];}
           context.currentIdentity.capabilityReadinessDigest=sha256(canonicalJson(context.capabilityReadiness));
         }catch(error){if(!(error instanceof CapabilityInputError))throw error;}
       }
@@ -2325,6 +2372,16 @@ export class SaraKernel {
           context.currentIdentity.serviceReadinessDigest=sha256(canonicalJson(context.serviceCapabilityEvidence));
         } catch(error) { if(!(error instanceof CapabilityInputError))throw error; }
       }
+      if(request.capabilityId==='economic-value-of-work'&&contract){
+        try{validateSchema(contract.inputSchema,request.input as Json);const workId=(request.input as {workId?:string|null}).workId;
+          if(workId)context.currentIdentity.workSubjectDigest=jobEconomicSubjectDigest(state.jobs,state.revenuePilotJobs,workId)??'unknown-work';
+        }catch(error){if(!(error instanceof CapabilityInputError))throw error;}
+      }
+      if(request.capabilityId==='profitability-accountant'&&contract){
+        try{validateSchema(contract.inputSchema,request.input as Json);const ids=(request.input as {authoritativeJobIds?:string[]}).authoritativeJobIds;
+          if(ids?.length){context.authoritativeJobAccounting=buildAuthoritativeJobAccounting(ids,state.ledger,state.revenuePilotJobs);context.currentIdentity.jobAccountingDigest=context.authoritativeJobAccounting.basisDigest;}
+        }catch(error){if(!(error instanceof CapabilityInputError))throw error;}
+      }
       const referenceMemo=new Map<string,boolean>(),visiting=new Set<string>();let referenceNodes=0;
       const referencedEvents=new Map(state.events.filter(e=>e.type==='digital_capability_executed'&&(context.ownerAuthenticated||e.actor.id===principal.id)).map(e=>[(e.data as {result:CapabilityResult}).result.resultDigest,e]));
       const referenceIsCurrent=async(prior:CapabilityResult,metadata:unknown,depth=0):Promise<boolean>=>{
@@ -2337,6 +2394,13 @@ export class SaraKernel {
         if(hasReceiptDependencies(prior.subject)){
           if(!dependencyInput)referenceCurrent=false;
           else{
+            if(prior.subject.workSubjectDigest!==undefined){
+              const id=dependencyInput.workId;referenceCurrent=referenceCurrent&&typeof id==='string'&&prior.subject.workSubjectDigest===(jobEconomicSubjectDigest(state.jobs,state.revenuePilotJobs,id)??'unknown-work');
+            }
+            if(prior.subject.jobAccountingDigest!==undefined){
+              const ids=dependencyInput.authoritativeJobIds as string[]|undefined;
+              referenceCurrent=referenceCurrent&&Array.isArray(ids)&&prior.subject.jobAccountingDigest===buildAuthoritativeJobAccounting(ids,state.ledger,state.revenuePilotJobs).basisDigest;
+            }
             if(prior.subject.serviceReadinessDigest!==undefined){
               const ids=dependencyInput.serviceCapabilityIds as string[]|undefined;
               referenceCurrent=referenceCurrent&&Array.isArray(ids)&&prior.subject.serviceReadinessDigest===sha256(canonicalJson(await serviceCapabilityEvidence(this.#store.stateDirectory,ids,this.constitutionDigest)));
@@ -2425,7 +2489,7 @@ export class SaraKernel {
       }
       const receipt=capabilityResult({requestId:request.requestId,capabilityId:request.capabilityId,inputDigest:sha256(canonicalJson(request.input)),
         contract,context,result,status:status==="SUCCEEDED"?result.status??status:status});
-      const dependencyInput=request.input&&typeof request.input==='object'&&!Array.isArray(request.input)?receiptDependencyInput(request.input as Record<string,Json>,context.currentIdentity):undefined;
+      const dependencyInput=request.input&&typeof request.input==='object'&&!Array.isArray(request.input)?receiptDependencyInput(request.input as Record<string,Json>,context.currentIdentity,context.capabilityReadiness?.map(c=>c.id)):undefined;
       await this.#store.append("digital_capability_executed",principal,{requestId:request.requestId,actorId:principal.id,requestDigest,result:receipt,...(dependencyInput?{dependencyInput}:{})});
       return structuredClone(receipt);
     });
@@ -2832,18 +2896,22 @@ export class SaraKernel {
       const campaign = currentLearningCampaign(state.events);
       const currentBootEpoch = state.events.filter(event => event.type === "system_booted").at(-1)?.hash ?? null;
       const reservedIds = new Set(reservations.map(event => (event.data as {jobId:string}).jobId));
+      const economicContract=await capabilityContract('economic-value-of-work');
+      const economicValues=currentJobEconomics({events:state.events,jobs:state.jobs,revenueJobs:state.revenuePilotJobs,authorityContextDigest:this.capabilityAuthorityDigest(state),contractDigest:economicContract?.contractDigest??''});
       let job = state.jobs.filter(candidate => candidate.kind === "self_development" &&
         ["authorized", "running"].includes(candidate.status) &&
         (campaign ? candidate.learningCampaignId === campaign.id : !candidate.learningCampaignId) &&
         candidate.workCard.maximumBudgetUsd === 0 && candidate.workCard.requiredCapabilities.includes("autonomous-learning"))
         .sort((a,b) => Number(b.status === "running") - Number(a.status === "running") ||
           Number(Boolean(b.learningParentJobId)) - Number(Boolean(a.learningParentJobId)) ||
-          b.workCard.expectedOwnerValue - a.workCard.expectedOwnerValue || a.id.localeCompare(b.id))[0];
+          compareJobEconomics(a.id,b.id,economicValues) || b.workCard.expectedOwnerValue - a.workCard.expectedOwnerValue || a.id.localeCompare(b.id))[0];
       if (!job) {
         const dailyReservations = reservations.filter(event => event.occurredAt.slice(0,10) === now.slice(0,10)).length;
         return ((campaign && campaignAccounting(campaign, state.events).remaining === 0) || dailyReservations >= LEARNING_DAILY_RESERVATION_LIMIT) ? null : undefined;
       }
 
+      const selectedValue=economicValues.get(job.id);
+      if(selectedValue&&!state.events.some(e=>e.type==='economic_queue_prioritized'&&(e.data as {jobId?:string;resultDigest?:string}).jobId===job!.id&&(e.data as {resultDigest?:string}).resultDigest===selectedValue.resultDigest))await this.#store.append('economic_queue_prioritized',SARA_PRINCIPAL,{queue:'learning',jobId:job.id,resultDigest:selectedValue.resultDigest,authorityGranted:false});
       const latestRunningEvent = [...state.events].reverse().find(event => event.type === "job_status_changed" &&
         (event.data as {jobId?:string;status?:string}).jobId === job!.id && (event.data as {status?:string}).status === "running");
       if (job.status === "running") {

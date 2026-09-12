@@ -1,8 +1,8 @@
 import {arraySchema as a,objectSchema as o,integerSchema as i,textSchema as t,idSchema as id,digestSchema,snapshotJson,validateSchema,CapabilityInputError,type Json} from './schema.ts';
 import {canonicalJson,sha256} from '../canonical.ts';
 import type {CapabilityContract,CapabilityInvocation,CapabilityResult} from './types.ts';
-export const planSchema=o({id,version:i(1,1000000),steps:a(o({id,capabilityId:id,contractDigest:digestSchema,input:{type:'json'},dependsOn:a(id,64),evidenceReceiptIds:a(digestSchema,32),bindings:a(o({inputKey:id,stepId:id,path:a(t(128),12,1)}),32),completion:a(o({path:a(t(128),12,1),equals:{type:'json'}}),32,1)}),64,1)});
-type Step={id:string;capabilityId:string;contractDigest:string;input:Json;dependsOn:string[];evidenceReceiptIds:string[];bindings:{inputKey:string;stepId:string;path:string[]}[];completion:{path:string[];equals:Json}[]};
+export const planSchema=o({id,version:i(1,1000000),steps:a(o({id,capabilityId:id,contractDigest:digestSchema,input:{type:'json'},dependsOn:a(id,64),evidenceReceiptIds:a(digestSchema,32),bindings:a(o({inputKey:id,stepId:id,path:a(t(128),12,1)}),32),completion:a(o({path:a(t(128),12,1),equals:{type:'json'}}),32,1),obligation:{type:'boolean'},economicEvidenceId:digestSchema},['id','capabilityId','contractDigest','input','dependsOn','evidenceReceiptIds','bindings','completion']),64,1)});
+type Step={obligation?:boolean;economicEvidenceId?:string;id:string;capabilityId:string;contractDigest:string;input:Json;dependsOn:string[];evidenceReceiptIds:string[];bindings:{inputKey:string;stepId:string;path:string[]}[];completion:{path:string[];equals:Json}[]};
 export type CapabilityPlan={id:string;version:number;steps:Step[]};
 export function validatePlan(supplied:unknown):CapabilityPlan {
  const input=snapshotJson(supplied);validateSchema(planSchema,input);const plan=input as unknown as CapabilityPlan;
@@ -11,12 +11,24 @@ export function validatePlan(supplied:unknown):CapabilityPlan {
  return plan;
 }
 function at(value:Json,path:string[]):Json|undefined {let current:Json|undefined=value;for(const key of path){if(['__proto__','constructor','prototype'].includes(key)||!current||typeof current!=='object'||!Object.hasOwn(current,key))return undefined;current=(current as Record<string,Json>)[key];}return current;}
-export async function executeBoundedPlan(plan:CapabilityPlan,adapter:{contract:(id:string)=>Promise<CapabilityContract|undefined>;invoke:(request:CapabilityInvocation)=>Promise<CapabilityResult>;stopped:()=>Promise<boolean>},maximumSteps:number) {
+export async function executeBoundedPlan(plan:CapabilityPlan,adapter:{contract:(id:string)=>Promise<CapabilityContract|undefined>;invoke:(request:CapabilityInvocation)=>Promise<CapabilityResult>;stopped:()=>Promise<boolean>;valuation?:(digest:string)=>Promise<number|null|undefined>},maximumSteps:number) {
  if(!Number.isSafeInteger(maximumSteps)||maximumSteps<1||maximumSteps>64)throw new CapabilityInputError('STEP_BUDGET');
- const results=new Map<string,CapabilityResult>(),completed:{stepId:string;resultDigest:string}[]=[];
- const finish=(status:string,blockedStep:string|null,reason:string)=>({planId:plan.id,version:plan.version,planDigest:sha256(canonicalJson(plan)),status,completed,blockedStep,reason,externalActions:0,actualCashMicroUsd:0});
+ const results=new Map<string,CapabilityResult>(),completed:{stepId:string;resultDigest:string}[]=[],blocked:{stepId:string;reason:string}[]=[],pending=[...plan.steps];
+ const finish=(status:string,blockedStep:string|null,reason:string)=>({planId:plan.id,version:plan.version,planDigest:sha256(canonicalJson(plan)),status,completed,blocked,blockedStep,reason,externalActions:0,actualCashMicroUsd:0});
  let fresh=0;
- for(const step of plan.steps){
+ while(pending.length){
+  const ready=pending.filter(s=>s.dependsOn.every(d=>results.has(d)||blocked.some(b=>b.stepId===d)));
+  if(!ready.length)return finish('BLOCKED',pending[0]!.id,'DEPENDENCY_UNRESOLVED');
+  const eligible:{step:Step;score:number|null;contract:CapabilityContract}[]=[];
+  for(const candidate of ready){const c=await adapter.contract(candidate.capabilityId);
+   let reason=candidate.dependsOn.some(d=>blocked.some(b=>b.stepId===d))?'FAILED_PREREQUISITE':!c||c.contractDigest!==candidate.contractDigest||c.status!=='ENABLED'||!['PURE','READ_ONLY','DRAFT_ONLY'].includes(c.effect)||!['READ_ONLY','DRAFT_ONLY'].includes(c.authorityClass)?'CURRENT_QUALIFIED_BOUNDED_CONTRACT_REQUIRED':null;
+   const score=candidate.economicEvidenceId?await adapter.valuation?.(candidate.economicEvidenceId):null;
+   if(candidate.economicEvidenceId&&score===undefined)reason='CURRENT_ECONOMIC_RECEIPT_REQUIRED';
+   if(reason){blocked.push({stepId:candidate.id,reason});pending.splice(pending.indexOf(candidate),1);}else eligible.push({step:candidate,score:score??null,contract:c!});
+  }
+  eligible.sort((a,b)=>Number(b.step.obligation===true)-Number(a.step.obligation===true)||Number(b.score!==null)-Number(a.score!==null)||(b.score??0)-(a.score??0)||plan.steps.indexOf(a.step)-plan.steps.indexOf(b.step));
+  if(!eligible.length)continue;
+  const {step}=eligible[0]!;pending.splice(pending.indexOf(step),1);
   if(await adapter.stopped())return finish('BLOCKED',step.id,'EMERGENCY_STOP');
   const contract=await adapter.contract(step.capabilityId);
   if(!contract||contract.contractDigest!==step.contractDigest||contract.status!=='ENABLED'||!['PURE','READ_ONLY','DRAFT_ONLY'].includes(contract.effect)||!['READ_ONLY','DRAFT_ONLY'].includes(contract.authorityClass))return finish('BLOCKED',step.id,'CURRENT_QUALIFIED_BOUNDED_CONTRACT_REQUIRED');
@@ -28,7 +40,7 @@ export async function executeBoundedPlan(plan:CapabilityPlan,adapter:{contract:(
   if(step.completion.some(p=>{const value=at(result.output,p.path);return value===undefined||canonicalJson(value)!==canonicalJson(p.equals);} ))return finish('BLOCKED',step.id,'COMPLETION_PREDICATE_FAILED');
   results.set(step.id,result);completed.push({stepId:step.id,resultDigest:result.resultDigest});
   if(!result.replayed)fresh++;
-  if(fresh>=maximumSteps&&completed.length<plan.steps.length)return finish('PAUSED',null,'PER_CALL_STEP_BUDGET');
+  if(fresh>=maximumSteps&&pending.length>0)return finish('PAUSED',null,'PER_CALL_STEP_BUDGET');
  }
- return finish('COMPLETE',null,'ALL_EXPLICIT_COMPLETION_PREDICATES_PASSED');
+ return blocked.length?finish('BLOCKED',blocked[0]!.stepId,blocked[0]!.reason):finish('COMPLETE',null,'ALL_EXPLICIT_COMPLETION_PREDICATES_PASSED');
 }
