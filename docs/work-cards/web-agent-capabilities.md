@@ -30,3 +30,11 @@ Current scope is supplied snapshots and isolated supplied-HTML rendering. No gen
 ## Final boundary review
 
 Two focused RED cases exposed uppercase password/hidden field values and credential-bearing source URLs. Sensitive textarea descendants were also excluded from DOM text extraction. The repair normalizes field types, prunes sensitive subtrees, rejects credential query keys, strips fragments, bounds DOM traversal and masks sensitive fields before screenshots. The required actual-browser fixture includes these cases. Nineteen affected web/agent tests and TypeScript passed; the reconciled inventory/runtime suite passed 21 tests. The separate browser command still failed locally with `SANDBOX_BROWSER_UNAVAILABLE` and remains a mandatory CI gate.
+
+## Actual Chrome handle repair
+
+PR #178 head `a58722bf` passed its 1,347 main tests and 14 runtime tests, then real browser qualification failed at the first field preparation: screenshot redaction and DOM refresh invalidated a saved frontend node ID. Two focused RED cases reproduced this failure and showed that a reused frontend number could address a different node.
+
+Snapshots now expose CDP backend node identity. Field preparation verifies the exact backend node in a current snapshot, retains all sensitive/type restrictions, and resolves a fresh frontend handle with `DOM.pushNodesByBackendIdsToFrontend` immediately before mutation. Screenshot masking uses the same resolution after each preceding redaction. Missing, sensitive, detached and unresolved identities fail closed. The real browser fixture retains the original backend handle across redaction, so the failing acceptance path remains exercised.
+
+`node --import tsx --test tests/web-capabilities.test.ts tests/web-capabilities-kernel.test.ts` passed 12/12. `npm run typecheck` passed. Real Chrome qualification must be rerun in CI against the repaired head; no local browser proof is claimed.

@@ -25,6 +25,20 @@ test('web reader rejects credential query sources and removes credential-bearing
 });
 test('web sandbox masks sensitive fields before requesting a screenshot',async()=>{
  const commands:{method:string;params:unknown}[]=[];
- const browser={snapshot:async()=>({elements:[{nodeId:9,name:'TEXTAREA',attributes:{name:'api_token',type:'password'}}]}),send:async(method:string,params:unknown)=>{commands.push({method,params});return method==='Page.captureScreenshot'?{data:Buffer.from('synthetic image bytes').toString('base64')}:{};}} as unknown as SandboxBrowser;
- await SandboxBrowser.prototype.screenshot.call(browser);assert.equal(commands[0]!.method,'DOM.setOuterHTML');assert.equal((commands[0]!.params as {nodeId:number}).nodeId,9);assert.equal(commands[1]!.method,'Page.captureScreenshot');
+ const browser={snapshot:async()=>({elements:[{nodeId:9,backendNodeId:90,name:'TEXTAREA',attributes:{name:'api_token',type:'password'}}]}),send:async(method:string,params:unknown)=>{commands.push({method,params});return method==='DOM.pushNodesByBackendIdsToFrontend'?{nodeIds:[19]}:method==='Page.captureScreenshot'?{data:Buffer.from('synthetic image bytes').toString('base64')}:{};}} as unknown as SandboxBrowser;
+ await SandboxBrowser.prototype.screenshot.call(browser);assert.equal(commands[0]!.method,'DOM.pushNodesByBackendIdsToFrontend');assert.equal(commands[1]!.method,'DOM.setOuterHTML');assert.equal((commands[1]!.params as {nodeId:number}).nodeId,19);assert.equal(commands[2]!.method,'Page.captureScreenshot');
+});
+test('web sandbox field preparation survives frontend node changes using stable backend identity',async()=>{
+ let frontend=41;const calls:{method:string;params:Record<string,unknown>}[]=[];
+ const browser={snapshot:async()=>({elements:[{nodeId:++frontend,backendNodeId:700,name:'INPUT',attributes:{id:'name',type:'text'}}]}),send:async(method:string,params:Record<string,unknown>)=>{calls.push({method,params});return method==='DOM.pushNodesByBackendIdsToFrontend'?{nodeIds:[frontend]}:{};}} as unknown as SandboxBrowser;
+ await SandboxBrowser.prototype.prepareField.call(browser,700,'Synthetic owner');
+ assert.deepEqual(calls,[{method:'DOM.pushNodesByBackendIdsToFrontend',params:{backendNodeIds:[700]}},{method:'DOM.setAttributeValue',params:{nodeId:42,name:'value',value:'Synthetic owner'}}]);
+});
+test('web sandbox stable handles cannot address sensitive, detached or unresolved fields',async()=>{
+ for(const elements of [[],[{nodeId:12,backendNodeId:700,name:'INPUT',attributes:{id:'token',type:'text'}}],[{nodeId:700,backendNodeId:701,name:'INPUT',attributes:{id:'name',type:'text'}}]]){
+  let mutations=0;const browser={snapshot:async()=>({elements}),send:async()=>{mutations++;return {};}} as unknown as SandboxBrowser;
+  await assert.rejects(()=>SandboxBrowser.prototype.prepareField.call(browser,700,'blocked'),/SENSITIVE_OR_EFFECTFUL_FIELD_DENIED/);assert.equal(mutations,0);
+ }
+ const browser={snapshot:async()=>({elements:[{nodeId:12,backendNodeId:700,name:'INPUT',attributes:{id:'name',type:'text'}}]}),send:async(method:string)=>{assert.equal(method,'DOM.pushNodesByBackendIdsToFrontend');return {nodeIds:[0]};}} as unknown as SandboxBrowser;
+ await assert.rejects(()=>SandboxBrowser.prototype.prepareField.call(browser,700,'blocked'),/STALE_SANDBOX_FIELD/);
 });
