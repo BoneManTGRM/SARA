@@ -1,0 +1,18 @@
+import type { CapabilityDefinition } from '../types.ts';
+import { businessSchemas } from './contracts.ts';
+import { businessCases } from './qualification.ts';
+import { scope, demand, competitors, proposal, verifyAcceptance, delivery, upsell, recurring, retention, experiment, productize } from './operations.ts';
+const implementations:Record<string,{execute:CapabilityDefinition['execute'];description:string;draft?:boolean;state?:boolean}>={
+ 'website-maintenance-scope-estimator':{execute:scope,description:'Estimate supplied website work scope and required verification against current qualified capabilities, retaining exact executor authority boundaries.',draft:true},
+ 'market-demand-validator':{execute:demand,description:'Separate exact-source independently evidenced demand, counterevidence, supplied inference and speculation; never fabricate demand.'},
+ 'competitive-offer-analyzer':{execute:competitors,description:'Compare supplied competitor terms and prices only within the same currency and billing unit, preserving unavailable fields as unknown.'},
+ 'proposal-compiler':{execute:proposal,description:'Compile a nonbinding proposal draft with exact owner drafting approval provenance, scope, exclusions, price assumptions and acceptance criteria.',draft:true},
+ 'customer-acceptance-verifier':{execute:verifyAcceptance,description:'Verify every customer criterion against independently captured exact job, scope, revision and required environment evidence; missing and contrary proof fail closed.'},
+ 'delivery-evidence-pack-compiler':{execute:delivery,description:'Compile an exact-revision delivery draft from an actual passing acceptance receipt and verified evidence references; never fabricate missing proof.',draft:true},
+ 'upsell-opportunity-detector':{execute:upsell,description:'Identify independently evidenced adjacent needs after independently accepted work, without inventing defects or authorizing outreach.',draft:true},
+ 'recurring-revenue-converter':{execute:recurring,description:'Identify repeated evidenced customer needs suitable for voluntary recurring work while preserving cancellation and customer data ownership.',draft:true},
+ 'customer-retention-planner':{execute:retention,description:'Draft useful follow-up from actual accepted work and evidenced customer needs; no unsolicited communication.',draft:true},
+ 'business-experiment-evaluator':{execute:experiment,description:'Persist frozen experiment designs as existing kernel receipts and evaluate independently bound results against precommitted thresholds and cost ceilings.',state:true},
+ 'repeatable-service-productizer':{execute:productize,description:'Derive a standardized service candidate from multiple independently accepted jobs and currently qualified demonstrated capabilities; prices stay unknown without economic evidence.',draft:true},
+};
+export const businessDefinitions:readonly CapabilityDefinition[]=Object.entries(implementations).map(([id,x])=>({id,version:'1.0.0',description:x.description,inputSchema:businessSchemas[id]!.input,outputSchema:businessSchemas[id]!.output,effect:x.state?'INTERNAL_STATE':x.draft?'DRAFT_ONLY':'PURE',authorityClass:x.draft?'DRAFT_ONLY':'READ_ONLY',resources:['supplied-input','actor-visible-kernel-evidence-receipts','existing-procedural-knowledge'],sourceFiles:['business/contracts.ts','business/operations.ts','business/qualification.ts','business/definitions.ts','engineering/common.ts'],qualificationRequirements:['frozen-contract','malformed-input','evidence-provenance','exact-subject-binding','no-fabricated-business-values','no-external-effect','determinism','kernel-replay-and-recovery'],execute:x.execute,cases:businessCases[id]!}));

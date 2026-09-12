@@ -23,3 +23,10 @@ test('owner observation retains its grade, subject and audit identity across rep
  assert.equal((proof.output as any).productionBehaviorProven,false);assert.equal(proof.evidence[0]!.provenance,'OWNER_OBSERVED');
  }finally{await rm(dir,{recursive:true,force:true});await rm(copy,{recursive:true,force:true});}
 });
+
+test('owner evidence preserves typed scalar subject fields without allowing structured authority payloads',async()=>{
+ const {compileOwnerEvidence}=await import('../src/digital-capabilities/observed-evidence.ts');
+ const input={requestId:'typed-owner-evidence',sourceId:'owner-record',contentDigest:'a'.repeat(64),subject:[{key:'reportRevision',value:2},{key:'protected',value:true},{key:'actorId',value:'specialist'},{key:'supersededBy',value:null}],claims:['observed']};
+ const e=compileOwnerEvidence(input,'2026-09-12T00:00:00.000Z');assert.deepEqual(e.subject,{reportRevision:2,protected:true,actorId:'specialist',supersededBy:null});assert.equal(e.provenance,'OWNER_OBSERVED');assert.equal(e.authoritySource,false);
+ assert.throws(()=>compileOwnerEvidence({...input,subject:[{key:'authority',value:{owner:true}}]},'2026-09-12T00:00:00.000Z'),/SAFE_SCALAR_SUBJECT_REQUIRED/);
+});

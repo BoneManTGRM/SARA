@@ -1,3 +1,4 @@
+import {deriveGoalTasks} from './digital-capabilities/self-management/definitions.ts';
 import {hasReceiptDependencies,receiptDependencyInput} from './digital-capabilities/receipt-dependencies.ts';
 import { capabilityContract, capabilityContracts, capabilityDefinition, benchmarkCapabilities } from "./digital-capabilities/registry.ts";
 import {enforceEffectBoundary} from './effect-boundary.ts';
@@ -2249,7 +2250,19 @@ export class SaraKernel {
       await this.authorize(principal,{action:'sandbox_development',targetId:`capability-plan:${plan.id}:${plan.version}`,external:false});
       await this.#store.append('capability_plan_registered',principal,{id:plan.id,version:plan.version,planDigest,plan});
     });
-    const result=await executeBoundedPlan(plan,{contract:capabilityContract,invoke:request=>this.invokeCapability(principal,request),stopped:async()=>(await this.state()).emergencyStopped},maximumSteps);
+    const result=await executeBoundedPlan(plan,{contract:capabilityContract,invoke:request=>this.invokeCapability(principal,request),stopped:async()=>(await this.state()).emergencyStopped,valuation:async digest=>{
+      const state=await this.state(),event=state.events.find(e=>e.type==='digital_capability_executed'&&(e.data as {result:CapabilityResult}).result.resultDigest===digest);
+      if(!event)return undefined;
+      // Reuse the same bounded transitive freshness gate as normal evidence consumers.
+      const freshness=await this.invokeCapability(principal,{requestId:`plan-value-${sha256(canonicalJson({planDigest,digest}))}`,capabilityId:'autonomy-boundary-checker',input:{action:'read_supplied',target:`economic-receipt:${digest}`,estimatedCashMicroUsd:0,reversibility:'NONE',external:false},evidenceReceiptIds:[digest]});
+      if(freshness.status!=='SUCCEEDED'||freshness.receiptValidity?.current===false||!freshness.evidence.some(e=>e.contentDigest===digest&&e.claims.includes('capability:economic-value-of-work:SUCCEEDED')))return undefined;
+      const receipt=(event.data as {result:CapabilityResult}).result,{resultDigest,...unsigned}=receipt;
+      if(resultDigest!==sha256(canonicalJson(unsigned)))throw new EventStoreIntegrityError('Economic receipt integrity failure.');
+      const contract=await capabilityContract('economic-value-of-work');
+      if(receipt.capability.id!=='economic-value-of-work'||receipt.status!=='SUCCEEDED'||receipt.capability.contractDigest!==contract?.contractDigest)return undefined;
+      const score=(receipt.output as {comparableScoreMicroUsd:unknown}).comparableScoreMicroUsd;
+      return score===null?null:typeof score==='number'&&Number.isSafeInteger(score)?score:undefined;
+    }},maximumSteps);
     await this.serializeMutation(async()=>{const state=await this.state(),digest=sha256(canonicalJson(result));if(!state.events.some(e=>e.type==='capability_plan_progress'&&(e.data as {digest:string}).digest===digest))await this.#store.append('capability_plan_progress',principal,{digest,result});});
     return result;
   }
@@ -2304,11 +2317,12 @@ export class SaraKernel {
         context.proceduralKnowledge=await ProceduralKnowledgeStore.inspectExisting(this.#store.stateDirectory);
         try{validateSchema(contract.inputSchema,request.input as Json);context.currentIdentity.proceduralKnowledgeDigest=proceduralDependencyDigest(request.capabilityId,request.input as Record<string,Json>,context.proceduralKnowledge);}catch(error){if(!(error instanceof CapabilityInputError))throw error;}
       }
-      if(definition?.sourceFiles.some(path=>path.startsWith('self-management/'))&&contract){
-        try{validateSchema(contract.inputSchema,request.input as Json);const input=request.input as {tasks?:Array<{capabilityId:string}>;encounters?:Array<{capabilityId:string}>};
-          const ids=[...new Set([...(input.tasks??[]),...(input.encounters??[])].map(t=>t.capabilityId))].sort();
+      if(definition?.sourceFiles.some(path=>path.startsWith('self-management/')||path.startsWith('agents/'))&&contract){
+        try{validateSchema(contract.inputSchema,request.input as Json);const input=request.input as {goal?:string;tasks?:Array<{capabilityId:string}>;encounters?:Array<{capabilityId:string}>;requestedCapabilityIds?:string[]};
+          const goalTasks=request.capabilityId==='goal-to-work-queue-compiler'&&!(input.tasks?.length)?deriveGoalTasks(input.goal??''):[];
+          const ids=[...new Set([...[...(input.tasks??[]),...(input.encounters??[]),...goalTasks].map(t=>String(t.capabilityId)),...(input.requestedCapabilityIds??[])])].sort();
           context.capabilityReadiness=[];
-          for(const id of ids){const c=await capabilityContract(id);if(c)context.capabilityReadiness=[...context.capabilityReadiness,{id,enabled:c.status==='ENABLED'&&c.qualification.status==='PASSED',authorityClass:c.authorityClass}];}
+          for(const id of ids){const c=await capabilityContract(id);if(c)context.capabilityReadiness=[...context.capabilityReadiness,{id,enabled:c.status==='ENABLED'&&c.qualification.status==='PASSED',authorityClass:c.authorityClass,version:c.version,contractDigest:c.contractDigest,description:c.description}];}
           context.currentIdentity.capabilityReadinessDigest=sha256(canonicalJson(context.capabilityReadiness));
         }catch(error){if(!(error instanceof CapabilityInputError))throw error;}
       }
@@ -2425,7 +2439,7 @@ export class SaraKernel {
       }
       const receipt=capabilityResult({requestId:request.requestId,capabilityId:request.capabilityId,inputDigest:sha256(canonicalJson(request.input)),
         contract,context,result,status:status==="SUCCEEDED"?result.status??status:status});
-      const dependencyInput=request.input&&typeof request.input==='object'&&!Array.isArray(request.input)?receiptDependencyInput(request.input as Record<string,Json>,context.currentIdentity):undefined;
+      const dependencyInput=request.input&&typeof request.input==='object'&&!Array.isArray(request.input)?receiptDependencyInput(request.input as Record<string,Json>,context.currentIdentity,context.capabilityReadiness?.map(c=>c.id)):undefined;
       await this.#store.append("digital_capability_executed",principal,{requestId:request.requestId,actorId:principal.id,requestDigest,result:receipt,...(dependencyInput?{dependencyInput}:{})});
       return structuredClone(receipt);
     });
