@@ -2271,7 +2271,7 @@ export class SaraKernel {
       const prior=state.events.find(e=>e.type==='owner_work_received'&&e.actor.id===principal.id&&(e.data as WorkRecord).request.requestId===request.requestId);
       if(prior){const saved=prior.data as WorkRecord;if(saved.requestDigest!==requestDigest)throw new Error('OWNER_WORK_REQUEST_CONFLICT');return structuredClone(saved);}
       await this.authorize(principal,{action:'record_memory',targetId:`owner-work:${request.requestId}`,external:false});
-      const materials=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord).filter(r=>r.request.suppliedText?.trim()).map(r=>({body:r.request.suppliedText!,sourceId:`owner-material:${r.requestDigest}`,receivedAt:r.receivedAt}));
+      const materials=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord).filter(r=>r.request.suppliedText?.trim()).map(r=>({body:r.request.suppliedText!,sourceId:`owner-material:${r.requestDigest}`,receivedAt:r.receivedAt,workflow:r.workflow}));
       const compiled=await compileOwnerWork(request,state.jobs,await capabilityContracts(),new Date().toISOString(),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),{jobCapabilities:state.capabilities,materials});
       await this.#store.append('owner_work_received',principal,compiled);
       return compiled;

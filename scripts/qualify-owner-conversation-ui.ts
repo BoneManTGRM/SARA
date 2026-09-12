@@ -65,11 +65,20 @@ try{
   assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('commitment-tracker')"),true);
   assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('2026-10-01')"),true);
  }
- const received=(await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received');assert.equal(received.length,4);
- const count=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(count,28);
+ for(const item of [
+  {goal:'Diagnose this software defect and give me a brief.',material:'Expected: the counter returns 2.\nObserved: the counter returns 3.\nEnvironment: isolated Node fixture.\nSteps: call increment(1).',visible:'Root cause remains unconfirmed.'},
+  {goal:'Review this business quote and draft a proposal.',material:'Problem: review the supplied release report.\nDeliverables: a written readiness brief.\nAcceptance criteria: identify every supplied blocker.\nPrice: USD 200.\nDirect cash cost: USD 25.\nModel API cost: USD 5.\nInfrastructure cost: USD 0.\nTooling cost: USD 0.\nRisk reserve: USD 10.\nMinimum margin: 20%.',visible:'cash margin: 80.00%'}
+ ]){
+  await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(item.goal)};document.querySelector('#owner-work-material').value=${JSON.stringify(item.material)};document.querySelector('#owner-work-submit').click()`);
+  await until("document.querySelector('#owner-work-status').textContent==='BLOCKED · VERIFIED_ANALYSIS'");
+  assert.equal(await evaluate(`document.querySelector('#owner-work-results').innerText.includes(${JSON.stringify(item.visible)})`),true,'The real activity view must show useful analysis without opening API responses');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true);
+ }
+ const received=(await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received');assert.equal(received.length,6);
+ const count=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(count,38);
  await evaluate("document.querySelector('#owner-work-submit').click()");await until("!document.querySelector('#owner-work-submit').disabled");
  assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length,count,'Repeated submission must reuse receipts');
- console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:4,executedReceipts:count,durableCommunicationReuse:true,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:6,executedReceipts:count,durableCommunicationReuse:true,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
  socket?.close();chrome.kill('SIGKILL');

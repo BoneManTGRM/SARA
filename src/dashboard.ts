@@ -791,7 +791,7 @@ export const DASHBOARD_HTML = `<!doctype html>
                     <label for="owner-work-text">Message SARA</label>
                     <textarea id="owner-work-text" maxlength="4096" required placeholder="Review unfinished work, identify blockers, prioritize obligations, complete the authorized steps, and give me a brief."></textarea>
                     <label for="owner-work-material">Supplied material (optional)</label>
-                    <textarea id="owner-work-material" maxlength="12000" placeholder="Paste communication text for a secretary review. Do not include passwords or secrets."></textarea>
+                    <textarea id="owner-work-material" maxlength="12000" placeholder="Paste communications, a defect report, or quote facts. Do not include passwords or secrets."></textarea>
                     <button class="button primary" id="owner-work-submit" type="submit">Run supported work</button>
                     <button class="button" id="owner-work-refresh" type="button">Refresh work</button>
                   </fieldset>
@@ -1211,6 +1211,10 @@ export const DASHBOARD_HTML = `<!doctype html>
         for (const receipt of result.receipts) {
           const output = receipt.output || {};
           const lines = [...(output.commitments || []).map(item => item.statement), ...(output.followUps || []).map(item => item.reason), ...(output.ambiguities || []), ...(output.responseDraft ? [output.responseDraft] : []), ...(output.sections || []).flatMap(section => section.items.map(item => item.summary)), ...(output.basis === 'AUTHORITATIVE_JOB_STATE' ? output.jobs.map(job => job.jobId + ': linked realized revenue $' + (job.realizedRevenueMicroUsd / 1000000).toFixed(6) + '; recorded model and direct costs $' + ((job.modelApiMicroUsd + job.directExternalMicroUsd) / 1000000).toFixed(6)) : []), ...(output.accountingUnknowns || [])];
+          if (receipt.capability.id === 'bug-reproduction-planner') lines.push('Reproduction plan: ' + output.status + '. Reproduction has not been executed.', ...output.steps.map(step => step.action));
+          if (receipt.capability.id === 'root-cause-analyzer') lines.push('Root cause remains unconfirmed. ' + output.nextDiagnostic);
+          if (receipt.capability.id === 'quote-margin-guard') lines.push('Quote calculation: ' + output.status + '. Expected cash contribution: ' + (output.contributionMicroUsd === null ? 'unknown' : '$' + (output.contributionMicroUsd / 1000000).toFixed(6)) + '; cash margin: ' + (output.marginPpm === null ? 'unknown' : (output.marginPpm / 10000).toFixed(2) + '%') + '. These are supplied estimates, not realized revenue.');
+          if (receipt.capability.id === 'proposal-compiler') lines.push('Unapproved proposal draft: ' + output.problemStatement, ...output.deliverables.map(item => 'Deliverable: ' + item), ...output.acceptanceCriteria.map(item => 'Acceptance: ' + item), ...output.missingFacts);
           for (const line of lines) { const p = document.createElement('p'); p.textContent = line; article.appendChild(p); }
         }
         for (const blocker of result.blockers || []) {
