@@ -1,3 +1,4 @@
+import { engineeringDefinitions } from "./engineering/definitions.ts";
 import { readFile } from "node:fs/promises";
 import { canonicalJson, sha256 } from "../canonical.ts";
 import { BASE_QUALIFICATION_CONTEXT, foundationDefinitions } from "./foundation.ts";
@@ -5,7 +6,7 @@ import { snapshotJson, validateSchema, type Json } from "./schema.ts";
 import type { CapabilityContract, CapabilityDefinition, ExecutionContext } from "./types.ts";
 
 // Only reviewed, statically imported implementations enter this registry. Customer manifests and learned artifacts cannot register code here.
-const DEFINITIONS:readonly CapabilityDefinition[]=foundationDefinitions;
+const DEFINITIONS:readonly CapabilityDefinition[]=[...foundationDefinitions,...engineeringDefinitions];
 const COMMON_FILES=["types.ts","schema.ts","registry.ts","evidence.ts","boundary.ts","receipt.ts","foundation.ts","../kernel.ts","../policy.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts"];
 function freezeReviewed(value:unknown):void {
   if(!value||typeof value!=="object"||Object.isFrozen(value))return;
@@ -19,15 +20,25 @@ export function capabilityDefinition(id:string):CapabilityDefinition|undefined{r
 
 type QualificationEvidence={capabilityId:string;passed:number;failed:number;caseDigest:string;implementationDigest:string;failures:string[]};
 const qualificationCache=new Map<string,Promise<QualificationEvidence>>();
-async function sourceIdentity(definition:CapabilityDefinition):Promise<string>{
+async function sourceIdentity(definition:CapabilityDefinition, startupReads?:Map<string,Promise<Buffer>>):Promise<string>{
+  // Share reads only within the one loaded-code snapshot. Runtime checks always
+  // reread current bytes, so startup deduplication cannot hide later changes.
+  const read = (key:string, url:URL):Promise<Buffer> => {
+    if (!startupReads) return readFile(url);
+    let pending = startupReads.get(key);
+    if (!pending) { pending = readFile(url); startupReads.set(key,pending); }
+    return pending;
+  };
   const files=[...new Set([...COMMON_FILES,...definition.sourceFiles])].sort(),source=[];
-  for(const file of files)source.push({path:file,digest:sha256(await readFile(new URL(file,import.meta.url)))});
-  source.push({path:"package-lock.json",digest:sha256(await readFile(new URL("../../package-lock.json",import.meta.url)))});
+  for(const file of files)source.push({path:file,digest:sha256(await read(file,new URL(file,import.meta.url)))});
+  source.push({path:"package-lock.json",digest:sha256(await read("package-lock.json",new URL("../../package-lock.json",import.meta.url)))});
   return sha256(canonicalJson(source));
 }
 // Loaded code and on-disk evidence must describe the same process revision.
 // A changed source file requires restart; passing old loaded code cannot attest new bytes.
-const loadedIdentities=new Map(await Promise.all(DEFINITIONS.map(async definition=>[definition.id,await sourceIdentity(definition)] as const)));
+const startupReads=new Map<string,Promise<Buffer>>();
+const loadedIdentities=new Map(await Promise.all(DEFINITIONS.map(async definition=>[definition.id,await sourceIdentity(definition,startupReads)] as const)));
+startupReads.clear();
 freezeReviewed(BASE_QUALIFICATION_CONTEXT);
 export async function runFrozenCapabilityCases(id:string):Promise<QualificationEvidence&{evidenceDisposition:"FRESH"|"REUSED"|"INVALIDATED"}> {
   const definition=definitions.get(id);
