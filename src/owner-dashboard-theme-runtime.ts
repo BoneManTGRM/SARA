@@ -1,5 +1,6 @@
 import { ServerResponse } from "node:http";
 import { applyOwnerDashboardTheme, KNIGHT_RIDER_THEME_MARKER } from "./owner-dashboard-theme.ts";
+import { applyOwnerJobActivityPanel } from "./owner-job-activity-runtime.ts";
 
 let installed = false;
 let loggedFirstApplication = false;
@@ -163,7 +164,7 @@ export function installOwnerDashboardThemeRuntime(): void {
 
   responsePrototype.end = function (this: ServerResponse, ...args: unknown[]): unknown {
     if (args.length > 0 && typeof args[0] === "string" && args[0].includes("<title>SARA // Owner Command Center</title>")) {
-      const themed = applyOwnerMobileLayoutFix(applyOwnerDashboardTheme(args[0]));
+      const themed = applyOwnerJobActivityPanel(applyOwnerMobileLayoutFix(applyOwnerDashboardTheme(args[0])));
       if (themed !== args[0]) {
         args[0] = themed;
         if (!loggedFirstApplication && themed.includes(KNIGHT_RIDER_THEME_MARKER)) {
