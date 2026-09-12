@@ -17,6 +17,7 @@ export const LEARNING_CAMPAIGN_MAXIMUM_REQUESTS = 100;
 export const LEARNING_CAMPAIGN_MAXIMUM_CONTRACTS = 32;
 export const LEARNING_DAILY_RESERVATION_LIMIT = 20;
 export const LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT = 4;
+export const LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY = 3;
 
 /** Owner-frozen data, never a producer-supplied acceptance oracle. */
 export function compileLearningCampaign(input: LearningCampaignInput): LearningCampaign {
@@ -169,6 +170,13 @@ export function selectLearningGap(campaign: LearningCampaign, jobs: Job[], event
       job.learningCapabilityId === contract.capabilityId && job.learningContractDigest === contractDigest &&
       (job.learningRootJobId === latestRoot.id || job.learningParentJobId === latestRoot.id));
     if (hasChild) return [];
+
+    // Repeated fresh roots are not new accomplishments. Three terminal roots
+    // without qualification exhaust the automatic retry budget for this
+    // capability. A changed verifier/generator, contract, or owner decision is
+    // required before further work should be created.
+    if (roots.length >= LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY &&
+        roots.every(job => job.status === "failed")) return [];
 
     const previousSelection = selections.filter(selection => selection.capabilityId === contract.capabilityId &&
       (selection.contractDigest === undefined || selection.contractDigest === contractDigest)).at(-1);
