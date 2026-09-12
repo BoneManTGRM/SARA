@@ -30,14 +30,14 @@ function route(text:string):string|null{
  if(/\b(?:review|inspect|prepare|complete)\b/iu.test(text)&&/\b(?:paid work|authorized opportunities|earning path|supported offer)\b/iu.test(text))return 'revenue-work';
  const defect=/\b(?:diagnose|analyze|analyse|triage|review|inspect)\b/iu.test(text)&&/\b(?:(?:software )?(?:defect|bug)(?: report)?|failure report)\b/iu.test(text);
  const quote=/\b(?:review|analyze|analyse|check|calculate|draft|prepare)\b/iu.test(text)&&/\b(?:quote|proposal)\b/iu.test(text);
- if((defect||quote)&&/\b(?:inbox|email|communications|messages|unfinished work|pending jobs|work queue|obligations)\b/iu.test(text))return null;
+ if((defect||quote)&&/\b(?:inbox|email|communications?|messages|unfinished work|pending jobs|work queue|obligations)\b/iu.test(text))return null;
  if(defect&&quote)return null;
  if(defect)return 'supplied-defect';
  if(/\bsoftware\b/iu.test(text))return null;
  if(quote)return 'supplied-quote';
  const action=/\b(?:review|inspect|check|summarize|summarise|triage|prioritize|prioritise|organize|organise|give|prepare|identify|show|tell|audit|reconcile|complete|finish)\b/iu.test(text);
  if(action&&/\b(?:(?:unfinished|outstanding|pending|open)\s+(?:work|jobs|tasks|obligations)|work queue|backlog|obligations|stuck jobs)\b/iu.test(text))return 'unfinished-work';
- if(action&&/\b(?:inbox|email|communications|messages|secretary|commitments|follow.up|meeting)\b/iu.test(text))return 'supplied-communications';
+ if(action&&/\b(?:inbox|email|communications?|messages|secretary|commitments|follow.up|meeting)\b/iu.test(text))return 'supplied-communications';
  return null;
 }
 export function supportedWorkFamily(text:string){return route(text);}
@@ -69,7 +69,14 @@ export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:
   const summaries=[`${service.review.serviceName}: catalog price $${service.review.catalogPriceUsd}; execution ceiling $${service.review.maximumExecutionCostUsd}. Total cash cost and profit remain unknown.`,`${service.review.deliveryEvidence.filter(d=>d.lastTransportOutcome==='COMPLETE').length} completed server download transports; customer receipt and acceptance remain unverified.`,service.review.nextAction,...service.blockers.map(b=>b.reason)];
   summaries.forEach((summary,index)=>briefItems.push({id:`service-${index}`,category:'CUSTOMER',summary,sourceId:`kernel:commercial:${service.identity}`,dueAt:null,status:'OPEN',requiresOwner:false}));
   const ownerObligations=jobs.filter(j=>!j.learningCampaignId&&j.status!=='verified');
-  briefItems.push({id:'owner-obligations',category:'COMMITMENT',summary:`${ownerObligations.length} unfinished explicit owner obligations remain in the existing work queue; use Review unfinished work for their preserved details. Learning is not a prerequisite for this service.`,sourceId:'kernel:jobs',dueAt:null,status:'OPEN',requiresOwner:false});
+  if(briefItems.length+ownerObligations.length>100){record.blockers.push({subjectId:'owner-obligations',reason:'The combined service and owner-obligation brief exceeds its 100-item bound; no obligations were silently discarded.',missing:['Narrow the review scope.']});return record;}
+  const available=new Set((context.jobCapabilities??[]).filter(c=>c.status==='available').map(c=>c.id));
+  for(const job of ownerObligations){
+   const missing=context.jobCapabilities?job.workCard.requiredCapabilities.filter(id=>!available.has(id)):job.workCard.missingCapabilities;
+   const reason=missing.length?`Missing current capabilities: ${missing.join(', ')}.`:`Existing owner job remains ${job.status}; its executor and acceptance evidence require reconciliation.`;
+   briefItems.push({id:job.id,category:'COMMITMENT',summary:`Preserved owner obligation (${job.status}): ${job.workCard.objective.slice(0,900)} — ${reason.slice(0,800)} This obligation is not a prerequisite for the snapshot service.`,sourceId:`kernel:job:${job.id}`,dueAt:null,status:'OPEN',requiresOwner:false});
+   record.blockers.push({subjectId:job.id,reason,missing:missing.length?missing:['Existing owner executor and acceptance evidence.']});
+  }
  }else if(workflow==='unfinished-work'){
   const retryBlockers=new Map(learningRetryBudgetBlockers(jobs).map(blocker=>[blocker.jobId,blocker]));
   const available=new Set((context.jobCapabilities??[]).filter(c=>c.status==='available').map(c=>c.id));
