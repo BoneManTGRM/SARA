@@ -41,7 +41,8 @@ test('ordinary earning request prepares the existing snapshot without inventing 
  const replay=await request({requestId:'service-review-one',text:goal});assert.deepEqual(replay.receipts,r.receipts);
 }));
 test('supplied meeting date is distinct from a draft commitment and the reply is relevant',()=>fixture(async(_kernel,request)=>{
- const r=await request({requestId:'service-scheduling',text:'Review these communications and prepare a brief.',suppliedText:'I will provide the draft by 2026-09-15. Can we meet on 2026-09-16 at 14:00 UTC for 30 minutes?'});
+ const r=await request({requestId:'service-scheduling',text:'Review this supplied communication and tell me what needs my attention.',suppliedText:'I will provide the draft by 2026-09-15. Can we meet on 2026-09-16 at 14:00 UTC for 30 minutes?'});
+ assert.equal(r.workflow,'supplied-communications');
  const calendar=r.receipts.find((x:any)=>x.capability.id==='calendar-intent-parser').output;
  assert.equal(calendar.date,'2026-09-16');assert.equal(calendar.time,'14:00');
  const intake=r.receipts.find((x:any)=>x.capability.id==='support-intake-triage').output;

@@ -30,14 +30,14 @@ function route(text:string):string|null{
  if(/\b(?:review|inspect|prepare|complete)\b/iu.test(text)&&/\b(?:paid work|authorized opportunities|earning path|supported offer)\b/iu.test(text))return 'revenue-work';
  const defect=/\b(?:diagnose|analyze|analyse|triage|review|inspect)\b/iu.test(text)&&/\b(?:(?:software )?(?:defect|bug)(?: report)?|failure report)\b/iu.test(text);
  const quote=/\b(?:review|analyze|analyse|check|calculate|draft|prepare)\b/iu.test(text)&&/\b(?:quote|proposal)\b/iu.test(text);
- if((defect||quote)&&/\b(?:inbox|email|communications|messages|unfinished work|pending jobs|work queue|obligations)\b/iu.test(text))return null;
+ if((defect||quote)&&/\b(?:inbox|email|communications?|messages|unfinished work|pending jobs|work queue|obligations)\b/iu.test(text))return null;
  if(defect&&quote)return null;
  if(defect)return 'supplied-defect';
  if(/\bsoftware\b/iu.test(text))return null;
  if(quote)return 'supplied-quote';
  const action=/\b(?:review|inspect|check|summarize|summarise|triage|prioritize|prioritise|organize|organise|give|prepare|identify|show|tell|audit|reconcile|complete|finish)\b/iu.test(text);
  if(action&&/\b(?:(?:unfinished|outstanding|pending|open)\s+(?:work|jobs|tasks|obligations)|work queue|backlog|obligations|stuck jobs)\b/iu.test(text))return 'unfinished-work';
- if(action&&/\b(?:inbox|email|communications|messages|secretary|commitments|follow.up|meeting)\b/iu.test(text))return 'supplied-communications';
+ if(action&&/\b(?:inbox|email|communications?|messages|secretary|commitments|follow.up|meeting)\b/iu.test(text))return 'supplied-communications';
  return null;
 }
 export function supportedWorkFamily(text:string){return route(text);}

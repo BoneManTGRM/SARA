@@ -60,7 +60,7 @@ try{
   const shot=await send('Page.captureScreenshot',{format:'png'});screenshots.push(sha256(Buffer.from(shot.data,'base64')));
  }
  for(const supplied of [true,false]){
-  const goal=supplied?'Review these communications, identify commitments and prepare a brief.':'Review the latest supplied messages and prepare a brief.';
+  const goal=supplied?'Review this supplied communication and tell me what needs my attention.':'Review the latest supplied messages and prepare a brief.';
   const material=supplied?'I will provide the draft by 2026-10-01. Can we meet on 2026-10-02 at 14:00 UTC for 30 minutes?':'';
   await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(goal)};document.querySelector('#owner-work-material').value=${JSON.stringify(material)};document.querySelector('#owner-work-submit').click()`);
   await until("document.querySelector('#owner-work-status').textContent==='COMPLETE · VERIFIED_ANALYSIS'");
