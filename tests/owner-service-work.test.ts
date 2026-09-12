@@ -21,6 +21,7 @@ async function fixture(run:(kernel:SaraKernel,request:(body:unknown)=>Promise<an
  finally{await new Promise<void>(resolve=>server.close(()=>resolve()));await rm(directory,{recursive:true,force:true});}
 }
 test('ordinary earning request prepares the existing snapshot without inventing a customer, authority or profit',()=>fixture(async(kernel,request)=>{
+ const obligation=await kernel.createSelfDevelopmentJob(kernel.authenticateOwnerToken(token),{objective:'Synthetic preserved owner obligation: inspect supplied triage facts',expectedOwnerValue:1,requiredCapabilities:['synthetic-missing-triage'],acceptanceCriteria:['Use only supplied fixture facts'],maximumBudgetUsd:0});
  const before=await kernel.getStatus();
  const r=await request({requestId:'service-review-one',text:goal});
  assert.equal(r.workflow,'revenue-work');
@@ -34,9 +35,13 @@ test('ordinary earning request prepares the existing snapshot without inventing 
  assert.ok(r.receipts.some((x:any)=>x.capability.id==='proposal-compiler'&&x.output.bindingOffer===false));
  assert.ok(r.receipts.some((x:any)=>x.capability.id==='profitability-accountant'&&x.output.basis==='AUTHORITATIVE_JOB_STATE'));
  assert.match(JSON.stringify(r.brief),/No recorded customer/);
+ assert.match(JSON.stringify(r.brief),/Synthetic preserved owner obligation: inspect supplied triage facts/);
+ assert.match(JSON.stringify(r.brief),/synthetic-missing-triage/);
+ assert.match(JSON.stringify(r.brief),new RegExp(`kernel:job:${obligation.id}`));
  const after=await kernel.getStatus();
  assert.deepEqual(after.revenuePilotJobs,before.revenuePilotJobs);
  assert.deepEqual(after.standingMandate,before.standingMandate);
+ assert.deepEqual(after.jobs,before.jobs);
  assert.equal(r.actualCashMicroUsd,0);
  const replay=await request({requestId:'service-review-one',text:goal});assert.deepEqual(replay.receipts,r.receipts);
 }));
