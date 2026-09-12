@@ -116,6 +116,13 @@ export type LedgerEntry = {
   recurringMonthly: boolean;
   description: string;
   occurredAt: string;
+  jobAccounting?: {
+    jobId: string;
+    category: 'MODEL_API' | 'DIRECT_EXTERNAL' | 'ALLOCATION' | 'REFUND';
+    evidenceRef: string;
+    scopeDigest: string;
+    roleReceiptDigests?: string[];
+  };
 };
 
 export type CapabilityStatus = "available" | "limited" | "missing";

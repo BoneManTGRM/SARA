@@ -3,6 +3,7 @@ import {compileGoalExecution} from './digital-capabilities/goal-plan.ts';
 import {jobEconomicSubjectDigest,currentJobEconomics,compareJobEconomics} from './digital-capabilities/economic-scheduling.ts';
 import {deriveGoalTasks} from './digital-capabilities/self-management/definitions.ts';
 import {buildAuthoritativeJobAccounting} from './digital-capabilities/economic/accounting.ts';
+import {bindJobExpense,jobAccountingScope,jobExpenseKinds,type JobExpenseInput} from './revenue-job-accounting.ts';
 import {hasReceiptDependencies,receiptDependencyInput} from './digital-capabilities/receipt-dependencies.ts';
 import { capabilityContract, capabilityContracts, capabilityDefinition, benchmarkCapabilities } from "./digital-capabilities/registry.ts";
 import {enforceEffectBoundary} from './effect-boundary.ts';
@@ -970,6 +971,18 @@ export class SaraKernel {
     return routeOperationalSkills(records, query, limit);
   }
 
+  async inspectRevenueJobAccounting(principal:Principal,jobId:string){
+    await this.authorize(principal,{action:'internal_read',targetId:`revenue-job-accounting:${jobId}`,external:false});
+    const state=await this.state(),job=state.revenuePilotJobs.find(j=>j.id===jobId);
+    if(!job)throw new Error('Revenue job does not exist.');
+    return {jobId,scopeDigest:jobAccountingScope(job,state.ledger),status:job.status,accountedExecutionCostUsd:job.actualExecutionCostUsd,accounting:buildAuthoritativeJobAccounting([jobId],state.ledger,state.revenuePilotJobs)};
+  }
+
+  recordRevenueJobExpense(principal:Principal,jobId:string,input:JobExpenseInput){
+    if(!Object.hasOwn(jobExpenseKinds,input.category))throw new Error('Invalid job expense category.');
+    return this.recordLedgerEntry(principal,{kind:jobExpenseKinds[input.category],source:'sara',amountUsd:input.amountUsd,realized:true,recurringMonthly:false,description:`Owner-attested job expense: ${input.category}`,occurredAt:new Date().toISOString(),jobAccounting:{jobId,category:input.category,evidenceRef:input.evidenceRef,scopeDigest:input.expectedScopeDigest}});
+  }
+
   recordLedgerEntry(principal: Principal, input: Omit<LedgerEntry, "id">): Promise<LedgerEntry> {
     return this.serializeMutation(async () => {
       assertMoney(input.amountUsd, "Ledger amount");
@@ -991,7 +1004,15 @@ export class SaraKernel {
       } else if (!input.realized) {
         await this.authorize(principal, { action: "record_ledger", targetId, external: false });
       }
-      const entry: LedgerEntry = { ...input, id: randomUUID() };
+      let attribution=input.jobAccounting;
+      if(attribution){
+        const state=await this.state(),job=state.revenuePilotJobs.find(j=>j.id===attribution!.jobId);
+        if(!job)throw new Error('Revenue job does not exist.');
+        const bound=bindJobExpense(input,job,state.ledger);
+        if(bound.existing)return structuredClone(bound.existing);
+        attribution=bound.attribution;
+      }
+      const entry: LedgerEntry = { ...input, ...(attribution?{jobAccounting:attribution}:{}), id: randomUUID() };
       await this.#store.append("ledger_recorded", principal, entry);
       return entry;
     });

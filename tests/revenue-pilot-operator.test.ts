@@ -24,6 +24,8 @@ import { paymentClientSecretDigest } from "../src/revenue-payment.ts";
 import { BASE_USDC_CONTRACT, type VerifiedUsdcPayment } from "../src/usdc-payment.ts";
 import {createSaraServer} from '../src/server.ts';
 import type {AddressInfo} from 'node:net';
+import {ProceduralKnowledgeStore,PROCEDURAL_SEED_PLAYBOOKS,executeVerifiedProcedure,type ProceduralPlaybook} from '../src/procedural-intelligence.ts';
+import {digest} from '../src/digital-capabilities/engineering/common.ts';
 
 const OWNER_TOKEN = "operator-test-owner-token";
 const OWNER_DIGEST = createHash("sha256").update(OWNER_TOKEN).digest("hex");
@@ -326,9 +328,39 @@ describe("bounded persistent Luna revenue operator", () => {
     const serving=createSaraServer(reboot,{stateDirectory:directory,ownerTokenSha256:OWNER_DIGEST});
     await new Promise<void>(resolve=>serving.listen(0,'127.0.0.1',resolve));
     try{
-      const response=await fetch(`http://127.0.0.1:${(serving.address() as AddressInfo).port}/api/public/revenue-pilot/deliveries/${delivery!.id}?access=${clientSecret}`);
-      assert.equal(response.status,200);assert.equal(response.headers.get('x-sara-recipient-receipt-verified'),'false');
-      const report=await response.json() as any;assert.equal(report.authorization.sourceReportDigest,delivery!.reportDigest);
+      const identity={policyDigest:(await reboot.getStatus()).constitution.digest};
+      const source:ProceduralPlaybook={...structuredClone(PROCEDURAL_SEED_PLAYBOOKS[0]!),id:'synthetic-readiness-delivery-accounting',taskFamily:'synthetic_readiness_delivery_accounting',triggers:['synthetic readiness delivery accounting'],nonTriggers:[],purpose:'Synthetic fixture: protected report delivery and exact job expense accounting',status:'CANDIDATE',authorityRequired:[],procedure:['Verify the immutable report and authorized protected access.','Read current job accounting scope and record already-incurred owner-attested costs.','Independently compare delivered report identity and recorded contribution.'],acceptanceCriteria:['Exact report digest and job identity','No double-counted role costs','No inferred customer receipt or full profit'],provenance:{producerIdentity:'synthetic-service-fixture',source:'isolated selected-service test'},sourceEvidence:[`SYNTHETIC:report:${delivery!.reportDigest}`],procedureApplicabilityIdentity:identity,evidenceReuseIdentity:identity,qualificationStatus:'pending_independent_qualification',qualificationDigest:'',evaluatorIdentity:'unassigned',verifiedAt:null,qualificationStrength:0};
+      const procedureStore=await ProceduralKnowledgeStore.open(directory,[]);await procedureStore.addCandidatePlaybook(source);
+      const qualification={evaluatorIdentity:'synthetic-independent-fixture-verifier',sourceEvidence:['SYNTHETIC:exact-report-positive','SYNTHETIC:wrong-artifact-negative'],qualificationDigest:sha256('synthetic-readiness-fixture-qualification')};
+      await procedureStore.qualifyPlaybook(source.id,1,qualification);await procedureStore.publishPlaybook(source.id,1,qualification);
+      const base=`http://127.0.0.1:${(serving.address() as AddressInfo).port}`,headers={authorization:`Bearer ${OWNER_TOKEN}`,'content-type':'application/json'};
+      let recorded:any;
+      const procedure=await executeVerifiedProcedure({store:procedureStore,task:{taskId:`synthetic:${job.id}`,description:'synthetic readiness delivery accounting',taskFamily:source.taskFamily,identity,requestedActions:[]},grantedAuthorities:[],authorizedCostCeilingUsd:0,estimatedCostUsd:0,variableWork:async()=>{
+        const response=await fetch(`${base}/api/public/revenue-pilot/deliveries/${delivery!.id}?access=${clientSecret}`);
+        assert.equal(response.status,200);assert.equal(response.headers.get('x-sara-recipient-receipt-verified'),'false');
+        const report=await response.json() as any;assert.equal(report.authorization.sourceReportDigest,delivery!.reportDigest);
+        for(const [category,amountUsd] of [['MODEL_API',0.02],['DIRECT_EXTERNAL',0.25],['ALLOCATION',0.5],['REFUND',10]] as const){
+          const scope=await (await fetch(`${base}/api/revenue-pilot/jobs/${job.id}/accounting`,{headers})).json() as any;
+          const cost=await fetch(`${base}/api/revenue-pilot/jobs/${job.id}/accounting`,{method:'POST',headers,body:JSON.stringify({expectedScopeDigest:scope.scopeDigest,category,amountUsd,evidenceRef:`synthetic-${category.toLowerCase()}-receipt`})});assert.equal(cost.status,200);
+        }
+        for(const [category,amountUsd] of [['MODEL_API',0.02],['REFUND',140]] as const){
+          const scope=await reboot.inspectRevenueJobAccounting(reboot.authenticateOwnerToken(OWNER_TOKEN),job.id);
+          await assert.rejects(reboot.recordRevenueJobExpense(reboot.authenticateOwnerToken(OWNER_TOKEN),job.id,{expectedScopeDigest:scope.scopeDigest,category,amountUsd,evidenceRef:`synthetic-rejected-${category}`}),/unaccounted role receipts|exceeds exact linked customer revenue/);
+        }
+        const review=await reboot.executeOwnerMessage(reboot.authenticateOwnerToken(OWNER_TOKEN),{requestId:'synthetic-reconciled-service-costs',text:ordinaryGoal});
+        recorded=review.receipts.find(r=>r.capability.id==='profitability-accountant')!.output as any;
+        return {reportDigest:report.authorization.sourceReportDigest,accounting:recorded};
+      },freshVerify:async(result)=>{
+        const artifact=await readRepositoryReadinessReportArtifact({stateDirectory:directory,jobId:job.id});
+        const row=result.accounting.jobs[0];
+        return {passed:artifact.reportDigest===result.reportDigest&&row.jobId===job.id&&row.modelApiMicroUsd===20_000&&row.directExternalMicroUsd===250_000&&row.allocatedMicroUsd===500_000&&row.refundsMicroUsd===10_000_000&&row.recordedNetContributionMicroUsd===138_230_000&&result.accounting.fullProfitabilityProven===false,evidence:[`ISOLATED:report:${artifact.reportDigest}`,`ISOLATED:accounting:${result.accounting.basisDigest}`]};
+      }});
+      assert.equal(procedure.outcome,'VERIFIED');assert.equal(recorded.jobs[0].recordedNetContributionMicroUsd,138_230_000);
+      const knowledge=procedureStore.snapshot();
+      const candidateRequest={requestId:'synthetic-service-procedure-candidate',capabilityId:'experience-to-procedure-compiler',input:{playbookId:source.id,playbookVersion:1,outcomeDigests:knowledge.outcomes.filter(o=>o.playbookId===source.id).map(digest),expectedKnowledgeDigest:digest(knowledge)}};
+      const candidate=await reboot.invokeCapability(reboot.authenticateOwnerToken(OWNER_TOKEN),candidateRequest);assert.equal((candidate.output as any).status,'CANDIDATE_READY');assert.equal((candidate.output as any).persisted,true);assert.equal((candidate.output as any).executionAuthorized,false);
+      assert.equal((await reboot.invokeCapability(reboot.authenticateOwnerToken(OWNER_TOKEN),candidateRequest)).resultDigest,candidate.resultDigest);
+      const retained=(await ProceduralKnowledgeStore.inspectExisting(directory))!;assert.equal(retained.playbooks.find(p=>p.id===(candidate.output as any).candidate.id)?.status,'CANDIDATE');
       const deadline=Date.now()+2000;
       while((await reboot.getStatus()).revenueDeliveries.find(d=>d.id===delivery!.id)?.lastTransportOutcome!=='COMPLETE'&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
       const finished=(await reboot.getStatus()).revenueDeliveries.find(d=>d.id===delivery!.id)!;

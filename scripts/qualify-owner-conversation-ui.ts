@@ -7,6 +7,9 @@ import {setTimeout as delay} from 'node:timers/promises';
 import type {AddressInfo} from 'node:net';
 import {legacyLearningRetryFixture} from '../tests/fixtures/legacy-learning-retry.ts';
 import {createSaraServer} from '../src/server.ts';
+import {compileCommercialTerms} from '../src/commercial-terms.ts';
+import {PILOT_REQUIRED_CAPABILITIES} from '../src/revenue-pilot.ts';
+import {SARA_PRINCIPAL} from '../src/kernel.ts';
 import {sha256} from '../src/canonical.ts';
 import {waitForSandboxBrowserEndpoint} from '../src/digital-capabilities/web/sandbox-browser.ts';
 import {installOwnerDashboardThemeRuntime} from '../src/owner-dashboard-theme-runtime.ts';
@@ -18,7 +21,9 @@ const legacy=await legacyLearningRetryFixture();
 const credential=legacy.token;
 installOwnerDashboardThemeRuntime();
 const kernel=legacy.kernel;
-const server=createSaraServer(kernel,{stateDirectory:legacy.directory,ownerTokenSha256:sha256(credential)});
+const terms=compileCommercialTerms({businessName:'Synthetic owner UI fixture',contactEmail:'owner@example.com',governingLaw:'Synthetic test terms'});
+const recipientAddress=`0x${'2'.repeat(40)}`;
+const server=createSaraServer(kernel,{stateDirectory:legacy.directory,ownerTokenSha256:sha256(credential),commerce:{terms,recipientAddress,rpcUrl:'https://mainnet.base.org',publicOrigin:'https://saraseed.app',fetchImpl:async()=>{throw new Error('SYNTHETIC_NETWORK_NOT_EXPECTED');}}});
 await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
 const origin=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 const chrome=spawn('google-chrome',['--headless=new','--disable-gpu','--disable-background-networking','--no-first-run','--no-default-browser-check','--remote-debugging-port=0',`--user-data-dir=${join(directory,'chrome')}`,'about:blank'],{stdio:'ignore',env:{PATH:process.env.PATH,LANG:'en_US.UTF-8'}});
@@ -30,7 +35,10 @@ try{
  await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Chrome connection timed out')),5000);socket!.addEventListener('open',()=>{clearTimeout(timer);resolve();},{once:true});socket!.addEventListener('error',()=>{clearTimeout(timer);reject(new Error('Chrome connection failed'));},{once:true});});
  let next=0;const pending=new Map<number,{resolve:(value:any)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();let sessionId:string|undefined;
  const send=(method:string,params:Record<string,unknown>={},session=sessionId):Promise<any>=>new Promise((resolve,reject)=>{const id=++next;const timer=setTimeout(()=>{pending.delete(id);reject(new Error(`Browser command timed out: ${method}`));},15000);pending.set(id,{resolve,reject,timer});socket!.send(JSON.stringify({id,method,params,...(session?{sessionId:session}:{})}));});
- socket.addEventListener('message',event=>{const m=JSON.parse(String(event.data));if(m.id){const p=pending.get(m.id);if(!p)return;clearTimeout(p.timer);pending.delete(m.id);m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}else if(m.method==='Fetch.requestPaused'){
+ socket.addEventListener('message',event=>{const m=JSON.parse(String(event.data));if(m.id){const p=pending.get(m.id);if(!p)return;clearTimeout(p.timer);pending.delete(m.id);m.error?p.reject(new Error(m.error.message)):p.resolve(m.result);}else if(m.method==='Page.javascriptDialogOpening'){
+   assert.equal(m.params.type,'confirm');assert.match(m.params.message,/Record already-incurred USD 0.25 for job/);
+   void send('Page.handleJavaScriptDialog',{accept:true},m.sessionId).catch(()=>{});
+ }else if(m.method==='Fetch.requestPaused'){
    const url=String(m.params.request.url);void send(url.startsWith(origin+'/')?'Fetch.continueRequest':'Fetch.failRequest',{requestId:m.params.requestId,...(url.startsWith(origin+'/')?{}:{errorReason:'BlockedByClient'})},m.sessionId).catch(()=>{});
  }});
  const target=await send('Target.createTarget',{url:'about:blank'});
@@ -93,7 +101,28 @@ try{
  await evaluate("document.querySelector('#owner-work-submit').click()");await until("!document.querySelector('#owner-work-submit').disabled");
  assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length,count,'Repeated submission must reuse receipts');
  assert.equal((await kernel.learningCampaignStatus()).campaign?.reserved,3,'Read-only review must preserve consumed learning reservations');
- console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:8,executedReceipts:count,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ // This unpaid synthetic job exercises the actual owner expense form, not a payment provider.
+ for(const id of PILOT_REQUIRED_CAPABILITIES)await kernel.registerCapability(SARA_PRINCIPAL,{id,name:id,status:'available',evidence:[`SYNTHETIC:UI:${id}`],limitations:['Isolated public snapshot fixture only.']});
+ const owner=kernel.authenticateOwnerToken(credential);
+ const expenseJob=await kernel.createRevenuePilotJob(owner,{opportunityId:'synthetic-ui-expense-job',sourceUrl:'https://github.com/example/project/issues/1',sourceAllowsAutomatedDiscovery:true,discoveredFromPublicSource:true,repoUrl:'https://github.com/example/project',repositoryIsPublic:true,repositoryOwnerPermissionConfirmed:true,requiresPrivateAccess:false,containsRegulatedOrPrivateData:false,requestsProductionChanges:false,requestsExploitValidation:false,primaryGoal:'release_readiness',customerBudgetUsd:149,desiredTurnaroundDays:3,recentCommitDays:2});
+ await kernel.createRevenuePaymentIntent(owner,{id:'synthetic-ui-expense-intent',jobId:expenseJob.id,recipientAddress,clientSecretDigest:sha256('synthetic-ui-unused-secret'),customerReferenceDigest:sha256('synthetic-ui-customer'),terms});
+ await send('Page.reload');await until("document.body.dataset.owner==='connected' && Boolean(document.querySelector('.commerce-expense-form'))");
+ for(const width of [390,1280]){
+  await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+  await evaluate("document.querySelector('.commerce-expense-form').closest('details').open=true");
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Actual expense form must fit the viewport');
+  await evaluate("document.querySelector('[aria-label=\"Actual cash amount in USD\"]').value='0.25';document.querySelector('[aria-label=\"Invoice or receipt reference\"]').value='synthetic-ui-invoice-01';document.querySelector('.commerce-expense-form button').click()");
+  await until("Boolean(document.querySelector('.commerce-expense-form')) && document.querySelector('[aria-label=\"Invoice or receipt reference\"]').value===''");
+  const expenses=(await kernel.inspectAudit()).filter(e=>e.type==='ledger_recorded'&&(e.data as any).jobAccounting?.jobId===expenseJob.id);
+  assert.equal(expenses.length,1,'Identical owner expense submission must reuse the financial entry');assert.equal((expenses[0]!.data as any).amountUsd,0.25);
+ }
+ await evaluate("document.querySelector('#owner-work-text').value='Review my earning path and prepare a supported offer with recorded costs.';document.querySelector('#owner-work-submit').click()");
+ await until("document.querySelector('#owner-work-status').textContent==='BLOCKED · VERIFIED_ANALYSIS'");
+ assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('recorded net contribution $-0.250000')"),true);
+ assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('full profit remains unverified')"),true);
+ assert.equal((await kernel.getStatus()).revenuePaymentIntents[0]!.status,'awaiting_payment');
+ const finalCount=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(finalCount,53);
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:9,executedReceipts:finalCount,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
  socket?.close();chrome.kill('SIGKILL');
