@@ -132,6 +132,7 @@ try{
    await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(item.goal)};document.querySelector('#owner-work-material').value=${JSON.stringify(item.material)};document.querySelector('#owner-work-submit').click()`);
    await until("!document.querySelector('#owner-work-submit').disabled && document.querySelector('#owner-work-status').textContent==='COMPLETE · VERIFIED_ANALYSIS'");
    assert.equal(await evaluate(`document.querySelector('#owner-work-results article').innerText.includes(${JSON.stringify(item.visible)})`),true);
+   if(item.material===defectMaterial)for(const fact of ['Scanner test','ba0cab4a','mobile and restart'])assert.equal(await evaluate(`document.querySelector('#owner-work-results article').innerText.includes(${JSON.stringify(fact)})`),true,`Sourced brief must retain ${fact}`);
    assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true);
    const receiptsBefore=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;
    await evaluate("document.querySelector('#owner-work-submit').click()");await until("!document.querySelector('#owner-work-submit').disabled");

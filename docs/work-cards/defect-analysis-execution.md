@@ -29,3 +29,5 @@ RED then GREEN: exact Nico phrase and no-failure report; useful brief with sourc
 ## Checkpoint
 
 Implemented the named-target analysis adapter, no-failure observation handling, sourced brief and one exact-owner-gated adapter to the existing Genome Lab verifier. LOCAL RED: three new Nico/execution regressions failed on the base. Focused GREEN: new analysis, passing/failing/type/source fixtures, replay/reboot, stop/cancellation, internal/bridge rejection and bounded nontermination pass. The initial inventory count assertion was updated for the one execution adapter; the original 93 required contracts remain checked. Required full gate, exact-head CI/security, isolated browser and production acceptance are pending. No real customer revenue is claimed.
+
+LOCAL integration failure preserved: the first full gate found the no-failure brief empty because its item was marked COMPLETE, which the existing owner brief intentionally omits. Keep the informational item visible as OPEN/HEALTH; the enclosing analysis can still complete. The source-fact assertion was retained and added to desktop/mobile UI acceptance. No acceptance predicate was weakened.

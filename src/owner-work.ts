@@ -112,7 +112,7 @@ export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:
    record.fieldProvenance.push(...review.fields);
    for(const step of review.steps)add(step.id,step.input,step.completion,step.reason);
    for(const reason of review.missing)record.blockers.push({subjectId:request.requestId,reason,missing:[reason]});
-   briefItems.push({id:'supplied-review',category:review.missing.length?'BLOCKED':'HEALTH',summary:review.summary??`Analyzed the supplied ${materialName}. Review the executed analysis, source facts and remaining requirements below. No external action or independent acceptance is claimed.`,sourceId:material.sourceId,dueAt:null,status:review.missing.length?'OPEN':'COMPLETE',requiresOwner:false});
+   briefItems.push({id:'supplied-review',category:review.missing.length?'BLOCKED':'HEALTH',summary:review.summary??`Analyzed the supplied ${materialName}. Review the executed analysis, source facts and remaining requirements below. No external action or independent acceptance is claimed.`,sourceId:material.sourceId,dueAt:null,status:'OPEN',requiresOwner:false});
   }else{
   const messages=[{id:'supplied-message',sourceId:material.sourceId,sender:'supplied counterparty (unverified)',sentAt:material.receivedAt,replyTo:null,body:material.body}];
   record.fieldProvenance.push({field:'messages.body',kind:'OBSERVED',source:request.suppliedText?'SUPPLIED untrusted text':`Durable previously supplied untrusted material: ${material.sourceId}`},{field:'messages.sentAt',kind:'DERIVED',source:'Original receipt time; original sent time unknown'});
