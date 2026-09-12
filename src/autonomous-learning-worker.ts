@@ -1,5 +1,6 @@
 import { SARA_PRINCIPAL, type SaraKernel } from "./kernel.ts";
-import type { CandidateGenerator } from "./types.ts";
+import { LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY } from "./learning-campaign.ts";
+import type { CandidateGenerator, Job } from "./types.ts";
 
 /** Existing-runtime queue consumer. It neither creates authority nor promotes code. */
 export class AutonomousLearningWorker {
@@ -7,6 +8,27 @@ export class AutonomousLearningWorker {
   private running = false;
   constructor(private readonly kernel: SaraKernel, private readonly generator: CandidateGenerator) {
     if (generator.maximumCostUsd !== 0) throw new Error("Learning worker requires a zero-cost generator.");
+  }
+
+  /**
+   * A fresh root selected before a deploy can otherwise survive a newly tightened
+   * retry policy. Refuse to dispatch that stale authorized root once three prior
+   * terminal roots for the exact campaign/contract/source have already failed.
+   * Child repair attempts retain their existing per-root lifecycle.
+   */
+  private retryBudgetExhausted(jobs: Job[]): boolean {
+    return jobs.some(job => {
+      if (job.status !== "authorized" || !job.learningCampaignId || !job.learningCapabilityId ||
+          !job.learningContractDigest || job.learningParentJobId) return false;
+      const failedRoots = jobs.filter(candidate =>
+        candidate.status === "failed" &&
+        !candidate.learningParentJobId &&
+        candidate.learningCampaignId === job.learningCampaignId &&
+        candidate.learningCapabilityId === job.learningCapabilityId &&
+        candidate.learningContractDigest === job.learningContractDigest &&
+        candidate.learningSourceJobId === job.learningSourceJobId);
+      return failedRoots.length >= LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY;
+    });
   }
 
   /**
@@ -54,6 +76,12 @@ export class AutonomousLearningWorker {
     if (this.running) return {status:"blocked" as const};
     this.running = true;
     try {
+      const state = await this.kernel.getStatus();
+      if (this.retryBudgetExhausted(state.jobs)) {
+        const result = {status:"blocked" as const};
+        console.info(JSON.stringify({event:"sara_learning_tick",result,reason:"LEARNING_FRESH_ROOT_RETRY_BUDGET_EXHAUSTED",snapshot:await this.kernel.learningOperationalSnapshot()}));
+        return result;
+      }
       let result = await this.kernel.runLearningWorkerTick(this.generator);
       if (result.status === "idle" && await this.seedNextApprovedCurriculumGap()) {
         result = await this.kernel.runLearningWorkerTick(this.generator);
