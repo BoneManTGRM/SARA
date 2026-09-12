@@ -1,0 +1,74 @@
+name: Apply exact reviewed control patch
+on:
+  push:
+    branches: [codex/sara-control-substrate]
+    paths: [.github/control-substrate.bundle.json]
+permissions:
+  contents: write
+concurrency:
+  group: sara-control-reviewed-patch
+  cancel-in-progress: false
+jobs:
+  apply:
+    if: github.repository == 'BoneManTGRM/SARA' && github.ref == 'refs/heads/codex/sara-control-substrate'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Validate exact reviewed patch and complete resulting source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, pathlib, subprocess
+          baseline = '81e074afd797e5ba698d6bac302b70c600d31a00'
+          transport = {'.github/control-substrate.bundle.json', '.github/workflows/control-apply-reviewed.yml', '.github/workflows/control-source-snapshot.yml'}
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only', baseline, 'HEAD'], text=True).splitlines())
+          if changed - transport:
+              raise SystemExit('Unexpected branch source changes; reconcile before applying')
+          bundle = json.loads(pathlib.Path('.github/control-substrate.bundle.json').read_text())
+          if bundle['baseSha'] != baseline or bundle['treeSha'] != '18f587d04a7783f5f1f0d82a9601a42eb5ba1648':
+              raise SystemExit('Unexpected source identity')
+          patch = gzip.decompress(base64.b64decode(bundle['payload'], validate=True))
+          if len(patch) != 50896 or hashlib.sha256(patch).hexdigest() != '5653699f21c0a23585c7fd1d2d5bae0361253c91cb5955c40898a813cc84be3e':
+              raise SystemExit('Patch integrity mismatch')
+          pathlib.Path('/tmp/sara-control-reviewed.patch').write_bytes(patch)
+          PY
+          git apply --check --index /tmp/sara-control-reviewed.patch
+          git apply --index /tmp/sara-control-reviewed.patch
+          cp .git/index /tmp/sara-control-check.index
+          GIT_INDEX_FILE=/tmp/sara-control-check.index git update-index --force-remove .github/control-substrate.bundle.json .github/workflows/control-apply-reviewed.yml .github/workflows/control-source-snapshot.yml
+          test "$(GIT_INDEX_FILE=/tmp/sara-control-check.index git write-tree)" = 18f587d04a7783f5f1f0d82a9601a42eb5ba1648
+          git diff --cached --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'Implement exact owner-controlled learned capability quarantine and restoration'
+          test "$(git ls-remote origin refs/heads/codex/sara-control-substrate | cut -f1)" = "$GITHUB_SHA"
+          git push origin HEAD:refs/heads/codex/sara-control-substrate
+          git rev-parse HEAD > /tmp/CONTROL_PATCH_COMMIT.txt
+      - name: Prepare locked development toolchain
+        run: |
+          npm ci --ignore-scripts
+          node scripts/build-native-checker.mjs
+          tar -czf /tmp/control-native-dependencies.tar.gz tools/native-checker/node_modules
+          sha256sum /tmp/control-native-dependencies.tar.gz > /tmp/CONTROL_NATIVE_SHA256SUMS
+      - name: Verify isolated control and affected behavior
+        run: |
+          node --import tsx --test tests/capability-control-projection.test.ts tests/learned-capability-control.test.ts tests/learning-campaign.test.ts tests/learning-requalification.test.ts tests/operational-skills.test.ts tests/production-state-fingerprint.test.ts tests/state-backup-restore.test.ts | tee /tmp/control-focused.tap
+          npm run typecheck
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: control-patch-verification
+          path: |
+            /tmp/CONTROL_PATCH_COMMIT.txt
+            /tmp/control-native-dependencies.tar.gz
+            /tmp/CONTROL_NATIVE_SHA256SUMS
+            /tmp/control-focused.tap
+          retention-days: 3
+          if-no-files-found: error
