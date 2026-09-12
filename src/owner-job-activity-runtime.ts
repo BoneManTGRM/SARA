@@ -1,3 +1,5 @@
+import { LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY } from "./learning-campaign.ts";
+
 export const OWNER_JOB_ACTIVITY_MARKER = 'data-owner-job-activity="2026-09-11"';
 
 const OWNER_JOB_ACTIVITY_STYLE = String.raw`<style ${OWNER_JOB_ACTIVITY_MARKER}>
@@ -114,10 +116,13 @@ const OWNER_JOB_ACTIVITY_PANEL = String.raw`
 `;
 
 const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
+    const ownerLearningRetryCeiling = ${LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY};
+
     function ownerJobStatus(records) {
       const statuses = new Set(records.map((job) => String(job.status || '').toLowerCase()));
+      const failedFreshRoots = records.filter((job) => String(job.status || '').toLowerCase() === 'failed' && !job.learningParentJobId).length;
       if (statuses.has('running') || statuses.has('active') || statuses.has('verifying')) return 'RUNNING';
-      if (statuses.has('blocked')) return 'BLOCKED';
+      if (statuses.has('blocked') || (statuses.has('authorized') && failedFreshRoots >= ownerLearningRetryCeiling)) return 'BLOCKED';
       if (statuses.has('authorized') || statuses.has('scoped') || statuses.has('new')) return 'QUEUED';
       if (statuses.has('verified') || statuses.has('done') || statuses.has('completed') || statuses.has('qualified')) return 'COMPLETED';
       if (statuses.has('failed')) return 'FAILED';
