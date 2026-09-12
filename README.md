@@ -12,6 +12,8 @@ The first bounded commercial implementation is documented in [the $50 revenue pi
 
 The [operational-skill layer](docs/OPERATIONAL_SKILL_LAYER.md) adds a proprietary SARA implementation of progressive skill routing. Repository-derived, paper-derived, and experiment-derived candidates must retain immutable source and license evidence, pass existing isolated Genome Lab checks, and stop at SHADOW. Only an exact owner-approved promotion makes a candidate loadable, and routing grants no execution, credential, spending, deployment, contact, or delivery authority. No third-party skill collection is bundled or bulk-imported.
 
+The authority-bound capability substrate includes a pure `service-opportunity-generator` that turns supplied public demand observations and current qualified capability contracts into deterministic SHADOW service candidates. It requires source-host diversity, capability evidence, comparable-price observations, and delivery ceilings; it recommends no price and grants no outreach, publication, contract, spending, or work authority. The authenticated generic capability API exposes the result for owner review while the kernel records only its bounded receipt.
+
 ## Bootstrap economics
 
 - New monthly recurring-cost target: **$0**
