@@ -1,5 +1,6 @@
 import type { SaraConstitution } from "./constitution.ts";
 import type { ActionRequest, PolicyDecision, Principal } from "./types.ts";
+import {enforceEffectBoundary} from './effect-boundary.ts';
 
 const ALLOWED_DURING_STOP = new Set(["internal_read", "record_memory", "emergency_stop_change"]);
 
@@ -87,7 +88,13 @@ export function evaluatePolicy(input: {
     }
   }
 
-  return { allowed: true, code: "ALLOWED", reason: "The action is within current authority and limits." };
+  const internal = new Set(['internal_read','record_memory','record_ledger','record_realized_financial_event','sandbox_development','emergency_stop_change']);
+  const protectedAction=constitution.protectedActions.includes(request.action as never);
+  const effect=request.action==='external_read'?'READ':request.action==='external_write'||request.action==='owner_recurring_commitment'||protectedAction?'EXTERNAL':internal.has(request.action)?'INTERNAL':'UNKNOWN';
+  return enforceEffectBoundary({action:request.action,target:request.targetId,external:request.external,emergencyStopped,effect,
+    decision:{allowed:true,code:'ALLOWED',reason:'The action is within current authority and limits.'},
+    authority:isOwner?'AUTHENTICATED_OWNER':'INTERNAL_POLICY',authorityIdentity:isOwner?request.approval?.approvalId??`${principal.id}:${request.action}:${request.targetId}`:null,
+    cost:request.monthlyRecurringUsd??null,credentials:false});
 }
 
 export class PolicyDeniedError extends Error {

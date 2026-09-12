@@ -2285,6 +2285,7 @@ export class SaraKernel {
             const prior=(event.data as {result:CapabilityResult}).result;
             const {resultDigest,...unsigned}=prior;
             if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError("Referenced capability receipt failed its content digest.");
+            context.priorCapabilityResults=[...(context.priorCapabilityResults??[]),structuredClone(prior)];
             evidence.push({id:sha256(canonicalJson({receiptId:event.id,resultDigest})),sourceId:`kernel:capability:${prior.capability.id}`,
               contentDigest:resultDigest,provenance:"LOCAL",claimedProvenance:null,authoritySource:false,subject:prior.subject,
               capturedAt:event.occurredAt,claims:[`capability:${prior.capability.id}:${prior.status}`],integrity:"KERNEL_RECEIPT",receiptId:event.id});

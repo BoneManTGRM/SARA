@@ -5,6 +5,7 @@ import { TelegramNicoHttpBridge } from "./telegram-nico-http.ts";
 import { GitHubExactTargetVerifier } from "./github-exact-target-verifier.ts";
 import { GmailOAuthActivation, RailwayRefreshTokenSecretWriter } from "./gmail-oauth-activation.ts";
 import { GmailVerifiedReportSender } from "./gmail-verified-report-sender.ts";
+import {enforceEffectBoundary} from './effect-boundary.ts';
 
 export const TELEGRAM_NICO_MANDATE_APPROVAL = "SARA_TELEGRAM_NICO_AUTOMATED_DELIVERY_V1_OWNER_APPROVED_2026-09-04";
 
@@ -55,6 +56,8 @@ export function evaluateTelegramNicoProductionAuthorization(input: {
   status: unknown;
   mandateApproval?: string;
   revoked?: string;
+  action?: string;
+  targetId?: string;
 }): { allowed: boolean; code: string; reason: string } {
   if (input.mandateApproval !== TELEGRAM_NICO_MANDATE_APPROVAL) {
     return { allowed: false, code: "TELEGRAM_NICO_MANDATE_INACTIVE", reason: "The exact owner-issued Telegram NICO mandate is not active." };
@@ -65,7 +68,10 @@ export function evaluateTelegramNicoProductionAuthorization(input: {
   if (explicitEmergencyStop(input.status) !== false) {
     return { allowed: false, code: "TELEGRAM_NICO_EMERGENCY_STOP", reason: "Emergency-stop state is active or could not be verified inactive." };
   }
-  return { allowed: true, code: "TELEGRAM_NICO_OWNER_AUTHORIZED", reason: "Exact bounded owner mandate and inactive emergency stop verified." };
+  const {allowed,code,reason}=enforceEffectBoundary({action:input.action??'telegram_nico_bounded_workflow',target:input.targetId??'telegram-nico:mandate-inspection',external:true,
+    emergencyStopped:false,effect:'EXTERNAL',authority:'EXACT_MANDATE',authorityIdentity:input.mandateApproval,cost:null,credentials:true,
+    decision:{allowed:true,code:'TELEGRAM_NICO_OWNER_AUTHORIZED',reason:'Exact bounded owner mandate and inactive emergency stop verified.'}});
+  return {allowed,code,reason};
 }
 
 async function buildBridge(kernel: TelegramNicoProductionKernel, options: TelegramNicoProductionOptions): Promise<HttpBridge | null> {
@@ -113,10 +119,11 @@ async function buildBridge(kernel: TelegramNicoProductionKernel, options: Telegr
     dailyActionLimit: 10,
     maxConcurrentAssessments: 1,
     assessmentCostLimitUsd: 3,
-    authorize: async () => evaluateTelegramNicoProductionAuthorization({
+    authorize: async (request) => evaluateTelegramNicoProductionAuthorization({
       status: await kernel.getStatus(),
       mandateApproval: process.env.SARA_TELEGRAM_NICO_MANDATE_APPROVAL,
       revoked: process.env.SARA_TELEGRAM_NICO_REVOKED,
+      action:request.action,targetId:request.assessmentRequestId,
     }),
   });
 
