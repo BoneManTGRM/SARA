@@ -1,5 +1,6 @@
 import { boundaryInputSchema, boundaryOutputSchema, checkAutonomyBoundary } from "./boundary.ts";
 import { arraySchema, enumSchema, idSchema, integerSchema, objectSchema, textSchema, type Json } from "./schema.ts";
+import { serviceOpportunityDefinition } from "./service-opportunity.ts";
 import type { CapabilityDefinition, ExecutionContext } from "./types.ts";
 
 export const BASE_QUALIFICATION_CONTEXT:ExecutionContext=Object.freeze({
@@ -45,4 +46,5 @@ export const foundationDefinitions:readonly CapabilityDefinition[]=[
       {name:"keeps-failed-qualification-visible",input:{capabilityIds:["unknown"]},context:{benchmark:async()=>({passed:0,failed:1,results:[{capabilityId:"unknown",passed:0,failed:1}],reenabledCapabilities:0})},
       check:r=>(r.output as Record<string,Json>).failed===1}],
   },
+  serviceOpportunityDefinition,
 ];

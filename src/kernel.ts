@@ -1,4 +1,5 @@
 import { capabilityContract, capabilityContracts, capabilityDefinition, benchmarkCapabilities } from "./digital-capabilities/registry.ts";
+import { serviceCapabilityEvidence } from "./digital-capabilities/service-readiness.ts";
 import { normalizeSuppliedEvidence } from "./digital-capabilities/evidence.ts";
 import { capabilityResult } from "./digital-capabilities/receipt.ts";
 import { CapabilityInputError, arraySchema, digestSchema, idSchema, snapshotJson, validateSchema, type Json } from "./digital-capabilities/schema.ts";
@@ -2253,12 +2254,21 @@ export class SaraKernel {
         (event.data as {requestId:string;actorId:string}).requestId===request!.requestId && (event.data as {actorId:string}).actorId===principal.id);
       const contract=await capabilityContract(request.capabilityId),definition=capabilityDefinition(request.capabilityId);
       if(contract)context.currentIdentity={...context.currentIdentity,capabilityId:contract.id,implementationDigest:contract.implementationDigest,contractDigest:contract.contractDigest};
+      if(request.capabilityId==="service-opportunity-generator" && contract){
+        try {
+          validateSchema(contract.inputSchema,request.input as Json);
+          const ids=(request.input as {capabilities:Array<{id:string}>}).capabilities.map(item=>item.id);
+          context.serviceCapabilityEvidence=await serviceCapabilityEvidence(this.#store.stateDirectory,ids,this.constitutionDigest);
+          context.currentIdentity.serviceReadinessDigest=sha256(canonicalJson(context.serviceCapabilityEvidence));
+        } catch(error) { if(!(error instanceof CapabilityInputError))throw error; }
+      }
       if(existing){
         const stored=existing.data as {requestDigest:string;result:CapabilityResult};
         if(stored.requestDigest!==requestDigest)throw new Error("CAPABILITY_REQUEST_REPLAY_CONFLICT");
         const {resultDigest,...unsigned}=stored.result;
         if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError("Capability receipt digest does not match its content.");
-        const current=stored.result.authority.contextDigest===authorityContextDigest&&stored.result.capability.implementationDigest===contract?.implementationDigest;
+        const current=stored.result.authority.contextDigest===authorityContextDigest&&stored.result.capability.implementationDigest===contract?.implementationDigest&&
+          stored.result.subject.serviceReadinessDigest===context.currentIdentity.serviceReadinessDigest;
         return {...structuredClone(stored.result),replayed:true,receiptValidity:{current,reason:current?"Unchanged material authority and implementation identity.":"Historical receipt only; current identity differs. Re-evaluate before relying on it."}};
       }
       let status:CapabilityResult["status"]="SUCCEEDED",result:import("./digital-capabilities/types.ts").ExecutionOutput;
