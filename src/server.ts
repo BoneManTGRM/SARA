@@ -754,6 +754,30 @@ async function handleOwnerRevenueWrite(
   owner: OwnerSession,
   options: ServerOptions,
 ): Promise<boolean> {
+  if (url.pathname === "/api/learning/controls" && request.method === "GET") {
+    json(response, 200, await kernel.inspectLearnedCapabilityControls()); return true;
+  }
+  if (url.pathname === "/api/learning/controls/review" && request.method === "POST") {
+    const body = await readJson(request);
+    const {mutationId,...input} = body;
+    json(response, 200, await kernel.reviewLearnedCapabilityControl(owner,
+      boundedText(mutationId,1,128,"mutationId"), input as import("./capability-control.ts").LearnedCapabilityControlInput)); return true;
+  }
+  if (url.pathname === "/api/learning/controls/apply" && request.method === "POST") {
+    const body = await readJson(request);
+    const control = body.request as import("./capability-control.ts").LearnedCapabilityControlRequest;
+    if (!control || typeof control !== "object" || typeof control.targetId !== "string" || body.approvedTargetId !== control.targetId) {
+      json(response, 409, {error:"Review the capability control and approve its exact target."}); return true;
+    }
+    json(response, 200, await kernel.changeLearnedCapabilityControl(owner, control, {
+      approvalId:randomUUID(),ownerId:owner.id,action:control.state === "ACTIVE" ? "production_promotion" : "protected_security_control_change",
+      targetId:control.targetId,approvedAt:new Date().toISOString(),
+    })); return true;
+  }
+  if (url.pathname === "/api/learning/requalify" && request.method === "POST") {
+    const body = await readJson(request);
+    json(response, 200, await kernel.requalifyLearnedCapability(owner,boundedText(body.mutationId,1,128,"mutationId"))); return true;
+  }
   if (url.pathname === "/api/learning/campaign/capacity" && request.method === "POST") {
     const body = await readJson(request);
     const maximumRequests = Number(body.maximumRequests);

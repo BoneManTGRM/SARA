@@ -1,3 +1,6 @@
+import { assertLearnedCapabilityActive, compileLearnedCapabilityControl, learnedCapabilityControl,
+  learnedControlTarget,
+  type LearnedCapabilityControlInput, type LearnedCapabilityControlRequest } from "./capability-control.ts";
 import { compileLearningCampaign, compileLearningCampaignCapacityExtension, currentLearningCampaign, campaignAccounting, learningContractDigest, LEARNING_DAILY_RESERVATION_LIMIT, LEARNING_MAXIMUM_ATTEMPTS_PER_ROOT, selectLearningGap, type LearningCampaignInput } from "./learning-campaign.ts";
 import { qualifyLearningArtifact, executeLearningArtifact, qualificationEnvironmentDigest } from "./learning-qualification.ts";
 import { maintenanceJobs, maintenanceRequestDigest, validateMaintenanceRequest, type MaintenanceRequest, type MaintenanceJob } from "./website-maintenance.ts";
@@ -706,8 +709,7 @@ export class SaraKernel {
         const mutation=qualified ? mutationMap.get(qualified.mutationId) : undefined;
         const available=Boolean(qualified && mutation && ["CANARY","LIMITED_PRODUCTION","BROADER_PRODUCTION"].includes(mutation.stage) &&
           qualified.candidateDigest===mutation.candidateDigest && qualified.contractDigest===learningContractDigest(contract) &&
-          qualified.receipt.environmentDigest===environmentDigest && !events.some(e=>e.type==="learning_skill_reuse_failed" &&
-            (e.data as {mutationId:string}).mutationId===mutation.id));
+          qualified.receipt.environmentDigest===environmentDigest && learnedCapabilityControl(events,mutation).state === "ACTIVE");
         if (qualified) capabilityMap.set(contract.capabilityId,{id:contract.capabilityId,name:contract.objective,
           status:available ? "available" : "limited", evidence:[qualified.receipt.evidenceDigest],
           limitations:["Pure bounded input/output only. Operational use requires current independent qualification and exact owner promotion. No revenue demonstrated."]});
@@ -922,7 +924,7 @@ export class SaraKernel {
           await readFile(join(this.#store.stateDirectory, parts[0]!, parts[1]!, "manifest.json"), "utf8"),
         ) as unknown;
         const record = operationalSkillRecordFromManifest(manifest, mutation);
-        if (record) records.push(record);
+        if (record) records.push({...record,loadable:record.loadable && learnedCapabilityControl(state.events,mutation).state === "ACTIVE"});
       } catch {
         invalidArtifacts += 1;
       }
@@ -2210,6 +2212,98 @@ export class SaraKernel {
     });
   }
 
+  /** Separate operational controls preserve promotion and original qualification history. */
+  async inspectLearnedCapabilityControls() {
+    const state = await this.state();
+    return state.mutations.filter(mutation => Boolean(mutation.artifactRelativePath))
+      .map(mutation => learnedCapabilityControl(state.events,mutation));
+  }
+
+  async reviewLearnedCapabilityControl(principal: Principal, mutationId: string, input: LearnedCapabilityControlInput) {
+    if (!this.isVerifiedOwner(principal)) throw new Error("AUTHENTICATED_OWNER_REQUIRED");
+    const state = await this.state();
+    const mutation = state.mutations.find(candidate => candidate.id === mutationId);
+    if (!mutation?.artifactRelativePath) throw new Error("LEARNED_ARTIFACT_REQUIRED");
+    const job = state.jobs.find(candidate => candidate.id === mutation.jobId);
+    const contract = currentLearningCampaign(state.events)?.contracts.find(candidate => candidate.capabilityId === job?.learningCapabilityId);
+    return compileLearnedCapabilityControl({mutation,events:state.events,request:input,
+      environmentDigest:await qualificationEnvironmentDigest(),contractDigest:contract ? learningContractDigest(contract) : null});
+  }
+
+  changeLearnedCapabilityControl(principal: Principal, supplied: LearnedCapabilityControlRequest, approval: OwnerApproval) {
+    // Snapshot before waiting for a lock: caller-owned objects cannot change the approved target.
+    const request = structuredClone(supplied), exactApproval = structuredClone(approval);
+    return this.serializeMutation(async () => {
+      if (!this.isVerifiedOwner(principal)) throw new Error("AUTHENTICATED_OWNER_REQUIRED");
+      const action = request.state === "ACTIVE" ? "production_promotion" : "protected_security_control_change";
+      if (!exactApproval || exactApproval.action !== action || exactApproval.ownerId !== principal.id || exactApproval.targetId !== request.targetId) {
+        throw new Error("EXACT_CONTROL_APPROVAL_REQUIRED");
+      }
+      const {targetId,...unsigned} = request;
+      if (targetId !== learnedControlTarget(unsigned)) throw new Error("CONTROL_REQUEST_IDENTITY_MISMATCH");
+      const state = await this.state();
+      const previous = state.events.find(event => event.type === "learned_capability_control_changed" &&
+        (event.data as LearnedCapabilityControlRequest).requestId === request.requestId);
+      if (previous) {
+        if (canonicalJson(previous.data) !== canonicalJson(request)) throw new Error("CONTROL_REQUEST_REPLAY_CONFLICT");
+        return {request:structuredClone(previous.data),replayed:true};
+      }
+      const mutation = state.mutations.find(candidate => candidate.id === request.mutationId);
+      if (!mutation || learnedCapabilityControl(state.events,mutation).sequence !== request.expectedControlSequence) {
+        throw new Error("STALE_CONTROL_REQUEST");
+      }
+      const expected = await this.reviewLearnedCapabilityControl(principal,request.mutationId,
+        {requestId:request.requestId,state:request.state,reason:request.reason,evidenceEventIds:request.evidenceEventIds});
+      if (canonicalJson(expected) !== canonicalJson(request)) throw new Error("STALE_CONTROL_APPROVAL_OR_IDENTITY");
+      await this.authorize(principal,{action,targetId:request.targetId,external:false,approval:exactApproval});
+      await this.#store.append("learned_capability_control_changed",principal,request);
+      return {request,replayed:false};
+    });
+  }
+
+  /** Fresh frozen acceptance is run in the existing isolated verifier; it never restores authority. */
+  async requalifyLearnedCapability(principal: Principal, mutationId: string) {
+    if (!this.isVerifiedOwner(principal)) throw new Error("AUTHENTICATED_OWNER_REQUIRED");
+    const prepared = await this.serializeMutation(async () => {
+      await this.authorize(principal,{action:"sandbox_development",targetId:`requalify:${mutationId}`,external:false});
+      const state = await this.state();
+      const mutation = state.mutations.find(candidate => candidate.id === mutationId);
+      const job = state.jobs.find(candidate => candidate.id === mutation?.jobId);
+      const campaign = currentLearningCampaign(state.events);
+      const contract = campaign?.contracts.find(candidate => candidate.capabilityId === job?.learningCapabilityId);
+      if (!mutation?.artifactRelativePath || !job || !contract || job.learningCampaignId !== campaign?.id ||
+          job.learningContractDigest !== learningContractDigest(contract)) throw new Error("FROZEN_QUALIFICATION_CONTRACT_REQUIRED");
+      const control = learnedCapabilityControl(state.events,mutation);
+      if (control.state === "ACTIVE") throw new Error("RESTRICTED_CAPABILITY_REQUIRED");
+      const environmentDigest = await qualificationEnvironmentDigest();
+      const previous = state.events.filter(event => event.type === "learning_qualification_passed" && event.sequence > control.sequence &&
+        (event.data as {mutationId:string;receipt:{environmentDigest:string}}).mutationId === mutation.id &&
+        (event.data as {receipt:{environmentDigest:string}}).receipt.environmentDigest === environmentDigest).at(-1);
+      return {mutation,job,contract,control,environmentDigest,previous,
+        stopEpoch:state.events.filter(event=>event.type==="emergency_stop_changed").at(-1)?.hash ?? null};
+    });
+    if (prepared.previous) return {status:"qualified",evidenceEventId:prepared.previous.id,reused:true};
+    let receipt: Awaited<ReturnType<typeof qualifyLearningArtifact>> | null = null;
+    try {
+      receipt = await qualifyLearningArtifact({artifactDirectory:join(this.#store.stateDirectory,prepared.mutation.artifactRelativePath!),
+        candidateDigest:prepared.mutation.candidateDigest,contractDigest:learningContractDigest(prepared.contract),tests:prepared.contract.acceptanceTests});
+    } catch { /* No hidden acceptance answers or child diagnostics are persisted. */ }
+    return this.serializeMutation(async () => {
+      const state = await this.state();
+      const current = state.mutations.find(candidate=>candidate.id===prepared.mutation.id)!;
+      const stopEpoch=state.events.filter(event=>event.type==="emergency_stop_changed").at(-1)?.hash ?? null;
+      if (state.emergencyStopped || stopEpoch!==prepared.stopEpoch ||
+          learnedCapabilityControl(state.events,current).sequence !== prepared.control.sequence ||
+          await qualificationEnvironmentDigest() !== prepared.environmentDigest) throw new Error("REQUALIFICATION_STATE_CHANGED");
+      const event = await this.#store.append(receipt ? "learning_qualification_passed" : "learned_capability_requalification_failed",principal,
+        {mutationId:prepared.mutation.id,jobId:prepared.job.id,capabilityId:prepared.contract.capabilityId,
+          candidateDigest:prepared.mutation.candidateDigest,contractDigest:learningContractDigest(prepared.contract),
+          environmentDigest:prepared.environmentDigest,purpose:"owner_restoration",controlSequence:prepared.control.sequence,
+          ...(receipt ? {receipt} : {reason:"Independent requalification failed; hidden answers withheld."})});
+      return {status:receipt ? "qualified" : "rejected",evidenceEventId:event.id,reused:false};
+    });
+  }
+
   async learningCampaignStatus() {
     const state = await this.state();
     const campaign = currentLearningCampaign(state.events);
@@ -2219,6 +2313,7 @@ export class SaraKernel {
       selections: state.events.filter(e => e.type === "learning_gap_selected").map(e => e.data),
       qualifications: state.events.filter(e => e.type === "learning_qualification_passed" || e.type === "learning_qualification_failed").map(e => ({ type: e.type, ...e.data as object })),
       reuses: state.events.filter(e => e.type === "learning_skill_reused").map(e => e.data),
+      controls:state.mutations.filter(mutation=>Boolean(mutation.artifactRelativePath)).map(mutation=>learnedCapabilityControl(state.events,mutation)),
       emergencyStopped: state.emergencyStopped };
   }
 
@@ -2458,24 +2553,47 @@ export class SaraKernel {
           mutation.candidateDigest !== qualification.candidateDigest || !["CANARY","LIMITED_PRODUCTION","BROADER_PRODUCTION"].includes(mutation.stage)) {
         throw new Error("QUALIFIED_APPROVED_CURRENT_SKILL_REQUIRED");
       }
-      if (auth.state.events.some(e=>e.type==="learning_skill_reuse_failed" &&
-          (e.data as {mutationId:string}).mutationId===mutation.id)) throw new Error("LEARNED_SKILL_MAINTENANCE_REQUIRED");
-      return {...auth, mutation, environmentDigest};
+      const control=learnedCapabilityControl(auth.state.events,mutation);
+      assertLearnedCapabilityActive(control);
+      return {...auth, mutation, environmentDigest, controlSequence:control.sequence, contract};
     });
     let result: Awaited<ReturnType<typeof executeLearningArtifact>>;
     try {
       result = await executeLearningArtifact({ artifactDirectory: join(this.#store.stateDirectory,prepared.mutation.artifactRelativePath!),
         candidateDigest: prepared.mutation.candidateDigest, input });
     } catch (error) {
-      await this.serializeMutation(() => this.#store.append("learning_skill_reuse_failed", principal, {
-        capabilityId, mutationId: prepared.mutation.id, candidateDigest: prepared.mutation.candidateDigest,
-        environmentDigest: prepared.environmentDigest, reason: "Isolated execution failed; maintenance review required." }));
+      // A customer can supply an unsupported value. That is not authority to disable code.
+      // Only a failure on the owner-frozen independent contract (or artifact integrity)
+      // may quarantine automatically. No customer/model content selects this oracle.
+      let regression = false;
+      try {
+        await qualifyLearningArtifact({artifactDirectory:join(this.#store.stateDirectory,prepared.mutation.artifactRelativePath!),
+          candidateDigest:prepared.mutation.candidateDigest,contractDigest:learningContractDigest(prepared.contract),tests:prepared.contract.acceptanceTests});
+      } catch { regression = true; }
+      await this.serializeMutation(async () => {
+        const state = await this.state();
+        const control = learnedCapabilityControl(state.events,prepared.mutation);
+        const currentEvidence = control.sequence === prepared.controlSequence && await qualificationEnvironmentDigest() === prepared.environmentDigest;
+        const restrict = regression && currentEvidence;
+        await this.#store.append("learning_skill_reuse_failed", principal, {
+          capabilityId, mutationId: prepared.mutation.id, candidateDigest: prepared.mutation.candidateDigest,
+          environmentDigest: prepared.environmentDigest,contractDigest:learningContractDigest(prepared.contract),
+          expectedControlSequence:prepared.controlSequence,priorState:control.state,
+          resultingState:restrict ? "QUARANTINED" : control.state,controlEffect:restrict ? "QUARANTINED" : "NONE",
+          verificationScope:"owner_frozen_independent_acceptance_and_artifact_integrity",
+          reason:!currentEvidence ? "Verification is stale against the current control or environment; no new control authority." :
+            regression ? "Mandatory independent regression or integrity verification failed." : "Task-specific execution rejected; frozen qualification still passes.",
+        });
+      });
       throw error;
     }
     return this.serializeMutation(async () => {
       const current = await this.learningAuthority(capabilityId);
       if (current.mandateDigest !== prepared.mandateDigest || current.mandateEpoch !== prepared.mandateEpoch || current.stopEpoch !== prepared.stopEpoch ||
           result.environmentDigest !== prepared.environmentDigest) throw new Error("LEARNING_AUTHORITY_OR_ENVIRONMENT_CHANGED");
+      const control=learnedCapabilityControl(current.state.events,prepared.mutation);
+      assertLearnedCapabilityActive(control);
+      if (control.sequence !== prepared.controlSequence) throw new Error("LEARNED_CAPABILITY_CONTROL_CHANGED");
       await this.#store.append("learning_skill_reused", principal, {capabilityId, mutationId:prepared.mutation.id,
         candidateDigest:prepared.mutation.candidateDigest, environmentDigest:result.environmentDigest,
         inputDigest:sha256(canonicalJson(input)), outputDigest:sha256(canonicalJson(result.output))});
@@ -2794,6 +2912,7 @@ export class SaraKernel {
       const state = await this.state();
       const mutation = state.mutations.find((candidate) => candidate.id === mutationId);
       if (!mutation) throw new Error(`Mutation ${mutationId} does not exist.`);
+      assertLearnedCapabilityActive(learnedCapabilityControl(state.events,mutation));
       const currentIndex = STAGES.indexOf(mutation.stage);
       if (STAGES[currentIndex + 1] !== nextStage) {
         throw new Error(`Mutation must advance exactly one stage from ${mutation.stage}.`);
