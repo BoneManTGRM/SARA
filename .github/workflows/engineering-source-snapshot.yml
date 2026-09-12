@@ -1,0 +1,39 @@
+name: Engineering reliability source snapshot
+on:
+  push:
+    branches: [codex/sara-engineering-reliability]
+    paths: [.github/workflows/engineering-source-snapshot.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 05f6efae40d39827a97f9b46527fb6e3b98a1d52
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+      - name: Export tracked source and pinned local verification tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=tar HEAD | gzip > baseline-source.tar.gz
+          git rev-parse HEAD > BASELINE_SHA.txt
+          npm ci --ignore-scripts
+          node scripts/build-native-checker.mjs
+          tar -czf baseline-dependencies.tar.gz node_modules tools/native-checker
+          sha256sum baseline-source.tar.gz baseline-dependencies.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: engineering-baseline-05f6efae40d3
+          path: |
+            baseline-source.tar.gz
+            baseline-dependencies.tar.gz
+            BASELINE_SHA.txt
+            SHA256SUMS
+          retention-days: 3
+          if-no-files-found: error
