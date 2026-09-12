@@ -15,6 +15,9 @@ export type RevenueDelivery = {
   lastDownloadedAt: string | null;
   approvalId: string;
   revokedAt: string | null;
+  /** Server transport evidence is not customer receipt or acceptance. */
+  recipientReceiptVerified?: false;
+  lastTransportOutcome?: 'COMPLETE' | 'INTERRUPTED' | 'UNKNOWN';
 };
 
 const SHA256_HEX = /^[a-f0-9]{64}$/i;

@@ -376,11 +376,14 @@ async function handlePublicDelivery(
       return true;
     }
     const secret = url.searchParams.get("access") ?? "";
-    const accessed = await kernel.accessRevenueDelivery(decodeURIComponent(nicoMatch[1]!), secret);
+    const accessed = await kernel.inspectRevenueDeliveryAccess(decodeURIComponent(nicoMatch[1]!), secret);
     const report = await readRepositoryReadinessReportArtifact({ stateDirectory: options.stateDirectory, jobId: accessed.job.id });
     const packaged = await readRevenueNicoPackage(options.stateDirectory, accessed.job.id);
     if (packaged.artifact.commitSha !== report.report.immutableCommitSha) throw new Error("NICO delivery commit does not match the readiness report.");
+    if(report.reportDigest!==accessed.delivery.reportDigest)throw new Error('Delivery report integrity check failed.');
+    const attempt=await kernel.beginRevenueDelivery(accessed.delivery.id,secret,report.reportDigest,sha256(Buffer.from(packaged.body)));
     response.writeHead(200, {
+      "x-sara-recipient-receipt-verified": "false",
       "content-type": packaged.artifact.contentType ?? "application/zip",
       "content-disposition": `attachment; filename="nico-authorized-${packaged.artifact.runId}.zip"`,
       "content-length": String(packaged.body.byteLength),
@@ -391,7 +394,7 @@ async function handlePublicDelivery(
       "x-nico-human-reviewed": "false",
       "x-nico-authorization-mode": "automated_policy",
     });
-    response.end(packaged.body);
+    await transmitRevenueDelivery(response,packaged.body,kernel,attempt.attemptId);
     return true;
   }
   const match = url.pathname.match(/^\/api\/public\/revenue-pilot\/deliveries\/([^/]+)$/u);
@@ -401,21 +404,34 @@ async function handlePublicDelivery(
     return true;
   }
   const secret = url.searchParams.get("access") ?? "";
-  const accessed = await kernel.accessRevenueDelivery(decodeURIComponent(match[1]!), secret);
+  const accessed = await kernel.inspectRevenueDeliveryAccess(decodeURIComponent(match[1]!), secret);
   const artifact = await readRepositoryReadinessReportArtifact({
     stateDirectory: options.stateDirectory,
     jobId: accessed.job.id,
   });
   if (artifact.reportDigest !== accessed.delivery.reportDigest) throw new Error("Delivery report integrity check failed.");
+  const body=JSON.stringify(compileAuthorizedAutomatedReadinessDelivery(artifact,accessed.delivery));
+  const attempt=await kernel.beginRevenueDelivery(accessed.delivery.id,secret,artifact.reportDigest,sha256(body));
   response.writeHead(200, {
+    "x-sara-recipient-receipt-verified": "false",
     "content-type": "application/json; charset=utf-8",
     "content-disposition": `attachment; filename="sara-readiness-${accessed.job.id}.json"`,
     "cache-control": "private, no-store, max-age=0",
     "referrer-policy": "no-referrer",
     "x-content-type-options": "nosniff",
   });
-  response.end(JSON.stringify(compileAuthorizedAutomatedReadinessDelivery(artifact, accessed.delivery)));
+  await transmitRevenueDelivery(response,body,kernel,attempt.attemptId);
   return true;
+}
+
+async function transmitRevenueDelivery(response:ServerResponse,body:string|Uint8Array,kernel:SaraKernel,attemptId:string){
+  const outcome=await new Promise<'COMPLETE'|'INTERRUPTED'>(resolve=>{
+    response.once('finish',()=>resolve('COMPLETE'));
+    response.once('close',()=>resolve(response.writableFinished?'COMPLETE':'INTERRUPTED'));
+    response.once('error',()=>resolve('INTERRUPTED'));
+    response.end(body);
+  });
+  await kernel.finishRevenueDelivery(attemptId,outcome);
 }
 
 function boundedText(value: unknown, minimum: number, maximum: number, label: string): string {

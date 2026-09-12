@@ -22,6 +22,8 @@ import { PILOT_REQUIRED_CAPABILITIES, type RevenuePilotInput } from "../src/reve
 import { compileCommercialTerms } from "../src/commercial-terms.ts";
 import { paymentClientSecretDigest } from "../src/revenue-payment.ts";
 import { BASE_USDC_CONTRACT, type VerifiedUsdcPayment } from "../src/usdc-payment.ts";
+import {createSaraServer} from '../src/server.ts';
+import type {AddressInfo} from 'node:net';
 
 const OWNER_TOKEN = "operator-test-owner-token";
 const OWNER_DIGEST = createHash("sha256").update(OWNER_TOKEN).digest("hex");
@@ -255,6 +257,12 @@ describe("bounded persistent Luna revenue operator", () => {
       approvedAt: "2026-09-03T11:59:00.000Z",
       ownerId: owner.id,
     });
+    const ordinaryGoal='Review my authorized opportunities and unfinished work. Complete eligible paid work first, prepare the best supported offer, and tell me exactly what still needs my decision.';
+    const beforeFulfillment=await kernel.executeOwnerMessage(owner,{requestId:'synthetic-paid-service-review',text:ordinaryGoal});
+    assert.equal(beforeFulfillment.workflow,'revenue-work');
+    assert.equal(beforeFulfillment.serviceReview?.selectedJobId,job.id);
+    assert.equal(beforeFulfillment.serviceReview?.verifiedPaymentCount,1);
+    assert.equal(beforeFulfillment.verification,'VERIFIED_ANALYSIS');
     const nicoCalls: string[] = [];
     const operator = new RevenuePilotOperator({
       kernel,
@@ -285,8 +293,51 @@ describe("bounded persistent Luna revenue operator", () => {
     assert.equal(delivery?.accessSecretDigest, paymentClientSecretDigest(clientSecret));
     assert.match(delivery?.approvalId ?? "", /^standing-mandate:/u);
     assert.equal(status.realizedProfit.collectedRevenueUsd, 149);
+    const afterFulfillment=await kernel.executeOwnerMessage(owner,{requestId:'synthetic-service-accounting',text:ordinaryGoal});
+    assert.equal(afterFulfillment.serviceReview?.obligations[0]?.status,'delivery_ready');
+    assert.match(afterFulfillment.serviceReview?.obligations[0]?.reason??'',/download and acceptance are not yet verified/);
+    const accounted=afterFulfillment.receipts.find(r=>r.capability.id==='profitability-accountant')!.output as any;
+    assert.equal(accounted.jobs[0].realizedRevenueMicroUsd,149_000_000);
+    assert.equal(accounted.jobs[0].modelApiMicroUsd,Math.round(deliveredJob!.actualExecutionCostUsd*1_000_000));
+    assert.equal(accounted.fullProfitabilityProven,false,'Isolated ledger totals do not attest unknown all-in costs');
+    assert.equal((await kernel.executeOwnerMessage(owner,{requestId:'synthetic-paid-service-review',text:ordinaryGoal})).verification,'HISTORICAL_ANALYSIS');
+
     assert.deepEqual(nicoCalls.map((call) => call.split(":")[0]), ["create", "get", "package"]);
     assert.equal(status.autonomyDecisions.filter((decision) => decision.requestId.startsWith("nico-automated-fulfillment:")).length, 1);
+    // The supported download path must not count an unavailable artifact as delivered.
+    const server=createSaraServer(kernel,{stateDirectory:join(directory,'synthetic-missing-artifact'),ownerTokenSha256:OWNER_DIGEST});
+    await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+    try{
+      const response=await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/public/revenue-pilot/deliveries/${delivery!.id}?access=${clientSecret}`);
+      assert.notEqual(response.status,200);
+      const unchanged=await kernel.getStatus();
+      assert.equal(unchanged.revenuePilotJobs.find(j=>j.id===job.id)?.status,'delivery_ready');
+      assert.equal(unchanged.revenueDeliveries.find(d=>d.id===delivery!.id)?.downloadCount,0);
+    }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));}
+    const attempt=await kernel.beginRevenueDelivery(delivery!.id,clientSecret,delivery!.reportDigest,sha256('synthetic transport bytes'));
+    assert.equal((await kernel.getStatus()).revenuePilotJobs.find(j=>j.id===job.id)?.status,'delivery_ready');
+    const reboot=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:OWNER_DIGEST});
+    assert.equal((await reboot.getStatus()).revenueDeliveries.find(d=>d.id===delivery!.id)?.lastTransportOutcome,'UNKNOWN');
+    await reboot.finishRevenueDelivery(attempt.attemptId,'INTERRUPTED');
+    const interrupted=await reboot.inspectAudit();
+    await reboot.finishRevenueDelivery(attempt.attemptId,'COMPLETE');
+    assert.deepEqual(await reboot.inspectAudit(),interrupted,'An acknowledged interrupted attempt cannot be relabeled successful');
+    assert.equal((await reboot.getStatus()).revenuePilotJobs.find(j=>j.id===job.id)?.status,'delivery_ready');
+    const serving=createSaraServer(reboot,{stateDirectory:directory,ownerTokenSha256:OWNER_DIGEST});
+    await new Promise<void>(resolve=>serving.listen(0,'127.0.0.1',resolve));
+    try{
+      const response=await fetch(`http://127.0.0.1:${(serving.address() as AddressInfo).port}/api/public/revenue-pilot/deliveries/${delivery!.id}?access=${clientSecret}`);
+      assert.equal(response.status,200);assert.equal(response.headers.get('x-sara-recipient-receipt-verified'),'false');
+      const report=await response.json() as any;assert.equal(report.authorization.sourceReportDigest,delivery!.reportDigest);
+      const deadline=Date.now()+2000;
+      while((await reboot.getStatus()).revenueDeliveries.find(d=>d.id===delivery!.id)?.lastTransportOutcome!=='COMPLETE'&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,10));
+      const finished=(await reboot.getStatus()).revenueDeliveries.find(d=>d.id===delivery!.id)!;
+      assert.equal(finished.lastTransportOutcome,'COMPLETE');assert.equal(finished.recipientReceiptVerified,false);
+      assert.equal(finished.downloadCount,2);
+      const afterDownload=await reboot.executeOwnerMessage(reboot.authenticateOwnerToken(OWNER_TOKEN),{requestId:'synthetic-post-download',text:ordinaryGoal});
+      assert.equal(afterDownload.verification,'VERIFIED_ANALYSIS');
+      assert.equal(afterDownload.serviceReview?.realRevenueVerified,false);
+    }finally{await new Promise<void>(resolve=>serving.close(()=>resolve()));}
   });
 
   it("does not call a model unless a paid job has owner authorization", async () => {
