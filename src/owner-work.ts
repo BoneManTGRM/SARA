@@ -1,4 +1,5 @@
 import {canonicalJson,sha256} from './canonical.ts';
+import type {ServiceWorkContext} from './owner-service-work.ts';
 import {suppliedReview} from './owner-work-inputs.ts';
 import {learningRetryBudgetBlockers} from './learning-campaign.ts';
 import type {Job,Capability} from './types.ts';
@@ -9,10 +10,10 @@ import type {CapabilityPlan} from './digital-capabilities/plan.ts';
 
 const messageSchema=objectSchema({requestId:idSchema,text:textSchema(4096),suppliedText:textSchema(12000,0)},['requestId','text']);
 export type StoredWorkMaterial={body:string;sourceId:string;receivedAt:string;workflow?:string|null};
-export type WorkContext={jobCapabilities?:Capability[];materials?:StoredWorkMaterial[]};
+export type WorkContext={jobCapabilities?:Capability[];materials?:StoredWorkMaterial[];service?:ServiceWorkContext};
 export type WorkMessage={requestId:string;text:string;suppliedText?:string};
 export type WorkBlocker={subjectId:string;reason:string;missing:string[]};
-export type WorkRecord={request:WorkMessage;requestDigest:string;workflow:string|null;plan:CapabilityPlan|null;selection:{capabilityId:string;reason:string;inputs:string[];unmet:string[]}[];alternatives:{capabilityId:string;reason:string}[];blockers:WorkBlocker[];sourceDigest:string;receivedAt:string;fieldProvenance:{field:string;kind:'OBSERVED'|'DERIVED'|'UNKNOWN';source:string}[]};
+export type WorkRecord={serviceIdentity?:string;serviceReview?:ServiceWorkContext["review"];request:WorkMessage;requestDigest:string;workflow:string|null;plan:CapabilityPlan|null;selection:{capabilityId:string;reason:string;inputs:string[];unmet:string[]}[];alternatives:{capabilityId:string;reason:string}[];blockers:WorkBlocker[];sourceDigest:string;receivedAt:string;fieldProvenance:{field:string;kind:'OBSERVED'|'DERIVED'|'UNKNOWN';source:string}[]};
 export function parseWorkMessage(value:unknown):WorkMessage{const input=snapshotJson(value);validateSchema(messageSchema,input);return input as unknown as WorkMessage;}
 const controlIds=new Set(['learned-capability-disable-and-quarantine','self-benchmark-runner','decision-register','experience-to-procedure-compiler','memory-conflict-resolver']);
 const workflowCapabilities=new Set(['bug-reproduction-planner','root-cause-analyzer','quote-margin-guard','proposal-compiler','profitability-accountant','goal-to-work-queue-compiler','solution-reuse-ranker','unfinished-work-reconciler','priority-rebalancer','daily-owner-brief','inbox-priority-classifier','email-thread-action-extractor','commitment-tracker','follow-up-detector','calendar-intent-parser','support-intake-triage']);
@@ -26,6 +27,7 @@ function route(text:string):string|null{
  if(/["“”`]|^\s*>|\b(?:forwarded|email says|page says|quoted)\b/iu.test(text))return null;
  if(/\b(?:send|publish|buy|purchase|transfer|approve|increase.*budget|delete|deploy|merge)\b/iu.test(text))return null;
  if(/\b(?:NICO|repository|deployment|API|agent collaboration|database)\b/iu.test(text))return null;
+ if(/\b(?:review|inspect|prepare|complete)\b/iu.test(text)&&/\b(?:paid work|authorized opportunities|earning path|supported offer)\b/iu.test(text))return 'revenue-work';
  const defect=/\b(?:diagnose|analyze|analyse|triage|review|inspect)\b/iu.test(text)&&/\b(?:(?:software )?(?:defect|bug)(?: report)?|failure report)\b/iu.test(text);
  const quote=/\b(?:review|analyze|analyse|check|calculate|draft|prepare)\b/iu.test(text)&&/\b(?:quote|proposal)\b/iu.test(text);
  if((defect||quote)&&/\b(?:inbox|email|communications|messages|unfinished work|pending jobs|work queue|obligations)\b/iu.test(text))return null;
@@ -55,7 +57,20 @@ export async function compileOwnerWork(request:WorkMessage,jobs:Job[],contracts:
  };
  add('solution-reuse-ranker',{taskFamily:workflow,maximumResults:8},[{path:['executionAuthorized'],equals:false}],'Inspect applicable stored procedures before constructing bounded analysis.');
  const briefItems:Json[]=[];
- if(workflow==='unfinished-work'){
+ if(workflow==='revenue-work'){
+  const service=context.service;
+  if(!service){record.blockers.push({subjectId:request.requestId,reason:'Current kernel commercial state is unavailable.',missing:['Current durable service projection']});return record;}
+  record.serviceIdentity=service.identity;record.serviceReview=service.review;
+  record.sourceDigest=workSourceDigest(jobs.filter(j=>!j.learningCampaignId),revenueJobs,ledgerDigest,context.jobCapabilities);
+  record.blockers.push(...service.blockers);
+  if(revenueJobs.length>32){record.blockers.push({subjectId:'revenue-work',reason:'The commercial review exceeds its 32-job bound; narrow scope before execution.',missing:['Bounded commercial scope']});return record;}
+  add('profitability-accountant',{authoritativeJobIds:revenueJobs.map(j=>j.id),includeModeledLabor:false},[{path:['basis'],equals:'AUTHORITATIVE_JOB_STATE'},{path:['ledgerChanged'],equals:false}],'Read exact linked ledger entries and actual costs; unknown allocations and refunds remain unknown.');
+  add('proposal-compiler',service.proposal,[{path:['bindingOffer'],equals:false},{path:['authorityGranted'],equals:false}],'Prepare a sourced nonbinding snapshot draft without creating an opportunity or commercial authority.');
+  const summaries=[`${service.review.serviceName}: catalog price $${service.review.catalogPriceUsd}; execution ceiling $${service.review.maximumExecutionCostUsd}. Total cash cost and profit remain unknown.`,service.review.nextAction,...service.blockers.map(b=>b.reason)];
+  summaries.forEach((summary,index)=>briefItems.push({id:`service-${index}`,category:'CUSTOMER',summary,sourceId:`kernel:commercial:${service.identity}`,dueAt:null,status:'OPEN',requiresOwner:false}));
+  const ownerObligations=jobs.filter(j=>!j.learningCampaignId&&j.status!=='verified');
+  briefItems.push({id:'owner-obligations',category:'COMMITMENT',summary:`${ownerObligations.length} unfinished explicit owner obligations remain in the existing work queue; use Review unfinished work for their preserved details. Learning is not a prerequisite for this service.`,sourceId:'kernel:jobs',dueAt:null,status:'OPEN',requiresOwner:false});
+ }else if(workflow==='unfinished-work'){
   const retryBlockers=new Map(learningRetryBudgetBlockers(jobs).map(blocker=>[blocker.jobId,blocker]));
   const available=new Set((context.jobCapabilities??[]).filter(c=>c.status==='available').map(c=>c.id));
   const missing=(required:string[],historical:string[])=>context.jobCapabilities?required.filter(id=>!available.has(id)):historical;
@@ -123,7 +138,7 @@ export function workResult(record:WorkRecord,execution:{status:string;reason:str
  const blockers=[...record.blockers,...(execution&&execution.status!=='COMPLETE'?[{subjectId:record.request.requestId,reason:execution.reason,missing:['Resolve the execution boundary before resuming']}]:[])];
  if(execution?.status==='COMPLETE'&&!verified)blockers.push({subjectId:record.request.requestId,reason:'Independent receipt identity or result-coverage verification failed.',missing:['Verified exact result coverage']});
  const brief=receipts.find(r=>r.capability.id==='daily-owner-brief');
- return {requestId:record.request.requestId,goal:record.request.text,workflow:record.workflow,status:execution?.status==='PAUSED'?'PAUSED':blockers.length?'BLOCKED':verified?'COMPLETE':'PLANNED',verification:verified?'VERIFIED_ANALYSIS':'NOT_VERIFIED',
+ return {...(record.serviceReview?{serviceReview:record.serviceReview}:{}),requestId:record.request.requestId,goal:record.request.text,workflow:record.workflow,status:execution?.status==='PAUSED'?'PAUSED':blockers.length?'BLOCKED':verified?'COMPLETE':'PLANNED',verification:verified?'VERIFIED_ANALYSIS':'NOT_VERIFIED',
   currentStep:expected.find(step=>!receipts.some(r=>r.capability.id===step.capabilityId&&r.status==='SUCCEEDED'))?.id??null,nextAction:execution?.status==='PAUSED'?'Existing worker will continue the durable plan.':blockers.length?'Resolve the listed boundary; preserved receipts remain available.':verified?'Review the verified analysis and its source references.':'Submit or refresh to reconcile durable progress.',
   selectedCapabilities:record.selection,rejectedAlternatives:record.alternatives.filter(a=>!record.selection.some(s=>s.capabilityId===a.capabilityId)),fieldProvenance:record.fieldProvenance,sourceDigest:record.sourceDigest,observedAt:record.receivedAt,planId:record.plan?.id??null,execution,receipts,blockers,
   outputText:verified?(blockers.length?`Executed bounded analysis. ${blockers.length} unresolved requirements remain. No underlying job was represented as completed.`:'Completed the bounded analysis workflow; all required analysis steps have receipts.'):(blockers[0]?.reason??'Work is planned.'),

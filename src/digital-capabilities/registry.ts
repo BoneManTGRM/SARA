@@ -16,7 +16,7 @@ import type { CapabilityContract, CapabilityDefinition, ExecutionContext } from 
 
 // Only reviewed, statically imported implementations enter this registry. Customer manifests and learned artifacts cannot register code here.
 const DEFINITIONS:readonly CapabilityDefinition[]=[...foundationDefinitions,...engineeringDefinitions,...troubleshootingDefinitions,...secretaryDefinitions,...economicDefinitions,...businessDefinitions,...proceduralDefinitions,...selfManagementDefinitions,...nicoDefinitions,...webDefinitions,...agentDefinitions];
-const COMMON_FILES=["goal-plan.ts","economic-scheduling.ts","types.ts","schema.ts","registry.ts","evidence.ts","boundary.ts","receipt.ts","receipt-dependencies.ts","foundation.ts","../kernel.ts","../owner-work.ts","../owner-work-inputs.ts","../learning-campaign.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts","observed-evidence.ts","plan.ts"];
+const COMMON_FILES=["goal-plan.ts","economic-scheduling.ts","types.ts","schema.ts","registry.ts","evidence.ts","boundary.ts","receipt.ts","receipt-dependencies.ts","foundation.ts","../kernel.ts","../owner-work.ts","../owner-service-work.ts","../revenue-service-catalog.ts","../owner-work-inputs.ts","../learning-campaign.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts","observed-evidence.ts","plan.ts"];
 function freezeReviewed(value:unknown):void {
   if(!value||typeof value!=="object"||Object.isFrozen(value))return;
   for(const descriptor of Object.values(Object.getOwnPropertyDescriptors(value)))if("value" in descriptor)freezeReviewed(descriptor.value);

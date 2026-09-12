@@ -255,6 +255,12 @@ describe("bounded persistent Luna revenue operator", () => {
       approvedAt: "2026-09-03T11:59:00.000Z",
       ownerId: owner.id,
     });
+    const ordinaryGoal='Review my authorized opportunities and unfinished work. Complete eligible paid work first, prepare the best supported offer, and tell me exactly what still needs my decision.';
+    const beforeFulfillment=await kernel.executeOwnerMessage(owner,{requestId:'synthetic-paid-service-review',text:ordinaryGoal});
+    assert.equal(beforeFulfillment.workflow,'revenue-work');
+    assert.equal(beforeFulfillment.serviceReview?.selectedJobId,job.id);
+    assert.equal(beforeFulfillment.serviceReview?.verifiedPaymentCount,1);
+    assert.equal(beforeFulfillment.verification,'VERIFIED_ANALYSIS');
     const nicoCalls: string[] = [];
     const operator = new RevenuePilotOperator({
       kernel,
@@ -285,6 +291,15 @@ describe("bounded persistent Luna revenue operator", () => {
     assert.equal(delivery?.accessSecretDigest, paymentClientSecretDigest(clientSecret));
     assert.match(delivery?.approvalId ?? "", /^standing-mandate:/u);
     assert.equal(status.realizedProfit.collectedRevenueUsd, 149);
+    const afterFulfillment=await kernel.executeOwnerMessage(owner,{requestId:'synthetic-service-accounting',text:ordinaryGoal});
+    assert.equal(afterFulfillment.serviceReview?.obligations[0]?.status,'delivery_ready');
+    assert.match(afterFulfillment.serviceReview?.obligations[0]?.reason??'',/download and acceptance are not yet verified/);
+    const accounted=afterFulfillment.receipts.find(r=>r.capability.id==='profitability-accountant')!.output as any;
+    assert.equal(accounted.jobs[0].realizedRevenueMicroUsd,149_000_000);
+    assert.equal(accounted.jobs[0].modelApiMicroUsd,Math.round(deliveredJob!.actualExecutionCostUsd*1_000_000));
+    assert.equal(accounted.fullProfitabilityProven,false,'Isolated ledger totals do not attest unknown all-in costs');
+    assert.equal((await kernel.executeOwnerMessage(owner,{requestId:'synthetic-paid-service-review',text:ordinaryGoal})).verification,'HISTORICAL_ANALYSIS');
+
     assert.deepEqual(nicoCalls.map((call) => call.split(":")[0]), ["create", "get", "package"]);
     assert.equal(status.autonomyDecisions.filter((decision) => decision.requestId.startsWith("nico-automated-fulfillment:")).length, 1);
   });

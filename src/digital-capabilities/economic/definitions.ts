@@ -72,11 +72,12 @@ function price(input:Data,context:ExecutionContext):ExecutionOutput {
 }
 
 function account(input:Data,context:ExecutionContext):ExecutionOutput {
- const jobIds=input.authoritativeJobIds?strings(input.authoritativeJobIds):[];
+ const authoritative=input.authoritativeJobIds!==undefined;
+ const jobIds=authoritative?strings(input.authoritativeJobIds!):[];
  if(new Set(jobIds).size!==jobIds.length)throw new CapabilityInputError('DUPLICATE_JOB_ID');
- if(jobIds.length&&input.entries&&rows(input.entries).length)throw new CapabilityInputError('MIXED_ACCOUNTING_AUTHORITY');
- if(!jobIds.length&&!input.entries)throw new CapabilityInputError('ACCOUNTING_ENTRIES_OR_AUTHORITATIVE_JOBS_REQUIRED');
- const projection=jobIds.length?projectAuthoritativeJobAccounting(jobIds,context):null;
+ if(authoritative&&input.entries&&rows(input.entries).length)throw new CapabilityInputError('MIXED_ACCOUNTING_AUTHORITY');
+ if(!authoritative&&!input.entries)throw new CapabilityInputError('ACCOUNTING_ENTRIES_OR_AUTHORITATIVE_JOBS_REQUIRED');
+ const projection=authoritative?projectAuthoritativeJobAccounting(jobIds,context):null;
  const entries=projection?.entries??rows(input.entries!);requireUnique(entries,'id');const jobs=new Map<string,Data>();
  for(const entry of entries){const job=String(entry.jobId);if(!jobs.has(job))jobs.set(job,{jobId:job,realizedRevenueMicroUsd:0,predictedRevenueMicroUsd:0,refundsMicroUsd:0,modelApiMicroUsd:0,directExternalMicroUsd:0,allocatedMicroUsd:0,modeledLaborMicroUsd:0,unknownCostIds:[],sourceRefs:[]});
   const row=jobs.get(job)!;(row.sourceRefs as Json[]).push(entry.sourceId!);const key=entry.kind==='REVENUE'?(entry.realized?'realizedRevenueMicroUsd':'predictedRevenueMicroUsd'):({REFUND:'refundsMicroUsd',MODEL_API:'modelApiMicroUsd',DIRECT_EXTERNAL:'directExternalMicroUsd',ALLOCATION:'allocatedMicroUsd',MODELED_LABOR:'modeledLaborMicroUsd'} as Record<string,string>)[String(entry.kind)]!;

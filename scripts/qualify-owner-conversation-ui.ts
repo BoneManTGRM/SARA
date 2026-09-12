@@ -66,6 +66,8 @@ try{
   await until("document.querySelector('#owner-work-status').textContent==='COMPLETE · VERIFIED_ANALYSIS'");
   assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('commitment-tracker')"),true);
   assert.equal(await evaluate("document.querySelector('#owner-work-results').textContent.includes('2026-10-01')"),true);
+  assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('Proposed meeting: 2026-10-02 14:00 UTC')"),true);
+  assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('meeting is not confirmed')"),true);
  }
  for(const item of [
   {goal:'Diagnose this software defect and give me a brief.',material:'Expected: the counter returns 2.\nObserved: the counter returns 3.\nEnvironment: isolated Node fixture.\nSteps: call increment(1).',visible:'Root cause remains unconfirmed.'},
@@ -76,12 +78,21 @@ try{
   assert.equal(await evaluate(`document.querySelector('#owner-work-results').innerText.includes(${JSON.stringify(item.visible)})`),true,'The real activity view must show useful analysis without opening API responses');
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true);
  }
- const received=(await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received');assert.equal(received.length,6);
- const count=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(count,38);
+ for(const width of [1280,390]){
+  await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+  const goal=width===1280?'Review my authorized opportunities and unfinished work. Complete eligible paid work first, prepare the best supported offer, and tell me exactly what still needs my decision.':'Review my earning path and prepare the best supported offer.';
+  await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(goal)};document.querySelector('#owner-work-material').value='';document.querySelector('#owner-work-submit').click()`);
+  await until("document.querySelector('#owner-work-status').textContent==='BLOCKED · VERIFIED_ANALYSIS'");
+  for(const phrase of ['Public Repository Readiness Snapshot','No recorded customer','WAITING FOR AUTHORITY','Excluded:','149.00','profitability-accountant'])assert.equal(await evaluate(`document.querySelector('#owner-work-results').innerText.includes(${JSON.stringify(phrase)})`),true,phrase);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true);
+  assert.equal((await kernel.getStatus()).revenuePilotJobs.length,0);
+ }
+ const received=(await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received');assert.equal(received.length,8);
+ const count=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;assert.equal(count,48);
  await evaluate("document.querySelector('#owner-work-submit').click()");await until("!document.querySelector('#owner-work-submit').disabled");
  assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length,count,'Repeated submission must reuse receipts');
  assert.equal((await kernel.learningCampaignStatus()).campaign?.reserved,3,'Read-only review must preserve consumed learning reservations');
- console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:6,executedReceipts:count,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:8,executedReceipts:count,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
  socket?.close();chrome.kill('SIGKILL');

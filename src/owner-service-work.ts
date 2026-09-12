@@ -1,0 +1,44 @@
+import {canonicalJson,sha256} from './canonical.ts';
+import {getRevenueService} from './revenue-service-catalog.ts';
+import type {RevenuePilotJob} from './revenue-pilot.ts';
+import type {RevenuePaymentIntent} from './revenue-payment.ts';
+import type {StandingMandate} from './autonomy.ts';
+import type {Capability} from './types.ts';
+import type {Json} from './digital-capabilities/schema.ts';
+
+/** Kernel-owned read projection. Never retains customer secrets or creates authority. */
+export function serviceWorkContext(state:{revenuePilotJobs:RevenuePilotJob[];revenuePaymentIntents:RevenuePaymentIntent[];standingMandate:StandingMandate|null;capabilities:Capability[]},now:string){
+ const service=getRevenueService('public-repository-readiness-snapshot');
+ const payments=state.revenuePaymentIntents.map(p=>({id:p.id,jobId:p.jobId,status:p.status,termsDigest:p.termsDigest,revenueEvidenceId:p.revenueEvidenceId,paymentVerified:Boolean(p.payment),expiresAt:p.expiresAt}));
+ const m=state.standingMandate;
+ const active=Boolean(m&&!m.revokedAt&&Date.parse(m.startsAt)<=Date.parse(now)&&Date.parse(now)<Date.parse(m.expiresAt));
+ const mandate=m?{id:m.id,digest:m.digest,startsAt:m.startsAt,expiresAt:m.expiresAt,revokedAt:m.revokedAt,active,allowedActions:m.allowedActions,allowedChannels:m.allowedChannels,allowedServiceIds:m.allowedServiceIds,maximumCostPerActionUsd:m.maximumCostPerActionUsd,maximumDailyActions:m.maximumDailyActions,maximumConcurrentActions:m.maximumConcurrentActions}:null;
+ const fulfillmentAuthority=Boolean(active&&m?.allowedActions.includes('fixed_service_fulfillment')&&m.allowedChannels.includes('approved_api')&&m.allowedServiceIds.includes(service.id)&&m.maximumCostPerActionUsd>=service.maximumExecutionCostUsd);
+ const deliveryAuthority=Boolean(active&&m?.allowedActions.includes('verified_report_delivery')&&m.allowedChannels.includes('approved_api')&&m.allowedServiceIds.includes(service.id));
+ const capabilities=service.requiredCapabilities.map(id=>{const c=state.capabilities.find(c=>c.id===id);return {id,status:c?.status??'missing',evidenceDigest:c?sha256(canonicalJson(c)):null};});
+ const jobs=state.revenuePilotJobs.filter(j=>!['delivered','rejected'].includes(j.status));
+ // A bound fulfilled-payment record or explicitly approved job is an obligation;
+ // an unfunded opportunity is never promoted because its potential value is high.
+ const committed=(j:RevenuePilotJob)=>Boolean(j.revenueEvidenceId||payments.some(p=>p.jobId===j.id&&p.paymentVerified&&['confirmed','authorized'].includes(p.status)));
+ const ordered=[...jobs].sort((a,b)=>Number(committed(b))-Number(committed(a))||a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id));
+ const selected=ordered.find(committed)??ordered.find(j=>j.plan.serviceId===service.id&&j.plan.decision==='offer_ready')??null;
+ const blockers:{subjectId:string;reason:string;missing:string[]}[]=[];
+ if(!selected)blockers.push({subjectId:service.id,reason:'WAITING FOR INPUT: No recorded customer opportunity or paid obligation. The prepared service template is not a sale.',missing:['A genuine inbound request for one authorized public GitHub repository.']});
+ if(selected&&selected.plan.serviceId!==service.id)blockers.push({subjectId:selected.id,reason:'An existing obligation belongs to another service. Preserve it for its exact executor; this snapshot review cannot substitute a service.',missing:['Resolve this obligation through its existing service controls.']});
+ const missing=capabilities.filter(c=>c.status!=='available').map(c=>c.id);
+ if(missing.length)blockers.push({subjectId:service.id,reason:`Required snapshot capabilities unavailable: ${missing.join(', ')}.`,missing});
+ if(!fulfillmentAuthority)blockers.push({subjectId:mandate?.id??service.id,reason:'WAITING FOR AUTHORITY: the current mandate does not authorize snapshot fulfillment. A verified payment requires exact job approval in Paid service lane, or a separately reviewed mandate.',missing:['Exact paid-job fulfillment approval; do not replace the current mandate implicitly.']});
+ if(!deliveryAuthority)blockers.push({subjectId:service.id,reason:'WAITING FOR AUTHORITY: external delivery requires exact reviewed-artifact approval in Paid service lane.',missing:['Inspect the actual report, then use its protected delivery approval.']});
+ const obligations=ordered.map(j=>{
+  const p=payments.find(p=>p.jobId===j.id);
+  const payment=p?.status??'not_recorded';
+  const reason=j.status==='delivery_ready'?'Protected delivery access is prepared. Customer download and acceptance are not yet verified.':p&&['refunded','disputed','expired'].includes(p.status)?`Payment is ${p.status}; reconcile the existing obligation before dispatch.`:j.status==='owner_review'?'Inspect the actual report and exact delivery approval.':j.activeLease?'Existing worker owns the lease; reconcile before retry.':['queued','running'].includes(j.status)&&j.revenueEvidenceId?'The existing revenue worker must recheck payment, authority, current capabilities and budget before its next role.':p?.paymentVerified?'Verified payment exists; exact fulfillment approval remains required.':'Verified linked payment and exact fulfillment approval are required.';
+  return {jobId:j.id,serviceId:j.plan.serviceId,status:j.status,payment,committed:committed(j),reason};
+ });
+ for(const j of obligations)blockers.push({subjectId:j.jobId,reason:j.reason,missing:[j.reason]});
+ const review={serviceId:service.id,serviceName:service.name,selectedJobId:selected?.id??null,selectedOpportunityId:selected?.plan.opportunityId??null,capabilities,mandate,fulfillmentAuthority,deliveryAuthority,paymentIntentCount:payments.length,recordedJobCount:state.revenuePilotJobs.length,obligations,catalogPriceUsd:service.priceUsd,maximumExecutionCostUsd:service.maximumExecutionCostUsd,priceAuthority:'Catalog price is not authority to issue an offer; exact configured terms and customer acceptance are required.',verifiedPaymentCount:payments.filter(p=>p.paymentVerified&&['confirmed','authorized'].includes(p.status)).length,realRevenueVerified:false,fullProfitabilityProven:false,authorityScopeOnly:true,dispatchRequiresCurrentGate:true,costLimitations:['The $3 execution ceiling is not an estimate of total cash cost.','Allocated infrastructure, tooling, refunds and provider invoice reconciliation remain unknown.'],nextAction:selected?obligations.find(j=>j.jobId===selected.id)!.reason:'Obtain one genuine inbound request through an existing authorized channel; review the draft before any external offer.'};
+ const identity=sha256(canonicalJson({payments,mandate,capabilities,jobs:state.revenuePilotJobs}));
+ const proposal:Json={opportunityId:selected?.plan.serviceId===service.id?selected.plan.opportunityId:'snapshot-service-template',approvalReceiptId:null,problem:selected?.plan.serviceId===service.id?`Recorded request for ${selected.plan.repository??'an unresolved repository'}; customer need remains limited to recorded intake.`:'Customer need is unknown until a genuine authorized repository-review request is supplied.',scope:['One customer-authorized public GitHub repository at one frozen revision; bounded public evidence only.'],deliverables:[...service.deliverables],exclusions:['Private repositories, credentials, private or regulated data.','Exploit validation, production access or changes.','Security certification, comprehensive audit, guarantees and human specialist review.'],acceptanceCriteria:['Repository and immutable commit match the approved scope.','Every finding cites inspected source and distinguishes unknowns.','Independent verifier and deterministic report compiler pass.','Delivered artifact matches the reviewed hash and authorized customer access.'],sequence:['Confirm exact scope and current approved terms.','Verify linked payment and exact fulfillment authority.','Existing worker collects immutable evidence and produces a separately verified report.','Obtain required report approval and create protected customer access.','Reconcile download evidence and actual ledger costs; customer acceptance remains separate.'],priceMicro:service.priceUsd*1_000_000,currency:'USD',paymentAssumptions:['Catalog USD equivalent only; current approved checkout requires exact 149 USDC on Base.','No payment, settlement, offer approval or customer acceptance is inferred from this draft.'],customerResponsibilities:['Supply the public repository and confirm authority to request the review.','Accept the exact current configured terms and use the supported payment intent.'],limitations:['Draft only; no external message or offer issued.','Turnaround must match current approved terms; existing v2 terms specify three business days after verified payment.','Actual cash margin and profit remain unknown until costs and adjustments are reconciled.']};
+ return {identity,review,proposal,blockers};
+}
+export type ServiceWorkContext=ReturnType<typeof serviceWorkContext>;
