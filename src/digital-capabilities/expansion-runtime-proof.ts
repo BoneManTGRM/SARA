@@ -9,7 +9,14 @@ export async function runSafeExpansionRuntimeProof(input:{kernel:SaraKernel;sour
  const identity=sha256(canonicalJson({source:input.sourceRevision,deployment:input.deploymentId,contracts:selected.map(c=>c.contractDigest),authority:before.standingMandate,stop:before.emergencyStopped})).slice(0,20);
  const receipts=[],behaviors:Record<string,boolean>={};
  for(const contract of selected){const definition=capabilityDefinition(contract.id)!,fixture=definition.cases.find(c=>!c.context)??definition.cases[0]!;
-  const result=await kernel.invokeCapability(SARA_PRINCIPAL,{requestId:`expansion-runtime:${identity}:${contract.id}`,capabilityId:contract.id,input:fixture.input});
+  const fixtureInput=structuredClone(fixture.input) as Record<string,import('./schema.ts').Json>;
+  // Absence probes must not assume the real procedure store is empty.
+  if(definition.sourceFiles.some(p=>p.startsWith('procedural/'))&&!definition.ownerOnly){
+   if('playbookId' in fixtureInput)fixtureInput.playbookId=`runtime-absence:${identity}`;
+   if('taskFamily' in fixtureInput)fixtureInput.taskFamily=`runtime-absence:${identity}`;
+   if(Array.isArray(fixtureInput.rules))fixtureInput.rules=fixtureInput.rules.map(r=>({...r as Record<string,import('./schema.ts').Json>,id:`runtime-absence:${identity}`}));
+  }
+  const result=await kernel.invokeCapability(SARA_PRINCIPAL,{requestId:`expansion-runtime:${identity}:${contract.id}`,capabilityId:contract.id,input:fixtureInput});
   receipts.push(result);behaviors[contract.id]=definition.ownerOnly?result.status==='BLOCKED':result.status==='SUCCEEDED'&&fixture.check({output:result.output});
  }
  const after=await kernel.getStatus(),afterAudit=await kernel.inspectAudit(),equal=(a:unknown,b:unknown)=>canonicalJson(a)===canonicalJson(b);

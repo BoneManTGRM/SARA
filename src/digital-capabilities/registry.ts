@@ -9,7 +9,7 @@ import type { CapabilityContract, CapabilityDefinition, ExecutionContext } from 
 
 // Only reviewed, statically imported implementations enter this registry. Customer manifests and learned artifacts cannot register code here.
 const DEFINITIONS:readonly CapabilityDefinition[]=[...foundationDefinitions,...engineeringDefinitions,...troubleshootingDefinitions,...proceduralDefinitions];
-const COMMON_FILES=["types.ts","schema.ts","registry.ts","evidence.ts","observed-evidence.ts","plan.ts","boundary.ts","receipt.ts","foundation.ts","../kernel.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts"];
+const COMMON_FILES=["receipt-dependencies.ts","types.ts","schema.ts","registry.ts","evidence.ts","observed-evidence.ts","plan.ts","boundary.ts","receipt.ts","foundation.ts","../kernel.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts"];
 function freezeReviewed(value:unknown):void {
   if(!value||typeof value!=="object"||Object.isFrozen(value))return;
   for(const descriptor of Object.values(Object.getOwnPropertyDescriptors(value)))if("value" in descriptor)freezeReviewed(descriptor.value);
