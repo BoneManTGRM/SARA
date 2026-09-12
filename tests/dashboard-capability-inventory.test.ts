@@ -27,7 +27,7 @@ test('owner dashboard renders the current digital registry independently of lega
    if(path==='/api/capability-contracts'){contractReads++;if(override)return override.clone();}
    return fetch(base+path,options);
   }});
-  const script=[...html.matchAll(/<script>([\s\S]*?)<\/script>/gu)][0]![1]!;
+  const script=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/giu)][0]![1]!;
   new Script(script).runInContext(context);
   assert.equal(contractReads,0,'Locked dashboard must not request protected inventory');
   // Other panels have their own tests; retain the actual authentication, HTTP,
