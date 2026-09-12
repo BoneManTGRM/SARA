@@ -1,5 +1,11 @@
+import {hasReceiptDependencies,receiptDependencyInput} from './digital-capabilities/receipt-dependencies.ts';
 import { capabilityContract, capabilityContracts, capabilityDefinition, benchmarkCapabilities } from "./digital-capabilities/registry.ts";
 import {enforceEffectBoundary} from './effect-boundary.ts';
+import {compileOwnerEvidence,ownerEvidenceSchema} from './digital-capabilities/observed-evidence.ts';
+import {durableRecoverySnapshot} from './digital-capabilities/troubleshooting/durable.ts';
+import {ProceduralKnowledgeStore} from './procedural-intelligence.ts';
+import {executeProceduralCapability,proceduralDependencyDigest} from './digital-capabilities/procedural/implementations.ts';
+import {validatePlan,executeBoundedPlan} from './digital-capabilities/plan.ts';
 import { serviceCapabilityEvidence } from "./digital-capabilities/service-readiness.ts";
 import { normalizeSuppliedEvidence } from "./digital-capabilities/evidence.ts";
 import { capabilityResult } from "./digital-capabilities/receipt.ts";
@@ -2234,6 +2240,34 @@ export class SaraKernel {
   /** Reviewed built-in contracts share this kernel, policy authority, and append-only audit store. */
   async inspectCapabilityContracts() { return capabilityContracts(); }
 
+  async executeCapabilityPlan(principal:Principal,supplied:unknown,maximumSteps=16) {
+    if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    const plan=validatePlan(supplied),planDigest=sha256(canonicalJson(plan));
+    await this.serializeMutation(async()=>{
+      const state=await this.state();const existing=state.events.find(e=>e.type==='capability_plan_registered'&&(e.data as {id:string;version:number}).id===plan.id&&(e.data as {version:number}).version===plan.version);
+      if(existing){if((existing.data as {planDigest:string}).planDigest!==planDigest)throw new Error('PLAN_IDENTITY_CONFLICT');return;}
+      await this.authorize(principal,{action:'sandbox_development',targetId:`capability-plan:${plan.id}:${plan.version}`,external:false});
+      await this.#store.append('capability_plan_registered',principal,{id:plan.id,version:plan.version,planDigest,plan});
+    });
+    const result=await executeBoundedPlan(plan,{contract:capabilityContract,invoke:request=>this.invokeCapability(principal,request),stopped:async()=>(await this.state()).emergencyStopped},maximumSteps);
+    await this.serializeMutation(async()=>{const state=await this.state(),digest=sha256(canonicalJson(result));if(!state.events.some(e=>e.type==='capability_plan_progress'&&(e.data as {digest:string}).digest===digest))await this.#store.append('capability_plan_progress',principal,{digest,result});});
+    return result;
+  }
+
+  recordOwnerObservedEvidence(principal:Principal,supplied:unknown) {
+    if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    const input=snapshotJson(supplied) as Record<string,Json>;validateSchema(ownerEvidenceSchema,input);
+    return this.serializeMutation(async()=>{
+      const state=await this.state(),requestDigest=sha256(canonicalJson(input));
+      const existing=state.events.find(event=>event.type==='capability_evidence_captured'&&event.actor.id===principal.id&&(event.data as {requestId:string}).requestId===input.requestId);
+      if(existing){const stored=existing.data as {requestDigest:string;record:import('./digital-capabilities/types.ts').EvidenceRecord};if(stored.requestDigest!==requestDigest)throw new Error('EVIDENCE_REQUEST_REPLAY_CONFLICT');return structuredClone(stored.record);}
+      await this.authorize(principal,{action:'record_memory',targetId:`evidence:${input.sourceId}`,external:false});
+      const record=compileOwnerEvidence(input,new Date().toISOString());
+      await this.#store.append('capability_evidence_captured',principal,{requestId:input.requestId,requestDigest,record});
+      return structuredClone(record);
+    });
+  }
+
   async invokeCapability(principal: Principal, supplied: CapabilityInvocation): Promise<CapabilityResult> {
     if (principal.kind === "owner" && !this.isVerifiedOwner(principal)) throw new Error("AUTHENTICATED_OWNER_REQUIRED");
     if (principal.kind !== "owner" && principal !== SARA_PRINCIPAL) throw new Error("AUTHENTICATED_OWNER_OR_INTERNAL_PRINCIPAL_REQUIRED");
@@ -2266,21 +2300,82 @@ export class SaraKernel {
         (event.data as {requestId:string;actorId:string}).requestId===request!.requestId && (event.data as {actorId:string}).actorId===principal.id);
       const contract=await capabilityContract(request.capabilityId),definition=capabilityDefinition(request.capabilityId);
       if(contract)context.currentIdentity={...context.currentIdentity,capabilityId:contract.id,implementationDigest:contract.implementationDigest,contractDigest:contract.contractDigest};
-      if(request.capabilityId==="service-opportunity-generator" && contract){
+      if(definition?.sourceFiles.some(path=>path.startsWith('procedural/'))&&contract){
+        context.proceduralKnowledge=await ProceduralKnowledgeStore.inspectExisting(this.#store.stateDirectory);
+        try{validateSchema(contract.inputSchema,request.input as Json);context.currentIdentity.proceduralKnowledgeDigest=proceduralDependencyDigest(request.capabilityId,request.input as Record<string,Json>,context.proceduralKnowledge);}catch(error){if(!(error instanceof CapabilityInputError))throw error;}
+      }
+      if(definition?.sourceFiles.some(path=>path.startsWith('self-management/'))&&contract){
+        try{validateSchema(contract.inputSchema,request.input as Json);const input=request.input as {tasks?:Array<{capabilityId:string}>;encounters?:Array<{capabilityId:string}>};
+          const ids=[...new Set([...(input.tasks??[]),...(input.encounters??[])].map(t=>t.capabilityId))].sort();
+          context.capabilityReadiness=[];
+          for(const id of ids){const c=await capabilityContract(id);if(c)context.capabilityReadiness=[...context.capabilityReadiness,{id,enabled:c.status==='ENABLED'&&c.qualification.status==='PASSED',authorityClass:c.authorityClass}];}
+          context.currentIdentity.capabilityReadinessDigest=sha256(canonicalJson(context.capabilityReadiness));
+        }catch(error){if(!(error instanceof CapabilityInputError))throw error;}
+      }
+      if(request.capabilityId==='recovery-state-reconstructor'&&contract){
+        try{validateSchema(contract.inputSchema,request.input as Json);const snapshot=durableRecoverySnapshot(state.jobs,state.events,String((request.input as {jobId:string}).jobId));
+          if(snapshot){context.recoverySnapshot=snapshot;context.currentIdentity.recoverySnapshotDigest=snapshot.sourceDigest;}
+        }catch(error){if(!(error instanceof CapabilityInputError))throw error;}
+      }
+      if(['service-opportunity-generator','website-maintenance-scope-estimator','repeatable-service-productizer'].includes(request.capabilityId) && contract){
         try {
           validateSchema(contract.inputSchema,request.input as Json);
-          const ids=(request.input as {capabilities:Array<{id:string}>}).capabilities.map(item=>item.id);
+          const ids=request.capabilityId==='service-opportunity-generator'?(request.input as {capabilities:Array<{id:string}>}).capabilities.map(item=>item.id):(request.input as {requiredCapabilityIds:string[]}).requiredCapabilityIds;
           context.serviceCapabilityEvidence=await serviceCapabilityEvidence(this.#store.stateDirectory,ids,this.constitutionDigest);
           context.currentIdentity.serviceReadinessDigest=sha256(canonicalJson(context.serviceCapabilityEvidence));
         } catch(error) { if(!(error instanceof CapabilityInputError))throw error; }
       }
+      const referenceMemo=new Map<string,boolean>(),visiting=new Set<string>();let referenceNodes=0;
+      const referencedEvents=new Map(state.events.filter(e=>e.type==='digital_capability_executed'&&(context.ownerAuthenticated||e.actor.id===principal.id)).map(e=>[(e.data as {result:CapabilityResult}).result.resultDigest,e]));
+      const referenceIsCurrent=async(prior:CapabilityResult,metadata:unknown,depth=0):Promise<boolean>=>{
+        if(referenceMemo.has(prior.resultDigest))return referenceMemo.get(prior.resultDigest)!;
+        if(depth>64||++referenceNodes>512||visiting.has(prior.resultDigest))return false;
+        visiting.add(prior.resultDigest);
+        const priorContract=await capabilityContract(prior.capability.id);
+        let referenceCurrent=prior.authority.contextDigest===authorityContextDigest&&prior.capability.implementationDigest===priorContract?.implementationDigest&&prior.capability.contractDigest===priorContract?.contractDigest;
+        const dependencyInput=(metadata as {dependencyInput?:Record<string,Json>}).dependencyInput;
+        if(hasReceiptDependencies(prior.subject)){
+          if(!dependencyInput)referenceCurrent=false;
+          else{
+            if(prior.subject.serviceReadinessDigest!==undefined){
+              const ids=dependencyInput.serviceCapabilityIds as string[]|undefined;
+              referenceCurrent=referenceCurrent&&Array.isArray(ids)&&prior.subject.serviceReadinessDigest===sha256(canonicalJson(await serviceCapabilityEvidence(this.#store.stateDirectory,ids,this.constitutionDigest)));
+            }
+            if(prior.subject.proceduralKnowledgeDigest!==undefined){
+              const input=dependencyInput.procedural;
+              referenceCurrent=referenceCurrent&&!!input&&typeof input==='object'&&!Array.isArray(input)&&prior.subject.proceduralKnowledgeDigest===proceduralDependencyDigest(prior.capability.id,input as Record<string,Json>,await ProceduralKnowledgeStore.inspectExisting(this.#store.stateDirectory));
+            }
+            if(prior.subject.capabilityReadinessDigest!==undefined){
+              const ids=dependencyInput.capabilityReadinessIds as string[]|undefined;const readiness=[];
+              if(!Array.isArray(ids))referenceCurrent=false;
+              else{for(const id of ids){const c=await capabilityContract(id);if(c)readiness.push({id,enabled:c.status==='ENABLED'&&c.qualification.status==='PASSED',authorityClass:c.authorityClass,version:c.version,contractDigest:c.contractDigest,description:c.description});}
+                referenceCurrent=referenceCurrent&&prior.subject.capabilityReadinessDigest===sha256(canonicalJson(readiness));}
+            }
+            if(prior.subject.recoverySnapshotDigest!==undefined){
+              const jobId=dependencyInput.recoveryJobId;
+              referenceCurrent=referenceCurrent&&typeof jobId==='string'&&prior.subject.recoverySnapshotDigest===durableRecoverySnapshot(state.jobs,state.events,jobId)?.sourceDigest;
+            }
+          }
+        }
+        // Historical owner decisions and counterpart performance remain audit facts;
+        // they do not assert that their old dependencies authorize fresh execution.
+        if(referenceCurrent&&!['decision-register','agent-reputation-ledger'].includes(prior.capability.id)){
+          for(const dependency of prior.evidence.filter(e=>e.integrity==='KERNEL_RECEIPT'&&e.sourceId.startsWith('kernel:capability:'))){
+            const found=referencedEvents.get(dependency.contentDigest);
+            if(!found){referenceCurrent=false;break;}
+            const candidate=(found.data as {result:CapabilityResult}).result,{resultDigest,...unsigned}=candidate;
+            if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError('Transitive capability receipt failed its content digest.');
+            if(!await referenceIsCurrent(candidate,found.data,depth+1)){referenceCurrent=false;break;}
+          }
+        }
+        visiting.delete(prior.resultDigest);referenceMemo.set(prior.resultDigest,referenceCurrent);return referenceCurrent;
+      };
       if(existing){
         const stored=existing.data as {requestDigest:string;result:CapabilityResult};
         if(stored.requestDigest!==requestDigest)throw new Error("CAPABILITY_REQUEST_REPLAY_CONFLICT");
         const {resultDigest,...unsigned}=stored.result;
         if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError("Capability receipt digest does not match its content.");
-        const current=stored.result.authority.contextDigest===authorityContextDigest&&stored.result.capability.implementationDigest===contract?.implementationDigest&&
-          stored.result.subject.serviceReadinessDigest===context.currentIdentity.serviceReadinessDigest;
+        const current=await referenceIsCurrent(stored.result,existing.data);
         return {...structuredClone(stored.result),replayed:true,receiptValidity:{current,reason:current?"Unchanged material authority and implementation identity.":"Historical receipt only; current identity differs. Re-evaluate before relying on it."}};
       }
       let status:CapabilityResult["status"]="SUCCEEDED",result:import("./digital-capabilities/types.ts").ExecutionOutput;
@@ -2290,6 +2385,13 @@ export class SaraKernel {
           validateSchema(arraySchema(digestSchema,32),request.evidenceReceiptIds);
           const evidence=[...context.evidence];
           for(const digest of [...new Set(request.evidenceReceiptIds)]){
+            const captured=state.events.find(event=>event.type==='capability_evidence_captured'&&(event.data as {record:{id:string}}).record.id===digest&&(context.ownerAuthenticated||event.actor.id===principal.id));
+            if(captured){
+              const record=(captured.data as {record:import('./digital-capabilities/types.ts').EvidenceRecord}).record;
+              const {id,...unsigned}=record;
+              if(sha256(canonicalJson(unsigned))!==id||record.provenance!=='OWNER_OBSERVED'||captured.actor.kind!=='owner')throw new EventStoreIntegrityError('Owner evidence integrity failed.');
+              evidence.push(structuredClone(record));continue;
+            }
             const event=state.events.find(event=>event.type==="digital_capability_executed" &&
               (event.data as {result:CapabilityResult}).result.resultDigest===digest &&
               (context.ownerAuthenticated||event.actor.id===principal.id));
@@ -2297,10 +2399,12 @@ export class SaraKernel {
             const prior=(event.data as {result:CapabilityResult}).result;
             const {resultDigest,...unsigned}=prior;
             if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError("Referenced capability receipt failed its content digest.");
-            context.priorCapabilityResults=[...(context.priorCapabilityResults??[]),structuredClone(prior)];
+            const referenceCurrent=await referenceIsCurrent(prior,event.data);
+            const referenceValidity={current:referenceCurrent,reason:referenceCurrent?'Unchanged material implementation, authority and dependency identities.':'Historical receipt only; current implementation, authority or dependency identity differs or is unavailable.'};
+            context.priorCapabilityResults=[...(context.priorCapabilityResults??[]),{...structuredClone(prior),receiptValidity:referenceValidity}];
             evidence.push({id:sha256(canonicalJson({receiptId:event.id,resultDigest})),sourceId:`kernel:capability:${prior.capability.id}`,
               contentDigest:resultDigest,provenance:"LOCAL",claimedProvenance:null,authoritySource:false,subject:prior.subject,
-              capturedAt:event.occurredAt,claims:[`capability:${prior.capability.id}:${prior.status}`],integrity:"KERNEL_RECEIPT",receiptId:event.id});
+              capturedAt:event.occurredAt,claims:[`capability:${prior.capability.id}:${referenceCurrent?prior.status:"STALE"}`],integrity:"KERNEL_RECEIPT",receiptId:event.id});
           }
           context.evidence=evidence;
         }
@@ -2309,7 +2413,9 @@ export class SaraKernel {
         else if(contract.qualification.status!=="PASSED"){status="BLOCKED";result={output:{code:"QUALIFICATION_FAILED"}};}
         else {
           validateSchema(contract.inputSchema,request.input as Json);
-          const output=await definition.execute(request.input as Record<string,Json>,context);
+          const procedural=definition.sourceFiles.some(path=>path.startsWith('procedural/'));
+          if(procedural&&definition.effect==='INTERNAL_STATE')await this.authorize(principal,{action:'record_memory',targetId:`procedure:${request.capabilityId}`,external:false});
+          const output=procedural?await executeProceduralCapability(request.capabilityId,request.input as Record<string,Json>,context,this.#store.stateDirectory):await definition.execute(request.input as Record<string,Json>,context);
           result=snapshotJson(output) as unknown as import("./digital-capabilities/types.ts").ExecutionOutput;
           validateSchema(contract.outputSchema,result.output);
         }
@@ -2319,7 +2425,8 @@ export class SaraKernel {
       }
       const receipt=capabilityResult({requestId:request.requestId,capabilityId:request.capabilityId,inputDigest:sha256(canonicalJson(request.input)),
         contract,context,result,status:status==="SUCCEEDED"?result.status??status:status});
-      await this.#store.append("digital_capability_executed",principal,{requestId:request.requestId,actorId:principal.id,requestDigest,result:receipt});
+      const dependencyInput=request.input&&typeof request.input==='object'&&!Array.isArray(request.input)?receiptDependencyInput(request.input as Record<string,Json>,context.currentIdentity):undefined;
+      await this.#store.append("digital_capability_executed",principal,{requestId:request.requestId,actorId:principal.id,requestDigest,result:receipt,...(dependencyInput?{dependencyInput}:{})});
       return structuredClone(receipt);
     });
   }

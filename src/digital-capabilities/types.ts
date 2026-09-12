@@ -28,6 +28,9 @@ export type ExecutionContext = {
   benchmark:(ids:string[])=>Promise<Json>;
   serviceCapabilityEvidence?:readonly ServiceCapabilityEvidence[];
   priorCapabilityResults?:readonly CapabilityResult[];
+  recoverySnapshot?:import('./troubleshooting/implementations.ts').RecoverySnapshot;
+  proceduralKnowledge?:import('../procedural-intelligence.ts').ProceduralKnowledgeSnapshot|null;
+  capabilityReadiness?:readonly {id:string;enabled:boolean;authorityClass:string}[];
 };
 export type ServiceCapabilityEvidence = {
   id:string;contractDigest:string;qualifiedEnabled:boolean;procedureEvidenceDigests:string[];
