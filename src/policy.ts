@@ -90,7 +90,9 @@ export function evaluatePolicy(input: {
 
   const internal = new Set(['internal_read','record_memory','record_ledger','record_realized_financial_event','sandbox_development','emergency_stop_change']);
   const protectedAction=constitution.protectedActions.includes(request.action as never);
-  const effect=request.action==='external_read'?'READ':request.action==='external_write'||request.action==='owner_recurring_commitment'||protectedAction?'EXTERNAL':internal.has(request.action)?'INTERNAL':'UNKNOWN';
+  // Network-backed draft generation is not publication. Its executor retains
+  // the separate job budget, lease and paid-provider reservation checks.
+  const effect=request.action==='external_read'?'READ':request.action==='sandbox_development'?'DRAFT':request.action==='external_write'||request.action==='owner_recurring_commitment'||protectedAction?'EXTERNAL':internal.has(request.action)?'INTERNAL':'UNKNOWN';
   return enforceEffectBoundary({action:request.action,target:request.targetId,external:request.external,emergencyStopped,effect,
     decision:{allowed:true,code:'ALLOWED',reason:'The action is within current authority and limits.'},
     authority:isOwner?'AUTHENTICATED_OWNER':'INTERNAL_POLICY',authorityIdentity:isOwner?request.approval?.approvalId??`${principal.id}:${request.action}:${request.targetId}`:null,
