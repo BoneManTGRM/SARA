@@ -116,7 +116,7 @@ try{
  const owner=kernel.authenticateOwnerToken(credential);
  const expenseJob=await kernel.createRevenuePilotJob(owner,{opportunityId:'synthetic-ui-expense-job',sourceUrl:'https://github.com/example/project/issues/1',sourceAllowsAutomatedDiscovery:true,discoveredFromPublicSource:true,repoUrl:'https://github.com/example/project',repositoryIsPublic:true,repositoryOwnerPermissionConfirmed:true,requiresPrivateAccess:false,containsRegulatedOrPrivateData:false,requestsProductionChanges:false,requestsExploitValidation:false,primaryGoal:'release_readiness',customerBudgetUsd:149,desiredTurnaroundDays:3,recentCommitDays:2});
  await kernel.createRevenuePaymentIntent(owner,{id:'synthetic-ui-expense-intent',jobId:expenseJob.id,recipientAddress,clientSecretDigest:sha256('synthetic-ui-unused-secret'),customerReferenceDigest:sha256('synthetic-ui-customer'),terms});
- await send('Page.reload');await until("document.body.dataset.owner==='connected' && Boolean(document.querySelector('.commerce-expense-form'))");
+ await send('Page.reload');await until("document.body?.dataset.owner==='connected' && Boolean(document.querySelector('.commerce-expense-form'))");
  for(const width of [390,1280]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
   await evaluate("document.querySelector('.commerce-expense-form').closest('details').open=true");
