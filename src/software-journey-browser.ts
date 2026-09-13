@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { lookup } from 'node:dns/promises';
 import { constants, createReadStream } from 'node:fs';
 import { access, chown, mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
-import { request } from 'node:https';
+import { request, type RequestOptions } from 'node:https';
 import { isIPv4 } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -198,6 +198,43 @@ export function validateJourneyAssetResponse(status: number | undefined, resourc
   if (headers.length !== undefined && (!/^\d+$/u.test(headers.length) || !Number.isSafeInteger(Number(headers.length)) || Number(headers.length) > PER_RESOURCE_BYTES)) throw new Error('JOURNEY_RESOURCE_BYTES_LIMIT');
   return contentType;
 }
+export function nicosJourneyRequestOptions(address: string, resourceType: string, pinnedAddress: string, signal: AbortSignal): RequestOptions {
+  if (!nicosJourneyResourceAllowed(address, 'GET', resourceType)) throw new Error('JOURNEY_RESOURCE_DENIED');
+  if (!isPublicJourneyIPv4(pinnedAddress)) throw new Error('JOURNEY_DNS_DENIED');
+  // Authority is a literal reviewed destination, never a page-provided URL.
+  // Only its validated static path crosses the URL-to-request boundary.
+  return {
+    protocol: 'https:', hostname: 'nicos-world.com', servername: 'nicos-world.com', port: 443,
+    path: new URL(address).pathname, method: 'GET', agent: false, signal, timeout: 8000, family: 4,
+    lookup: ((_host: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) => callback(null, pinnedAddress, 4)) as RequestOptions['lookup'],
+    headers: { Accept: '*/*', 'Accept-Encoding': 'identity', 'User-Agent': 'SARA-Bounded-Journey/1.0' },
+  };
+}
+
+// Fixed declarations are code; selectors, attributes and labels are CDP data.
+// No page/request string is quoted, sanitized or interpolated into JavaScript.
+const CONTROL_OBSERVATION = `function(selector, action) {
+  const candidates = [...document.querySelectorAll(selector)];
+  if (candidates.length !== 1) return null;
+  const element = candidates[0];
+  const label = (element.getAttribute('aria-label') || element.textContent || '').trim();
+  if (element.disabled || !label.includes(action) || !element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return null;
+  element.scrollIntoView({block:'center',behavior:'instant'});
+  const bounds = element.getBoundingClientRect();
+  const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
+  const hit = document.elementFromPoint(x,y);
+  return bounds.width > 0 && bounds.height > 0 && hit && element.contains(hit) ? {x,y} : null;
+}`;
+const EXPECTATION_OBSERVATION = `function(selector, attribute) {
+  const nodes = [...document.querySelectorAll(selector)];
+  if (nodes.length !== 1 || !nodes[0].checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return '';
+  return String((attribute === null ? nodes[0].textContent : nodes[0].getAttribute(attribute)) || '').trim().slice(0,256);
+}`;
+export function nicosJourneyObservationCall(kind: 'control' | 'expectation', selector: string, detail: string | null, objectId: string) {
+  return { objectId, functionDeclaration: kind === 'control' ? CONTROL_OBSERVATION : EXPECTATION_OBSERVATION,
+    arguments: [{ value: selector }, { value: detail }], returnByValue: true };
+}
+
 async function fetchAsset(address: string, resourceType: string, budget: JourneyResourceBudget, signal: AbortSignal): Promise<Asset> {
   if (!nicosJourneyResourceAllowed(address, 'GET', resourceType)) throw new Error('JOURNEY_RESOURCE_DENIED');
   budget.reserve();
@@ -205,11 +242,7 @@ async function fetchAsset(address: string, resourceType: string, budget: Journey
   if (!records.length || records.some(record => !isPublicJourneyIPv4(record.address))) throw new Error('JOURNEY_DNS_DENIED');
   const pinnedAddress = records[0]!.address;
   return new Promise<Asset>((resolve, reject) => {
-    const call = request(address, {
-      method: 'GET', agent: false, signal, timeout: 8000, family: 4,
-      lookup: ((_host: string, _options: unknown, callback: (error: Error | null, address: string, family: number) => void) => callback(null, pinnedAddress, 4)) as NonNullable<Parameters<typeof request>[1]>['lookup'],
-      headers: { Accept: '*/*', 'Accept-Encoding': 'identity', 'User-Agent': 'SARA-Bounded-Journey/1.0' },
-    }, response => {
+    const call = request(nicosJourneyRequestOptions(address, resourceType, pinnedAddress, signal), response => {
       const fail = (code: string): void => { response.destroy(); call.destroy(); reject(new Error(code)); };
       let contentType: string;
       try { contentType = validateJourneyAssetResponse(response.statusCode, resourceType, { contentType: response.headers['content-type'], encoding: response.headers['content-encoding'], length: response.headers['content-length'] }); }
@@ -256,18 +289,31 @@ export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> 
   };
   let directory: string | undefined, child: ChildProcess | undefined, socket: WebSocket | undefined, sequence = 0, sessionId: string | undefined, closed = false, interceptedRequests = 0;
   const lifetime = setTimeout(() => { controller.abort(); child?.kill('SIGKILL'); }, LIFETIME_MS);
-  const send = (method: string, params: Record<string, unknown> = {}, browserLevel = false): Promise<any> => new Promise((resolve, reject) => {
+  const send = (method: string, params: Record<string, unknown> = {}, browserLevel = false, maximumMilliseconds = 5000): Promise<any> => new Promise((resolve, reject) => {
     if (closed || controller.signal.aborted || !socket || socket.readyState !== WebSocket.OPEN) { reject(new Error('JOURNEY_BROWSER_CLOSED')); return; }
     if (socket.bufferedAmount > 16 * 1024 * 1024) { reject(new Error('JOURNEY_PROTOCOL_BYTES_LIMIT')); return; }
     const id = ++sequence;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error('JOURNEY_COMMAND_TIMEOUT')); }, 5000);
+    const timer = setTimeout(() => {
+      pending.delete(id);
+      // callFunctionOn has no JavaScript evaluation timeout. Preserve the old
+      // observation bound by terminating the isolated child on its 1500ms limit.
+      if (method === 'Runtime.callFunctionOn') { controller.abort(); child?.kill('SIGKILL'); }
+      reject(new Error('JOURNEY_COMMAND_TIMEOUT'));
+    }, maximumMilliseconds);
     pending.set(id, { resolve, reject, timer });
     socket.send(JSON.stringify({ id, method, params, ...(!browserLevel && sessionId ? { sessionId } : {}) }));
   });
-  const evaluate = async (expression: string): Promise<any> => {
-    const evaluated = await send('Runtime.evaluate', { expression, returnByValue: true, timeout: 1500, disableBreaks: true });
-    if (evaluated.exceptionDetails) throw new Error('JOURNEY_OBSERVATION_FAILED');
-    return evaluated.result?.value;
+  const observe = async (kind: 'control' | 'expectation', selector: string, detail: string | null): Promise<any> => {
+    const global = await send('Runtime.evaluate', { expression: 'globalThis', returnByValue: false, timeout: 1500, disableBreaks: true });
+    const objectId = global.result?.objectId;
+    if (global.exceptionDetails || typeof objectId !== 'string') throw new Error('JOURNEY_OBSERVATION_FAILED');
+    try {
+      const evaluated = await send('Runtime.callFunctionOn', nicosJourneyObservationCall(kind, selector, detail, objectId), false, 1500);
+      if (evaluated.exceptionDetails) throw new Error('JOURNEY_OBSERVATION_FAILED');
+      return evaluated.result?.value;
+    } finally {
+      if (!controller.signal.aborted) await send('Runtime.releaseObject', { objectId }).catch(() => undefined);
+    }
   };
   const capture = async (): Promise<void> => {
     // Fixed target/new profile contains no owner session or supplied sensitive fields.
@@ -365,7 +411,7 @@ export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> 
         const controlDeadline = Math.min(started + LIFETIME_MS - 5000, performance.now() + 5000);
         let selected: any = null;
         while (performance.now() < controlDeadline) {
-          selected = await evaluate(`(() => { const candidates = [...document.querySelectorAll(${JSON.stringify(step.selector)})]; if (candidates.length !== 1) return null; const element = candidates[0]; const label = (element.getAttribute('aria-label') || element.textContent || '').trim(); if (element.disabled || !label.includes(${JSON.stringify(step.action)}) || !element.checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return null; element.scrollIntoView({block:'center',behavior:'instant'}); const bounds = element.getBoundingClientRect(); const x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2; const hit = document.elementFromPoint(x,y); return bounds.width > 0 && bounds.height > 0 && hit && element.contains(hit) ? {x,y} : null; })()`);
+          selected = await observe('control', step.selector, step.action);
           if (selected) break;
           await delay(100, undefined, { signal: controller.signal });
         }
@@ -380,7 +426,7 @@ export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> 
       const deadline = Math.min(started + LIFETIME_MS - 5000, performance.now() + 10_000);
       let observed = '';
       while (performance.now() < deadline) {
-        observed = String(await evaluate(`(() => { const nodes = [...document.querySelectorAll(${JSON.stringify(step.expectedSelector)})]; if (nodes.length !== 1 || !nodes[0].checkVisibility({checkOpacity:true,checkVisibilityCSS:true})) return ''; return String(${step.attribute ? `nodes[0].getAttribute(${JSON.stringify(step.attribute)})` : "nodes[0].textContent"} || '').trim().slice(0,256); })()`) ?? '');
+        observed = String(await observe('expectation', step.expectedSelector, step.attribute ?? null) ?? '');
         if (observed === step.expected) break;
         await delay(100, undefined, { signal: controller.signal });
       }

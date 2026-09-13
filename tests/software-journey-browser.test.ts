@@ -1,6 +1,32 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { nicosJourneyResourceAllowed, isPublicJourneyIPv4, JourneyResourceBudget, NICOS_JOURNEY_PROFILE, nicosJourneyBrowserArguments, nicosJourneyChildIdentity, validateJourneyAssetResponse, parseJourneyPackagedIdentity, verifyJourneyBrowserCommandLine } from '../src/software-journey-browser.ts';
+import { nicosJourneyResourceAllowed, isPublicJourneyIPv4, JourneyResourceBudget, NICOS_JOURNEY_PROFILE, nicosJourneyBrowserArguments, nicosJourneyChildIdentity, validateJourneyAssetResponse, parseJourneyPackagedIdentity, verifyJourneyBrowserCommandLine, nicosJourneyRequestOptions, nicosJourneyObservationCall } from '../src/software-journey-browser.ts';
+
+test('outbound request fixes TLS authority and permits only the validated static path with a public pinned address',()=>{
+  const signal=new AbortController().signal;
+  const options=nicosJourneyRequestOptions('https://nicos-world.com/assets/app-123.js','Script','104.21.12.34',signal);
+  assert.equal(options.protocol,'https:');assert.equal(options.hostname,'nicos-world.com');assert.equal(options.servername,'nicos-world.com');assert.equal(options.port,443);
+  assert.equal(options.path,'/assets/app-123.js');assert.equal(options.method,'GET');assert.equal(options.agent,false);assert.equal(options.signal,signal);
+  assert.equal('auth' in options,false);
+  for(const address of ['https://evil.test/assets/app.js','https://nicos-world.com@127.0.0.1/assets/app.js','https://nicos-world.com/assets/app.js?target=169.254.169.254','https://nicos-world.com//evil.test/app.js','https://nicos-world.com/assets/../api/test.js'])assert.throws(()=>nicosJourneyRequestOptions(address,'Script','104.21.12.34',signal),/RESOURCE_DENIED/);
+  for(const address of ['127.0.0.1','169.254.169.254','::ffff:8.8.8.8'])assert.throws(()=>nicosJourneyRequestOptions('https://nicos-world.com/','Document',address,signal),/DNS_DENIED/);
+  let observed='';
+  (options.lookup as Function)('untrusted-lookup-argument.test',{},(error:Error|null,address:string,family:number)=>{assert.equal(error,null);assert.equal(family,4);observed=address;});
+  assert.equal(observed,'104.21.12.34');
+});
+
+test('browser observation declarations remain static while hostile selectors and labels travel only as protocol arguments',()=>{
+  const hostile='\");globalThis.untrustedExecuted=true;//';
+  for(const kind of ['control','expectation'] as const){
+    const baseline=nicosJourneyObservationCall(kind,'#page-title','World Map','isolated-global');
+    const candidate=nicosJourneyObservationCall(kind,hostile,hostile,'isolated-global');
+    assert.equal(candidate.functionDeclaration,baseline.functionDeclaration);
+    assert.equal(candidate.functionDeclaration.includes(hostile),false);
+    assert.deepEqual(candidate.arguments,[{value:hostile},{value:hostile}]);
+    assert.equal(candidate.objectId,'isolated-global');assert.equal(candidate.returnByValue,true);
+    assert.equal('expression' in candidate,false);
+  }
+});
 
 test('journey fetch permits only reviewed static GET resources on the exact target', () => {
   for (const [url, kind] of [['https://nicos-world.com/', 'Document'], ['https://nicos-world.com/assets/index-Ab123.js', 'Script'], ['https://nicos-world.com/assets/index-Ab123.css', 'Stylesheet'], ['https://nicos-world.com/art/robot.webp', 'Image'], ['https://nicos-world.com/fonts/font.woff2', 'Font']]) {
