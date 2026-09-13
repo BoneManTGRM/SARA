@@ -110,6 +110,28 @@ test('source collection records only exact-head CI runs and distinguishes provid
  assert.equal(result.ciQueryStatus,'OBSERVED');assert.equal(result.ciRuns?.length,1);assert.equal(result.ciRuns?.[0]?.headSha,commit);
  const seam=api();const denied=(async(input,init)=>String(input).includes('/actions/runs?')?new Response('denied',{status:403}):seam.fetchImpl(input,init)) as typeof fetch;
  const partial=await collectSoftwareSource('BoneManTGRM/Nicos-Adventures','movement-to-scanner',{fetchImpl:denied});
- assert.equal(partial.ciQueryStatus,'UNAVAILABLE');assert.equal(partial.ciRuns?.length,0);assert.ok(partial.files.length>0);
+ assert.equal(partial.ciProviderBoundary?.httpStatus,403);assert.equal(partial.ciProviderBoundary?.classification,'PROVIDER_REJECTED');assert.equal(partial.ciQueryStatus,'UNAVAILABLE');assert.equal(partial.ciRuns?.length,0);assert.ok(partial.files.length>0);
  assert.match(partial.limitations.join(' '),/CI.*unavailable/);
+});
+
+test('source provider boundary preserves validated HTTP and rate metadata without reading or exposing denied bodies',async()=>{
+ for(const [status,headers,code] of [[403,{},'PROVIDER_REJECTED'],[403,{'x-ratelimit-remaining':'0','x-ratelimit-reset':'1789257600','retry-after':'60'},'RATE_LIMIT'],[429,{},'RATE_LIMIT'],[403,{'retry-after':'60','x-ratelimit-remaining':'2'},'PROVIDER_REJECTED']] as const){
+  let calls=0,cancelled=false;const fetchImpl=(async()=>{calls++;return new Response(new ReadableStream({cancel(){cancelled=true;}}),{status,headers:{...headers,'x-unapproved':'synthetic-secret'}});}) as typeof fetch;
+  await assert.rejects(collectSoftwareSource('BoneManTGRM/Nicos-Adventures','movement',{fetchImpl}),(error:unknown)=>{assert.ok(error instanceof SoftwareSourceReadError);assert.equal(error.code,code);assert.equal(error.providerBoundary?.httpStatus,status);assert.equal(error.providerBoundary?.classification,code);assert.equal(JSON.stringify(error.providerBoundary).includes('synthetic-secret'),false);if(code==='RATE_LIMIT'&&status===403){assert.equal(error.providerBoundary?.rateLimitRemaining,0);assert.equal(error.providerBoundary?.rateLimitResetUnixSeconds,1789257600);assert.equal(error.providerBoundary?.retryAfterSeconds,60);}return true;});assert.equal(calls,1);assert.equal(cancelled,true);
+ }
+});
+test('provider metadata rejects malformed fields and normalizes only a strict Retry-After HTTP date',async()=>{
+ for(const retry of ['Sun, 13 Sep 2026 00:00:00 GMT','synthetic-secret','-1','1e3']){
+  const fetchImpl=(async()=>new Response('synthetic-secret',{status:403,headers:{'x-ratelimit-remaining':'0, synthetic-secret','x-ratelimit-reset':'-1','retry-after':retry}})) as typeof fetch;
+  await assert.rejects(collectSoftwareSource('BoneManTGRM/Nicos-Adventures','movement',{fetchImpl}),(error:unknown)=>{assert.ok(error instanceof SoftwareSourceReadError);assert.equal(error.code,'PROVIDER_REJECTED');assert.equal(error.providerBoundary?.rateLimitRemaining,null);assert.equal(error.providerBoundary?.rateLimitResetUnixSeconds,null);assert.equal(error.providerBoundary?.retryAfterSeconds,null);assert.equal(error.providerBoundary?.retryAfterAt,retry.startsWith('Sun,')?'2026-09-13T00:00:00.000Z':null);assert.equal(JSON.stringify(error).includes('synthetic-secret'),false);return true;});
+ }
+});
+
+import {softwareWorkDefinitions} from '../src/digital-capabilities/software-work.ts';
+import {BASE_QUALIFICATION_CONTEXT} from '../src/digital-capabilities/foundation.ts';
+test('actual source capability carries typed provider boundary and never forwards arbitrary thrown error fields',async()=>{
+ const inspect=softwareWorkDefinitions.find(d=>d.id==='software-source-inspector')!,input={website:'https://nicos-world.com/',repository:'BoneManTGRM/Nicos-Adventures',journey:'movement-to-scanner',scope:'INSPECTION'};
+ const result=await inspect.execute(input,{...BASE_QUALIFICATION_CONTEXT,softwareWorkAuthorized:true,softwareRuntime:{inspectSource:(repository,journey)=>collectSoftwareSource(repository,journey,{fetchImpl:(async()=>new Response('synthetic-secret',{status:403,headers:{'x-ratelimit-remaining':'0','retry-after':'30'}})) as typeof fetch}),testJourney:async()=>null}});
+ const out=result.output as any;assert.equal(out.result,'SOURCE_UNAVAILABLE');assert.equal(out.evidence.providerBoundary.httpStatus,403);assert.equal(out.evidence.providerBoundary.classification,'RATE_LIMIT');assert.match(out.summary,/HTTP 403/);assert.equal(JSON.stringify(result).includes('synthetic-secret'),false);
+ const unknown=await inspect.execute(input,{...BASE_QUALIFICATION_CONTEXT,softwareWorkAuthorized:true,softwareRuntime:{inspectSource:async()=>{throw {code:'synthetic-secret',providerBoundary:{httpStatus:403}};},testJourney:async()=>null}});assert.equal(JSON.stringify(unknown).includes('synthetic-secret'),false);assert.equal((unknown.output as any).evidence,null);
 });

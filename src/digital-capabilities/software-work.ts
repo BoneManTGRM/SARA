@@ -1,7 +1,7 @@
 import {canonicalJson,sha256} from '../canonical.ts';
 import {objectSchema as o,textSchema as t,arraySchema as a,enumSchema as e,type Json} from './schema.ts';
 import type {CapabilityDefinition,ExecutionContext,ExecutionOutput} from './types.ts';
-import type {SoftwareSourceEvidence} from '../software-source-reader.ts';
+import {SoftwareSourceReadError,type SoftwareSourceEvidence} from '../software-source-reader.ts';
 
 export type SoftwareRuntime={configurationIdentity?:Readonly<{sourceDigest:string;journeyDigest:string}>;inspectSource:(repository:string,journey:string)=>Promise<SoftwareSourceEvidence>;testJourney:()=>Promise<unknown>};
 const inputSchema=o({website:t(512,0),repository:t(256),journey:t(512,0),scope:e('INSPECTION','JOURNEY_TEST')});
@@ -15,7 +15,7 @@ async function inspect(i:Record<string,Json>,ctx:ExecutionContext):Promise<Execu
  if(!ctx.softwareRuntime)return output('INTEGRATION_UNAVAILABLE','SARA’s public source adapter is not connected.',null,['Runtime public source integration is unavailable.']);
  try{const evidence=await ctx.softwareRuntime.inspectSource(String(i.repository),String(i.journey)||'source configuration tests');
   return {...output('SOURCE_COLLECTED',`SARA inspected ${evidence.files.length} immutable source files at ${evidence.immutableCommitSha}. Existing tests were read, not executed.`,evidence as unknown as Json,evidence.limitations),observed:[{basis:'SARA_RUNTIME_PUBLIC_SOURCE',repository:evidence.repository,revision:evidence.immutableCommitSha,tree:evidence.treeSha}]};
- }catch(error){const code=error&&typeof error==='object'&&'code' in error?String(error.code):'PROVIDER_FAILURE';return {...output('SOURCE_UNAVAILABLE',`Repository collection did not complete (${code}). No application defect is established.`,null,[`Public source collection: ${code}.`]),observed:[{basis:'SARA_RUNTIME_PUBLIC_SOURCE_ATTEMPT',repository:i.repository!,failureCode:code}]};}
+ }catch(error){const code=error instanceof SoftwareSourceReadError?error.code:'PROVIDER_FAILURE',boundary=error instanceof SoftwareSourceReadError?error.providerBoundary:null;const detail=boundary?`${code}; HTTP ${boundary.httpStatus}`:code;return {...output('SOURCE_UNAVAILABLE',`Repository collection did not complete (${detail}). No application defect is established.`,boundary?{providerBoundary:boundary}:null,[`Public source collection: ${detail}.`]),observed:[{basis:'SARA_RUNTIME_PUBLIC_SOURCE_ATTEMPT',repository:i.repository!,failureCode:code,...(boundary?{providerBoundary:boundary}:{})}]};}
 }
 async function journey(i:Record<string,Json>,ctx:ExecutionContext):Promise<ExecutionOutput>{
  if(!permitted(ctx))return {...output('BLOCKED','Exact authenticated owner software request required.'),status:'BLOCKED'};
