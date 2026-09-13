@@ -12,12 +12,42 @@ type FileRole = "manifest" | "lockfile" | "runtime_configuration" | "ci_configur
 // Reserve useful excerpts for tests and application source even when earlier lockfiles are large.
 const ROLE_TEXT_BYTES: Record<FileRole, number> = { manifest: 2_000, lockfile: 1_000, runtime_configuration: 2_000, ci_configuration: 1_000, journey_test: 5_000, journey_source: 4_000 };
 type Entry = { path: string; type: string; mode: string; sha: string; size?: number };
-export type SoftwareSourceErrorCode = "INVALID_TARGET" | "INVALID_JOURNEY" | "UNSUPPORTED_ACCESS" | "PROVIDER_REJECTED" | "PROVIDER_FAILURE" | "RESPONSE_LIMIT" | "TIME_LIMIT" | "REQUEST_LIMIT" | "MALFORMED_EVIDENCE" | "SOURCE_IDENTITY_MISMATCH";
+export type SoftwareSourceErrorCode = "INVALID_TARGET" | "INVALID_JOURNEY" | "UNSUPPORTED_ACCESS" | "RATE_LIMIT" | "PROVIDER_REJECTED" | "PROVIDER_FAILURE" | "RESPONSE_LIMIT" | "TIME_LIMIT" | "REQUEST_LIMIT" | "MALFORMED_EVIDENCE" | "SOURCE_IDENTITY_MISMATCH";
 
+export type SoftwareSourceProviderBoundary = Readonly<{
+  httpStatus: number;
+  classification: "RATE_LIMIT" | "PROVIDER_REJECTED";
+  rateLimitRemaining: number | null;
+  rateLimitResetUnixSeconds: number | null;
+  retryAfterSeconds: number | null;
+  retryAfterAt: string | null;
+}>;
+function sourceProviderBoundary(response: Pick<Response, "status" | "headers">): SoftwareSourceProviderBoundary | null {
+  if (!Number.isInteger(response.status) || response.status < 300 || response.status > 599) return null;
+  const integerHeader = (name: string, maximum: number): number | null => {
+    const value = response.headers.get(name);
+    if (value === null || !/^(?:0|[1-9]\d{0,11})$/u.test(value)) return null;
+    const parsed = Number(value); return Number.isSafeInteger(parsed) && parsed <= maximum ? parsed : null;
+  };
+  const rateLimitRemaining = integerHeader('x-ratelimit-remaining', 2_147_483_647);
+  const rateLimitResetUnixSeconds = integerHeader('x-ratelimit-reset', 253_402_300_799);
+  const retryAfterSeconds = integerHeader('retry-after', 2_147_483_647);
+  const retry = response.headers.get('retry-after');
+  let retryAfterAt: string | null = null;
+  if (retry && retry.length === 29 && /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/u.test(retry)) {
+    const parsed = new Date(retry); if (Number.isFinite(parsed.getTime()) && parsed.toUTCString() === retry) retryAfterAt = parsed.toISOString();
+  }
+  // Header evidence only. A bare 403 or Retry-After does not establish why
+  // access was denied; no provider body, credentials or raw headers are read.
+  return Object.freeze({httpStatus: response.status, classification: response.status === 429 || rateLimitRemaining === 0 ? 'RATE_LIMIT' : 'PROVIDER_REJECTED', rateLimitRemaining, rateLimitResetUnixSeconds, retryAfterSeconds, retryAfterAt});
+}
 export class SoftwareSourceReadError extends Error {
   readonly code: SoftwareSourceErrorCode;
-  constructor(code: SoftwareSourceErrorCode, message: string) {
-    super(message); this.name = "SoftwareSourceReadError"; this.code = code;
+  readonly providerBoundary: SoftwareSourceProviderBoundary | null;
+  constructor(code: SoftwareSourceErrorCode, message: string, providerResponse?: Pick<Response, "status" | "headers">) {
+    super(message); this.name = "SoftwareSourceReadError";
+    this.providerBoundary = providerResponse ? sourceProviderBoundary(providerResponse) : null;
+    this.code = this.providerBoundary?.classification ?? code;
   }
 }
 
@@ -43,6 +73,7 @@ export type SoftwareSourceEvidence = {
     sourceTruncated: boolean;
     trust: "UNTRUSTED_SOURCE";
   }>;
+  ciProviderBoundary?: SoftwareSourceProviderBoundary | null;
   ciQueryStatus?: "OBSERVED" | "UNAVAILABLE";
   ciRuns?: Array<{id:number;headSha:string;name:string;status:string;conclusion:string|null;url:string}>;
   requestsUsed: number;
@@ -131,7 +162,7 @@ export async function collectSoftwareSource(repository: string, journey: string,
     if (++requestsUsed > MAX_REQUESTS) reject("REQUEST_LIMIT", "Source collection exceeded its request budget.");
     const response = await fetchImpl(parsed, { method: "GET", redirect: "error", credentials: "omit", signal: controller.signal,
       headers: { accept: "application/vnd.github+json", "user-agent": "SARA-Software-Source/1.0", "x-github-api-version": "2022-11-28" } });
-    if (!response.ok) { await response.body?.cancel(); reject("PROVIDER_REJECTED", `GitHub source collection returned HTTP ${response.status}; no application defect is established.`); }
+    if (!response.ok) { const failure = new SoftwareSourceReadError("PROVIDER_REJECTED", `GitHub source collection returned HTTP ${response.status}; no application defect is established.`, response); await response.body?.cancel().catch(() => undefined); throw failure; }
     if (response.redirected || response.url && new URL(response.url).origin !== parsed.origin) { await response.body?.cancel(); reject("UNSUPPORTED_ACCESS", "Redirected source evidence is not accepted."); }
     if (!response.body) reject("MALFORMED_EVIDENCE", "GitHub returned no source response body.");
     const reader = response.body.getReader(), chunks: Uint8Array[] = [];
@@ -194,6 +225,7 @@ export async function collectSoftwareSource(repository: string, journey: string,
     }
     const ciRuns: NonNullable<SoftwareSourceEvidence['ciRuns']> = [];
     let ciQueryStatus: 'OBSERVED'|'UNAVAILABLE' = 'UNAVAILABLE';
+    let ciProviderBoundary: SoftwareSourceProviderBoundary | null = null;
     try {
       const runs=await get(`${base}/actions/runs?head_sha=${commit.sha}&per_page=5`,256*1024);
       if(!Array.isArray(runs.workflow_runs)||runs.workflow_runs.length>5)reject('MALFORMED_EVIDENCE','CI response exceeded the reviewed run shape.');
@@ -206,10 +238,10 @@ export async function collectSoftwareSource(repository: string, journey: string,
       }
       ciQueryStatus='OBSERVED';
       if(!ciRuns.length)limitations.push('No matching CI run was returned by the bounded exact-head query; this is not a passing CI result.');
-    }catch(error){limitations.push(`Exact-head CI evidence is unavailable (${error instanceof SoftwareSourceReadError?error.code:'PROVIDER_FAILURE'}); collected source remains independently identified.`);}
+    }catch(error){ciProviderBoundary=error instanceof SoftwareSourceReadError?error.providerBoundary:null;limitations.push(`Exact-head CI evidence is unavailable (${error instanceof SoftwareSourceReadError?error.code:'PROVIDER_FAILURE'}); collected source remains independently identified.`);}
     return { schemaVersion: 1, actor: "SARA_RUNTIME", evidenceLabel: "EXTERNAL_READ_ONLY", collectionMode: "anonymous_read_only", repository: canonical,
       immutableCommitSha: commit.sha, treeSha, defaultBranch: metadata.default_branch, collectedAt: new Date().toISOString(), inventoryTruncated: inventory.truncated,
-      files, ciRuns, ciQueryStatus, requestsUsed, limitations };
+      files, ciRuns, ciQueryStatus, ciProviderBoundary, requestsUsed, limitations };
   } catch (error) {
     if (error instanceof SoftwareSourceReadError) throw error;
     if (controller.signal.aborted) reject("TIME_LIMIT", "Source collection exceeded its 30 second duration limit.");

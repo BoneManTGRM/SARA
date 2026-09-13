@@ -67,7 +67,12 @@ export const NICOS_JOURNEY_PROFILE: readonly JourneyProfileStep[] = Object.freez
 ].map(step => Object.freeze(step)));
 
 export type JourneyBrowserStartupDiagnostic = {
-  classification: 'SANDBOX_UNAVAILABLE' | 'SANDBOX_HELPER_CONFIGURATION' | 'NAMESPACE_UNAVAILABLE' | 'MISSING_LIBRARY' | 'CRASHPAD_FAILURE' | 'ACCESS_DENIED' | 'EXECUTABLE_UNAVAILABLE' | 'RESOURCE_UNAVAILABLE' | 'PROCESS_CRASH' | 'UNKNOWN';
+  classification: 'SANDBOX_CREDENTIALS_FAILURE' | 'NAMESPACE_SANDBOX_FAILURE' | 'LINUX_SANDBOX_FAILURE' | 'SANDBOX_HELPER_FAILURE' | 'ZYGOTE_STARTUP_FAILURE' | 'PROFILE_INITIALIZATION_FAILURE' | 'UNKNOWN_FATAL' | 'SANDBOX_UNAVAILABLE' | 'SANDBOX_HELPER_CONFIGURATION' | 'NAMESPACE_UNAVAILABLE' | 'MISSING_LIBRARY' | 'CRASHPAD_FAILURE' | 'ACCESS_DENIED' | 'EXECUTABLE_UNAVAILABLE' | 'RESOURCE_UNAVAILABLE' | 'PROCESS_CRASH' | 'UNKNOWN';
+  classificationBasis: 'FIRST_FATAL_LINE' | 'NONFATAL_STDERR_SYMPTOM' | 'SPAWN_ERROR' | 'PROCESS_SIGNAL' | 'UNKNOWN';
+  fatalCallsite: 'credentials.cc' | 'namespace_sandbox.cc' | 'sandbox_linux.cc' | 'setuid_sandbox_host.cc' | 'zygote_host_impl_linux.cc' | 'process_singleton_posix.cc' | null;
+  fatalSourceLine: number | null;
+  fatalOperation: 'SET_GID_UID_MAPS' | 'DROP_CAPABILITIES' | 'READ_UIDS' | 'READ_GIDS' | 'READ_CAPABILITIES' | 'SIGNAL_ACTION' | 'OPEN_PROC' | null;
+  fatalErrno: number | null;
   exitCode: number | null;
   signal: string | null;
   spawnErrorCode: string | null;
@@ -76,6 +81,45 @@ export type JourneyBrowserStartupDiagnostic = {
   diagnosticDigest: string;
   digestScope: 'BOUNDED_STDERR_PREFIX_AND_EXIT';
 };
+
+// Source names and checked operations reviewed against Chromium tag
+// 153.0.8010.36 at chromium.googlesource.com/chromium/src. Never emit a
+// source string parsed from stderr unless it exactly matches this allowlist.
+const FATAL_SOURCES = {
+  'sandbox/linux/services/credentials.cc': 'credentials.cc',
+  'sandbox/linux/services/namespace_sandbox.cc': 'namespace_sandbox.cc',
+  'sandbox/policy/linux/sandbox_linux.cc': 'sandbox_linux.cc',
+  'sandbox/linux/suid/client/setuid_sandbox_host.cc': 'setuid_sandbox_host.cc',
+  'content/browser/zygote_host/zygote_host_impl_linux.cc': 'zygote_host_impl_linux.cc',
+  'chrome/browser/process_singleton_posix.cc': 'process_singleton_posix.cc',
+} as const;
+function firstFatalDiagnostic(stderr: string) {
+  for (const line of stderr.split(/\r?\n/u)) {
+    const fatal = /^\[[^\]\r\n]{0,200}\bFATAL:([^\]\r\n]{1,240})\]\s?(.*)$/u.exec(line);
+    if (!fatal) continue;
+    const location = /(?::(\d{1,6})|\((\d{1,6})\))$/u.exec(fatal[1]!);
+    const sourceLine = Number(location?.[1] ?? location?.[2]);
+    const source = fatal[1]!.replace(/(?::\d{1,6}|\(\d{1,6}\))$/u, '');
+    const entry = Object.entries(FATAL_SOURCES).find(([path, basename]) => source === path || source === basename);
+    const callsite = entry?.[1] ?? null, message = fatal[2]!;
+    let operation: JourneyBrowserStartupDiagnostic['fatalOperation'] = null;
+    if (callsite === 'credentials.cc' && /Check failed:/u.test(message)) {
+      if (/SetGidAndUidMaps\(gid, uid\)/u.test(message)) operation = 'SET_GID_UID_MAPS';
+      else if (/DropAllCapabilitiesOnCurrentThread\(\)/u.test(message)) operation = 'DROP_CAPABILITIES';
+      else if (/sys_getresuid\(/u.test(message)) operation = 'READ_UIDS';
+      else if (/sys_getresgid\(/u.test(message)) operation = 'READ_GIDS';
+      else if (/sys_capget\(/u.test(message)) operation = 'READ_CAPABILITIES';
+    } else if (callsite === 'namespace_sandbox.cc' && /Check failed: sys_sigaction\(/u.test(message)) operation = 'SIGNAL_ACTION';
+    else if (callsite === 'sandbox_linux.cc' && /Check failed: proc_fd\.is_valid\(\)/u.test(message)) operation = 'OPEN_PROC';
+    // Numeric errno is accepted only from a recognizable error suffix, never
+    // a PID, source line, check argument, pathname or unrelated earlier error.
+    const suffix = /(?:Operation not permitted|No such file or directory|Permission denied|Cannot allocate memory|Resource temporarily unavailable|Invalid argument|No space left on device|Function not implemented|Operation not supported|Input\/output error|Too many open files) \((\d{1,3})\)\.?$/u.exec(message);
+    const explicit = /\berrno\s*=\s*(\d{1,3})(?:\s|$)/u.exec(message);
+    const number = Number(suffix?.[1] ?? explicit?.[1]);
+    return { callsite, sourceLine: callsite && Number.isInteger(sourceLine) && sourceLine >= 1 && sourceLine <= 10000 ? sourceLine : null, operation, errno: Number.isInteger(number) && number >= 1 && number <= 133 ? number : null, message };
+  }
+  return null;
+}
 
 /** Process output is diagnostic evidence, never instructions. Retain at most
  * 16KiB in memory and emit only a closed classification, safe exit facts and
@@ -97,17 +141,29 @@ export class JourneyBrowserStartupDiagnostics {
     const signal = ['SIGABRT','SIGSEGV','SIGILL','SIGBUS','SIGTRAP','SIGKILL','SIGTERM','SIGSYS','SIGHUP','SIGQUIT','SIGXCPU','SIGXFSZ'].includes(state.signal ?? '') ? state.signal : null;
     const spawnErrorCode = state.spawnErrorCode === null ? null : ['ENOENT','EACCES','EPERM','ENOMEM','EAGAIN'].includes(state.spawnErrorCode) ? state.spawnErrorCode : 'UNKNOWN';
     const stderr = this.#buffer.subarray(0, this.#bytes).toString('utf8');
+    const fatal = firstFatalDiagnostic(stderr);
+    // The first observed fatal is kept even if its source is unknown; a later
+    // recognizable or nonfatal message cannot overwrite the failure category.
+    const diagnosticText = fatal?.message ?? stderr;
     let classification: JourneyBrowserStartupDiagnostic['classification'] = 'UNKNOWN';
-    if (/SUID sandbox helper binary was found, but is not configured correctly/iu.test(stderr)) classification = 'SANDBOX_HELPER_CONFIGURATION';
-    else if (/Failed to move to new namespace|Failed to create[^\r\n]*namespace/iu.test(stderr)) classification = 'NAMESPACE_UNAVAILABLE';
-    else if (/No usable sandbox|Running as root without --no-sandbox/iu.test(stderr)) classification = 'SANDBOX_UNAVAILABLE';
-    else if (/error while loading shared libraries|cannot open shared object file/iu.test(stderr)) classification = 'MISSING_LIBRARY';
-    else if (/chrome_crashpad_handler.*(?:required|failed|error|denied)|crashpad.*(?:failed|error|denied)/iu.test(stderr)) classification = 'CRASHPAD_FAILURE';
-    else if (spawnErrorCode === 'EACCES' || spawnErrorCode === 'EPERM' || /Permission denied|Access is denied/iu.test(stderr)) classification = 'ACCESS_DENIED';
+    if (fatal?.callsite === 'credentials.cc') classification = 'SANDBOX_CREDENTIALS_FAILURE';
+    else if (fatal?.callsite === 'namespace_sandbox.cc') classification = 'NAMESPACE_SANDBOX_FAILURE';
+    else if (fatal?.callsite === 'sandbox_linux.cc') classification = 'LINUX_SANDBOX_FAILURE';
+    else if (fatal?.callsite === 'process_singleton_posix.cc') classification = 'PROFILE_INITIALIZATION_FAILURE';
+    else if (fatal && !fatal.callsite) classification = 'UNKNOWN_FATAL';
+    else if (/SUID sandbox helper binary was found, but is not configured correctly/iu.test(diagnosticText)) classification = 'SANDBOX_HELPER_CONFIGURATION';
+    else if (/Failed to move to new namespace|Failed to create[^\r\n]*namespace/iu.test(diagnosticText)) classification = 'NAMESPACE_UNAVAILABLE';
+    else if (/No usable sandbox|Running as root without --no-sandbox/iu.test(diagnosticText)) classification = 'SANDBOX_UNAVAILABLE';
+    else if (fatal?.callsite === 'setuid_sandbox_host.cc') classification = 'SANDBOX_HELPER_FAILURE';
+    else if (fatal?.callsite === 'zygote_host_impl_linux.cc') classification = 'ZYGOTE_STARTUP_FAILURE';
+    else if (/error while loading shared libraries|cannot open shared object file/iu.test(diagnosticText)) classification = 'MISSING_LIBRARY';
+    else if (/chrome_crashpad_handler.*(?:required|failed|error|denied)|crashpad.*(?:failed|error|denied)/iu.test(diagnosticText)) classification = 'CRASHPAD_FAILURE';
+    else if (spawnErrorCode === 'EACCES' || spawnErrorCode === 'EPERM' || /Permission denied|Access is denied/iu.test(diagnosticText)) classification = 'ACCESS_DENIED';
     else if (spawnErrorCode === 'ENOENT') classification = 'EXECUTABLE_UNAVAILABLE';
-    else if (spawnErrorCode === 'ENOMEM' || spawnErrorCode === 'EAGAIN' || /Cannot allocate memory|Resource temporarily unavailable/iu.test(stderr)) classification = 'RESOURCE_UNAVAILABLE';
+    else if (spawnErrorCode === 'ENOMEM' || spawnErrorCode === 'EAGAIN' || /Cannot allocate memory|Resource temporarily unavailable/iu.test(diagnosticText)) classification = 'RESOURCE_UNAVAILABLE';
     else if (signal !== null && ['SIGABRT','SIGSEGV','SIGILL','SIGBUS','SIGTRAP','SIGSYS'].includes(signal)) classification = 'PROCESS_CRASH';
-    return { classification, exitCode, signal, spawnErrorCode, capturedBytes: this.#bytes, truncated: this.#truncated, diagnosticDigest: sha256(canonicalJson({ stderrPrefixSha256: sha256(this.#buffer.subarray(0, this.#bytes)), capturedBytes: this.#bytes, truncated: this.#truncated, exitCode, signal, spawnErrorCode })), digestScope: 'BOUNDED_STDERR_PREFIX_AND_EXIT' };
+    const classificationBasis: JourneyBrowserStartupDiagnostic['classificationBasis'] = fatal ? 'FIRST_FATAL_LINE' : spawnErrorCode ? 'SPAWN_ERROR' : classification === 'PROCESS_CRASH' ? 'PROCESS_SIGNAL' : classification !== 'UNKNOWN' ? 'NONFATAL_STDERR_SYMPTOM' : 'UNKNOWN';
+    return { classification, classificationBasis, fatalCallsite: fatal?.callsite ?? null, fatalSourceLine: fatal?.sourceLine ?? null, fatalOperation: fatal?.operation ?? null, fatalErrno: fatal?.errno ?? null, exitCode, signal, spawnErrorCode, capturedBytes: this.#bytes, truncated: this.#truncated, diagnosticDigest: sha256(canonicalJson({ stderrPrefixSha256: sha256(this.#buffer.subarray(0, this.#bytes)), capturedBytes: this.#bytes, truncated: this.#truncated, exitCode, signal, spawnErrorCode })), digestScope: 'BOUNDED_STDERR_PREFIX_AND_EXIT' };
   }
 }
 
