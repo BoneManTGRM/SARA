@@ -90,7 +90,7 @@ test("a new process requalifies a promoted retained artifact after a verifier en
     await kernel.promoteMutation(owner, mutation.id, "CANARY", { approvalId: "test-exact-promotion", ownerId: owner.id,
       action: "production_promotion", targetId: `${mutation.id}:CANARY`, approvedAt: new Date().toISOString() });
     const root = fileURLToPath(new URL("../", import.meta.url));
-    for (const path of ["src", "constitution", "package.json", "package-lock.json"]) await cp(join(root, path), join(copy, path), { recursive: true });
+    for (const path of ["src", "constitution", "package.json", "package-lock.json", "railpack.json", "scripts/prepare-software-browser.mjs"]) await cp(join(root, path), join(copy, path), { recursive: true });
     await symlink(join(root, "node_modules"), join(copy, "node_modules"), "dir");
     const verifier = join(copy, "src", "learning-qualification.ts");
     await writeFile(verifier, `${await readFile(verifier, "utf8")}\n// Isolated verifier revision for restart regression.\n`);

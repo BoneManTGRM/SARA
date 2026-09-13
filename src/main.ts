@@ -1,3 +1,6 @@
+import {collectSoftwareSource} from './software-source-reader.ts';
+import {runNicosMovementJourney,readSoftwareBrowserConfigurationIdentity} from './software-journey-browser.ts';
+import {sha256} from './canonical.ts';
 import {createNicoReadObserver} from './digital-capabilities/nico/observer.ts';
 import { WebsiteMaintenanceOperator } from "./website-maintenance.ts";
 import { AutonomousLearningWorker } from "./autonomous-learning-worker.ts";
@@ -114,6 +117,7 @@ const nicoOperator = nicoBaseUrl && nicoOperatorPassword
   ? new NicoOperatorClient({ baseUrl: nicoBaseUrl, operatorPassword: nicoOperatorPassword })
   : null;
 export const kernel = await SaraKernel.boot({
+  softwareRuntime:{configurationIdentity:{sourceDigest:sha256(JSON.stringify({adapter:'anonymous-public-github-source-v1',maxRequests:20,maxDurationMilliseconds:30000,maxResponseBytes:8*1024*1024,authentication:'anonymous',node:process.versions.node})),journeyDigest:await readSoftwareBrowserConfigurationIdentity()},inspectSource:collectSoftwareSource,testJourney:runNicosMovementJourney},
   stateDirectory,
   ownerTokenSha256,
   bootstrapRevenueCapabilities: true,

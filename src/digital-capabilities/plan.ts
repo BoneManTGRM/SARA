@@ -6,8 +6,8 @@ type Step={obligation?:boolean;economicEvidenceId?:string;id:string;capabilityId
 export type CapabilityPlan={id:string;version:number;steps:Step[]};
 // This capability persists only its sourced snapshot in the normal invocation
 // receipt; it cannot alter policy, send messages or write a competing store.
-function boundedEffect(c:CapabilityContract):boolean{return (c.id==='isolated-defect-reproducer'&&c.effect==='INTERNAL_STATE'&&c.authorityClass==='REVERSIBLE_AUTHORIZED')||['PURE','READ_ONLY','DRAFT_ONLY'].includes(c.effect)||(c.id==='commitment-tracker'&&c.effect==='INTERNAL_STATE'&&c.authorityClass==='READ_ONLY');}
-function boundedAuthority(c:CapabilityContract):boolean{return ['READ_ONLY','DRAFT_ONLY'].includes(c.authorityClass)||(c.id==='isolated-defect-reproducer'&&c.authorityClass==='REVERSIBLE_AUTHORIZED');}
+function boundedEffect(c:CapabilityContract):boolean{return (['isolated-defect-reproducer','software-journey-tester'].includes(c.id)&&c.effect==='INTERNAL_STATE'&&c.authorityClass==='REVERSIBLE_AUTHORIZED')||['PURE','READ_ONLY','DRAFT_ONLY'].includes(c.effect)||(c.id==='commitment-tracker'&&c.effect==='INTERNAL_STATE'&&c.authorityClass==='READ_ONLY');}
+function boundedAuthority(c:CapabilityContract):boolean{return ['READ_ONLY','DRAFT_ONLY'].includes(c.authorityClass)||(['isolated-defect-reproducer','software-journey-tester'].includes(c.id)&&c.authorityClass==='REVERSIBLE_AUTHORIZED');}
 export function validatePlan(supplied:unknown):CapabilityPlan {
  const input=snapshotJson(supplied);validateSchema(planSchema,input);const plan=input as unknown as CapabilityPlan;
  const seen=new Set<string>();for(const step of plan.steps){if(seen.has(step.id))throw new CapabilityInputError('DUPLICATE_STEP');seen.add(step.id);}
