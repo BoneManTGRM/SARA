@@ -1,3 +1,4 @@
+import { repositoryCollectionReason } from './revenue-repository-collection.ts';
 import {canonicalJson,sha256} from './canonical.ts';
 import {getRevenueService} from './revenue-service-catalog.ts';
 import type {RevenuePilotJob} from './revenue-pilot.ts';
@@ -36,7 +37,9 @@ export function serviceWorkContext(state:{revenuePilotJobs:RevenuePilotJob[];rev
   const p=payments.find(p=>p.jobId===j.id);
   const payment=p?.status??'not_recorded';
   const cashBoundary=cashBoundaries.find(decision=>decision.requestId.startsWith(`nico-cash-allowance:${j.id}:`));
-  const reason=j.status==='owner_review'&&cashBoundary?cashBoundary.reason:j.activeLease&&j.activeLease.dispatchState!=='NOT_DISPATCHED'?'Unresolved provider effect: preserve the existing lease and reserved allowance; actual attempt cost is unknown until exact output or provider evidence is reconciled. No automatic retry.':j.status==='delivery_ready'?'Protected delivery access is prepared. Customer download and acceptance are not yet verified.':p&&['refunded','disputed','expired'].includes(p.status)?`Payment is ${p.status}; reconcile the existing obligation before dispatch.`:j.status==='owner_review'?'Inspect the actual report and exact delivery approval.':j.activeLease?'Existing worker owns the lease; reconcile before retry.':['queued','running'].includes(j.status)&&j.revenueEvidenceId?'The existing revenue worker must recheck payment, authority, current capabilities and budget before its next role.':p?.paymentVerified?'Verified payment exists; exact fulfillment approval remains required.':'Verified linked payment and exact fulfillment approval are required.';
+  const collectionReason=j.repositoryCollection?repositoryCollectionReason(j.repositoryCollection):'';
+  const baseReason=j.status==='owner_review'&&cashBoundary?cashBoundary.reason:j.activeLease&&j.activeLease.dispatchState!=='NOT_DISPATCHED'?'Unresolved provider effect: preserve the existing lease and reserved allowance; actual attempt cost is unknown until exact output or provider evidence is reconciled. No automatic retry.':j.status==='delivery_ready'?'Protected delivery access is prepared. Customer download and acceptance are not yet verified.':p&&['refunded','disputed','expired'].includes(p.status)?`Payment is ${p.status}; reconcile the existing obligation before dispatch.`:j.status==='owner_review'?'Inspect the actual report and exact delivery approval.':j.activeLease?'Existing worker owns the lease; reconcile before retry.':['queued','running'].includes(j.status)&&j.revenueEvidenceId?'The existing revenue worker must recheck payment, authority, current capabilities and budget before its next role.':p?.paymentVerified?'Verified payment exists; exact fulfillment approval remains required.':'Verified linked payment and exact fulfillment approval are required.';
+  const reason=collectionReason?`${baseReason} ${collectionReason}`:baseReason;
   return {jobId:j.id,serviceId:j.plan.serviceId,status:j.status,payment,committed:committed(j),reason};
  });
  for(const j of obligations)blockers.push({subjectId:j.jobId,reason:j.reason,missing:[j.reason]});

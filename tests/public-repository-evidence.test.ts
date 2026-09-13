@@ -139,3 +139,26 @@ describe("bounded public GitHub evidence", () => {
     );
   });
 });
+
+// SYNTHETIC provider statuses; no external network.
+it('retains only typed provider quota evidence and never mistakes bare forbidden for quota',async()=>{
+  for(const [headers,classification] of [[{'x-ratelimit-remaining':'0','x-ratelimit-reset':'1789293600','retry-after':'60'},'RATE_LIMIT'],[{'retry-after':'secret malformed value'},'PROVIDER_REJECTED']] as const){
+    const collector=new GitHubPublicRepositoryEvidenceCollector({fetchImpl:(async()=>new Response('secret body',{status:403,headers})) as typeof fetch});
+    await assert.rejects(collector.collect('https://github.com/example/project'),(error:unknown)=>{
+      const e=error as {providerBoundary?:{httpStatus:number;classification:string;retryAfterSeconds:number|null}};
+      assert.equal(e.providerBoundary?.httpStatus,403);assert.equal(e.providerBoundary?.classification,classification);
+      assert.equal(e.providerBoundary?.retryAfterSeconds,classification==='RATE_LIMIT'?60:null);
+      assert.equal(JSON.stringify(e).includes('secret'),false);return true;
+    });
+  }
+});
+
+it('does not retry authorization failures or malformed quota reset advice',async()=>{
+  const {SoftwareSourceReadError}=await import('../src/software-source-reader.ts');
+  const {repositoryCollectionFailure,repositoryCollectionRetryAt}=await import('../src/revenue-repository-collection.ts');
+  const now=new Date('2026-09-13T00:00:00Z');
+  for(const [status,headers] of [[401,{'x-ratelimit-remaining':'0','retry-after':'60'}],[403,{'x-ratelimit-remaining':'0','x-ratelimit-reset':'unsafe value'}],[429,{'retry-after':'0'}]] as const){
+    const error=new SoftwareSourceReadError('PROVIDER_REJECTED','SYNTHETIC',{status,headers:new Headers(headers)});
+    assert.equal(repositoryCollectionRetryAt(repositoryCollectionFailure(error),1,now),null);
+  }
+});

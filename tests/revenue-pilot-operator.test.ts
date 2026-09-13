@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { cp, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -745,4 +745,90 @@ describe("bounded persistent Luna revenue operator", () => {
     assert.equal(modelCalls.length, 0);
     assert.equal((await kernel.getStatus()).revenuePilotJobs[0].activeLease, null);
   });
+});
+
+// ISOLATED / SYNTHETIC: paid identities and provider failures never leave this fixture.
+describe("durable paid repository collection boundaries", () => {
+  it("preserves deterministic refusal across restart without repeated collection or raw provider content", async () => {
+    const directory = await stateDirectory(), restoredDirectory = await stateDirectory();
+    const {kernel,jobId} = await authorizedKernel(directory);
+    let calls=0;
+    const collector: PublicRepositoryEvidenceCollector={collect:async()=>{calls++;throw new Error("secret raw provider body must not enter receipts");}};
+    const make=(k:SaraKernel,d:string)=>new RevenuePilotOperator({kernel:k,stateDirectory:d,repositoryEvidenceCollector:collector,modelClient:fakeLuna([],[])});
+    await make(kernel,directory).tick();
+    await cp(directory,restoredDirectory,{recursive:true});
+    const restored=await SaraKernel.boot({stateDirectory:restoredDirectory,ownerTokenSha256:OWNER_DIGEST});
+    await make(restored,restoredDirectory).tick();
+    assert.equal(calls,1,"A preserved deterministic failure must not recollect after restart");
+    const job=(await restored.getStatus()).revenuePilotJobs.find(j=>j.id===jobId)!;
+    assert.equal(job.repositoryCollection?.state,"FAILED");
+    assert.equal(job.repositoryCollection?.attempts,1);
+    assert.equal(job.repositoryCollection?.retryAt,null);
+    assert.ok(job.revenueEvidenceId);assert.equal(job.status,"queued");assert.equal(job.activeLease,null);
+    assert.equal(JSON.stringify(await restored.inspectAudit()).includes("secret raw provider body"),false);
+  });
+  it("waits for evidenced quota reset and exhausts at most three attempts across restarts",async()=>{
+    const directory=await stateDirectory();const {kernel}=await authorizedKernel(directory);let calls=0,clock=Date.now();
+    const {GitHubPublicRepositoryEvidenceCollector}=await import('../src/public-repository-evidence.ts');
+    const collector=new GitHubPublicRepositoryEvidenceCollector({fetchImpl:(async()=>{calls++;return new Response('secret body',{status:403,headers:{'x-ratelimit-remaining':'0','x-ratelimit-reset':String(Math.floor(clock/1000)+60)}});}) as typeof fetch});
+    const make=(k:SaraKernel)=>new RevenuePilotOperator({kernel:k,stateDirectory:directory,repositoryEvidenceCollector:collector,modelClient:fakeLuna([],[]),now:()=>new Date(clock)});
+    await make(kernel).tick();await make(kernel).tick();assert.equal(calls,1,"Quota reset must be respected");
+    for(let attempt=2;attempt<=3;attempt++){clock+=61_000;const restored=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:OWNER_DIGEST});await make(restored).tick();assert.equal(calls,attempt);}
+    clock+=61_000;const restored=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:OWNER_DIGEST});await make(restored).tick();assert.equal(calls,3,"Exhaustion survives reboot and elapsed provider reset");
+    const boundary=(await restored.getStatus()).revenuePilotJobs[0].repositoryCollection!;
+    assert.equal(boundary.failure?.providerBoundary?.classification,'RATE_LIMIT');assert.equal(boundary.failure?.providerBoundary?.httpStatus,403);assert.equal(boundary.retryAt,null);
+  });
+  it("serializes competing collectors and preserves failure when stop changes during collection",async()=>{
+    const directory=await stateDirectory();const {kernel}=await authorizedKernel(directory);let calls=0,release!:()=>void;
+    const gate=new Promise<void>(r=>{release=r;});
+    const collector:PublicRepositoryEvidenceCollector={collect:async()=>{calls++;await gate;throw new Error('controlled failure');}};
+    const make=()=>new RevenuePilotOperator({kernel,stateDirectory:directory,repositoryEvidenceCollector:collector,modelClient:fakeLuna([],[])});
+    const first=make().tick();while(!calls)await new Promise(r=>setImmediate(r));
+    const second=make().tick();await new Promise(r=>setTimeout(r,30));
+    await kernel.setEmergencyStop(kernel.authenticateOwnerToken(OWNER_TOKEN),true);release();await Promise.all([first,second]);
+    assert.equal(calls,1,'A second operator must not start a duplicate collector');
+    assert.equal((await kernel.getStatus()).revenuePilotJobs[0].repositoryCollection?.state,'FAILED');
+    assert.equal((await kernel.getStatus()).revenuePilotJobs[0].activeLease,null);
+  });
+});
+
+it('reconciles an interrupted collection only from exact durable evidence and rejects stale results',async()=>{
+  const directory=await stateDirectory(),copy=await stateDirectory();const {kernel,jobId}=await authorizedKernel(directory);
+  const attempt=await kernel.beginRevenueRepositoryCollection(SARA_PRINCIPAL,jobId);assert.ok(attempt);
+  await cp(directory,copy,{recursive:true});
+  const restored=await SaraKernel.boot({stateDirectory:copy,ownerTokenSha256:OWNER_DIGEST});let reads=0;const calls:string[]=[];
+  const operator=new RevenuePilotOperator({kernel:restored,stateDirectory:copy,repositoryEvidenceCollector:{collect:async()=>{reads++;return evidenceSnapshot();}},modelClient:fakeLuna(['SYNTHETIC director output'],calls)});
+  await operator.tick();assert.equal(reads,0);assert.equal(calls.length,0,'An unresolved pending read has no new provider dispatch');
+  const {persistPublicRepositoryEvidence}=await import('../src/public-repository-evidence.ts');
+  const evidence=await persistPublicRepositoryEvidence({stateDirectory:copy,jobId,snapshot:evidenceSnapshot()});
+  await assert.rejects(()=>restored.finishRevenueRepositoryCollection(SARA_PRINCIPAL,jobId,'wrong-attempt',{snapshotDigest:evidence.snapshotDigest}),/Stale/);
+  await operator.tick();assert.equal(reads,0);assert.equal(calls.length,1);
+  const job=(await restored.getStatus()).revenuePilotJobs[0];
+  assert.equal(job.repositoryCollection?.attemptId,attempt.attemptId);assert.equal(job.repositoryCollection?.attempts,1);
+  assert.equal(job.repositoryCollection?.snapshotDigest,evidence.snapshotDigest);assert.equal(job.repositoryCollection?.state,'COLLECTED');
+  assert.equal(job.completedRoles.filter(role=>role==='work_director').length,1);assert.equal(job.receipts.filter(receipt=>receipt.role==='work_director').length,1);
+  await assert.rejects(()=>restored.finishRevenueRepositoryCollection(SARA_PRINCIPAL,jobId,attempt.attemptId,{snapshotDigest:'f'.repeat(64)}),/already settled/);
+});
+it('rechecks capability and stop before a due quota retry while owner brief preserves the obligation',async()=>{
+  const directory=await stateDirectory();const {kernel,jobId}=await authorizedKernel(directory);const owner=kernel.authenticateOwnerToken(OWNER_TOKEN);let clock=Date.now(),calls=0;
+  const {GitHubPublicRepositoryEvidenceCollector}=await import('../src/public-repository-evidence.ts');
+  const collector=new GitHubPublicRepositoryEvidenceCollector({fetchImpl:(async()=>{calls++;return new Response('',{status:429,headers:{'retry-after':'60'}});}) as typeof fetch});
+  const operator=new RevenuePilotOperator({kernel,stateDirectory:directory,repositoryEvidenceCollector:collector,modelClient:fakeLuna([],[]),now:()=>new Date(clock)});
+  await operator.tick();clock+=61_000;await kernel.setEmergencyStop(owner,true);await operator.tick();assert.equal(calls,1);
+  await kernel.setEmergencyStop(owner,false);await kernel.registerCapability(SARA_PRINCIPAL,{id:PILOT_REQUIRED_CAPABILITIES[0],name:'synthetic unavailable',status:'missing',evidence:['SYNTHETIC capability changed'],limitations:['Controlled fixture']});
+  await operator.tick();assert.equal(calls,1);
+  const {serviceWorkContext}=await import('../src/owner-service-work.ts');const state=await kernel.getStatus();
+  const brief=serviceWorkContext(state,new Date(clock).toISOString());const obligation=brief.review.obligations.find(j=>j.jobId===jobId)!;
+  assert.match(obligation.reason,/quota exhausted/);assert.match(obligation.reason,/paid obligation remains preserved/);assert.equal(obligation.committed,true);
+  assert.equal(state.revenuePilotJobs[0].repositoryCollection?.attempts,1);
+  await assert.rejects(()=>kernel.beginRevenueRepositoryCollection(owner,jobId),/Only authenticated SARA/);
+});
+
+it('rejects wrong-repository durable artifacts while retaining exact pending attempt failure',async()=>{
+ const directory=await stateDirectory();const {kernel,jobId}=await authorizedKernel(directory);const attempt=await kernel.beginRevenueRepositoryCollection(SARA_PRINCIPAL,jobId);assert.ok(attempt);
+ const {persistPublicRepositoryEvidence}=await import('../src/public-repository-evidence.ts');
+ await persistPublicRepositoryEvidence({stateDirectory:directory,jobId,snapshot:{...evidenceSnapshot(),repository:'https://github.com/example/wrong'}});
+ const calls:string[]=[];const operator=new RevenuePilotOperator({kernel,stateDirectory:directory,repositoryEvidenceCollector:fakeEvidence(calls),modelClient:fakeLuna([],calls)});
+ await operator.tick();assert.equal(calls.length,0);const job=(await kernel.getStatus()).revenuePilotJobs[0];
+ assert.equal(job.repositoryCollection?.state,'FAILED');assert.equal(job.repositoryCollection?.attemptId,attempt.attemptId);assert.equal(job.repositoryCollection?.retryAt,null);assert.equal(job.activeLease,null);
 });

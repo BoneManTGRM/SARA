@@ -1,3 +1,4 @@
+import type { RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import { randomUUID } from "node:crypto";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { compileFoundingPilot, type FoundingPilotInput } from "./founding-pilot.ts";
@@ -108,6 +109,7 @@ export type RevenuePilotReceipt = {
 };
 
 export type RevenuePilotJob = {
+  repositoryCollection?: RevenueRepositoryCollection;
   id: string;
   input: RevenuePilotInput;
   plan: RevenuePilotPlan;
