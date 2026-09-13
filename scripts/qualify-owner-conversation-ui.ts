@@ -188,7 +188,7 @@ try{
   implementationRevision:/^[a-f0-9]{40}$/u.test(process.env.GITHUB_SHA??'')?process.env.GITHUB_SHA:null,
   ownerInterface:'actual authenticated served dashboard',requestedOwnerViewports:[1280,390],applicationViewportScope:'isolated desktop only',sourceProvenance:'EXTERNAL_READ_ONLY',sourceCollectionActor:'SARA_RUNTIME',journeyActor:'SARA_RUNTIME',independentVerifierActor:'IMPLEMENTATION_AGENT',planId:workData.plan?.id,
   runtimeDispatches:{...runtimeDispatches},receiptChain:newReceipts.map(({requestId,capability,resultDigest,inputDigest,cost})=>({requestId,capability,resultDigest,inputDigest,cost})),
-  source:sourceOutput?.evidence?{...sourceOutput.evidence,files:sourceOutput.evidence.files.map(({path,role,gitBlobSha,contentSha256,byteLength,sourceTruncated})=>({path,role,gitBlobSha,contentSha256,byteLength,sourceTruncated}))}:null,
+  source:Array.isArray(sourceOutput?.evidence?.files)?{...sourceOutput!.evidence!,files:sourceOutput!.evidence!.files.map(({path,role,gitBlobSha,contentSha256,byteLength,sourceTruncated})=>({path,role,gitBlobSha,contentSha256,byteLength,sourceTruncated}))}:null,
   journey:journeyOutput?.evidence??null,review:reviewOutput??null,ownerScreenshotDigests:[] as Array<{width:number;sha256:string}>,replayVerified:false,
   workflowCashMicroUsd:newReceipts.reduce((sum,r)=>sum+r.cost.actualCashMicroUsd,0),infrastructureAllocation:'UNKNOWN',productionAcceptance:false,commercialFulfillment:false,realRevenueVerified:false,authorityDelta:0};
  const saveSoftwareReport=async()=>{await mkdir(dirname(softwareReportPath),{recursive:true});await writeFile(softwareReportPath,JSON.stringify(softwareReport,null,2)+'\n',{mode:0o600});};
