@@ -1,3 +1,4 @@
+import { repositoryCollectionRetryDue, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import { SaraKernel, SARA_PRINCIPAL } from "./kernel.ts";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { assertNicoRunTarget, extractNicoArtifactIdentity, type NicoOperator } from "./nico-operator.ts";
@@ -364,8 +365,28 @@ export class RevenuePilotOperator {
       }
     }
     const workOrder=await this.#kernel.orderRevenuePilotWork(SARA_PRINCIPAL);
-    const job = status.revenuePilotJobs.find(candidate=>candidate.id===workOrder[0]);
-    if (!job || !job.nextRole) return this.#record({ outcome: "idle", reason: "no_authorized_job" });
+    let job: RevenuePilotJob | undefined;
+    let collectionBlocked = false;
+    for (const id of workOrder) {
+      const candidate = status.revenuePilotJobs.find(value => value.id === id);
+      if (!candidate) continue;
+      const collection = candidate.repositoryCollection;
+      if (!candidate.activeLease && collection && !repositoryCollectionRetryDue(collection,now)) {
+        // A priority forecast is not collection readiness. A bounded local read
+        // can reconcile a completed artifact without repeating a blocked GET.
+        const saved = await readPublicRepositoryEvidence({stateDirectory:this.#stateDirectory,jobId:candidate.id}).catch(()=>null);
+        // Pending artifacts must reach exact validation below, including a
+        // durable failure receipt for a mismatched artifact. Settled blocked
+        // candidates without valid evidence cannot starve another obligation.
+        if (!saved || (collection.state !== 'PENDING' && (saved.snapshot.repository !== candidate.plan.repository || (collection.state === 'COLLECTED' && collection.snapshotDigest !== saved.snapshotDigest)))) {
+          collectionBlocked = true;
+          continue;
+        }
+      }
+      job = candidate;
+      break;
+    }
+    if (!job || !job.nextRole) return this.#record({ outcome: "idle", reason: collectionBlocked ? "repository_evidence_unavailable" : "no_authorized_job" });
     if (job.activeLease) {
       const profile = ROLE_PROFILES[job.activeLease.role];
       const pending = job.activeLease.workerId === profile.workerId
@@ -382,11 +403,20 @@ export class RevenuePilotOperator {
       return this.#record({ outcome: "idle", reason: "eligibility_changed" });
     }
     let repositoryEvidence: StoredPublicRepositoryEvidence;
+    let collectionAttempt: RevenueRepositoryCollection | null = null;
     try {
       const existing = await readPublicRepositoryEvidence({ stateDirectory: this.#stateDirectory, jobId: job.id });
       if (existing) {
+        collectionAttempt = job.repositoryCollection?.state === 'PENDING' ? job.repositoryCollection : null;
+        if (existing.snapshot.repository !== job.plan.repository || (job.repositoryCollection?.state === 'COLLECTED' && job.repositoryCollection.snapshotDigest !== existing.snapshotDigest)) throw new Error('Stored repository evidence identity mismatch.');
         repositoryEvidence = existing;
+        if (collectionAttempt) {
+          const attemptId = collectionAttempt.attemptId; collectionAttempt = null;
+          await this.#kernel.finishRevenueRepositoryCollection(SARA_PRINCIPAL,job.id,attemptId,{snapshotDigest:existing.snapshotDigest},this.#now().toISOString());
+        }
       } else {
+        collectionAttempt = await this.#kernel.beginRevenueRepositoryCollection(SARA_PRINCIPAL,job.id,this.#now().toISOString());
+        if (!collectionAttempt) return this.#record({outcome:'idle',reason:'repository_evidence_unavailable'});
         if (!job.plan.repository) throw new Error("The authorized job has no canonical public repository.");
         const snapshot = await this.#repositoryEvidenceCollector.collect(job.plan.repository);
         if (snapshot.repository !== job.plan.repository) throw new Error("Repository evidence target mismatch.");
@@ -395,8 +425,11 @@ export class RevenuePilotOperator {
           jobId: job.id,
           snapshot,
         });
+        const attemptId = collectionAttempt.attemptId; collectionAttempt = null;
+        await this.#kernel.finishRevenueRepositoryCollection(SARA_PRINCIPAL,job.id,attemptId,{snapshotDigest:repositoryEvidence.snapshotDigest},this.#now().toISOString());
       }
-    } catch {
+    } catch (error) {
+      if (collectionAttempt) await this.#kernel.finishRevenueRepositoryCollection(SARA_PRINCIPAL,job.id,collectionAttempt.attemptId,{error},this.#now().toISOString());
       return this.#record({ outcome: "idle", reason: "repository_evidence_unavailable" });
     }
     const profile = ROLE_PROFILES[job.nextRole];

@@ -3,6 +3,33 @@ import type { WorkRecord } from './owner-work.ts';
 import { validateSchema } from './digital-capabilities/schema.ts';
 import type { CapabilityContract, CapabilityResult } from './digital-capabilities/types.ts';
 
+export const maximumOwnerSourceRetries = 2;
+export type OwnerSourceRetry = {
+  ownerRequestId:string; requestDigest:string; planId:string; stepRequestId:string;
+  priorResultDigest:string; inputDigest:string; contractDigest:string; runtimeDigest:string;
+  authorityContextDigest:string; notBefore:string; attempt:number;
+};
+/** Only sanitized provider quota evidence supplies a retry deadline. Clock
+ * passage never grants dispatch; a new authenticated Resume must reserve it. */
+export function sourceQuotaRetryDeadline(receipt:CapabilityResult,occurredAt:string):number|null {
+  const output=receipt.output as any,b=output?.evidence?.providerBoundary;
+  if(receipt.capability.id!=='software-source-inspector'||receipt.status!=='SUCCEEDED'||output?.result!=='SOURCE_UNAVAILABLE'||output.actor!=='SARA_RUNTIME'||b?.classification!=='RATE_LIMIT'||!(b.httpStatus===429||b.httpStatus===403&&b.rateLimitRemaining===0))return null;
+  const observed=Date.parse(occurredAt),deadlines:number[]=[];
+  if(!Number.isFinite(observed))return null;
+  for(const [key,max] of [['rateLimitResetUnixSeconds',253402300799],['retryAfterSeconds',2147483647]] as const){const value=b[key];if(value!==null&&(!Number.isSafeInteger(value)||value<0||value>max))return null;}
+  if(b.rateLimitResetUnixSeconds!==null)deadlines.push(b.rateLimitResetUnixSeconds*1000);
+  if(b.retryAfterSeconds!==null)deadlines.push(observed+b.retryAfterSeconds*1000);
+  if(b.retryAfterAt!==null){if(typeof b.retryAfterAt!=='string'||!Number.isFinite(Date.parse(b.retryAfterAt))||new Date(b.retryAfterAt).toISOString()!==b.retryAfterAt)return null;deadlines.push(Date.parse(b.retryAfterAt));}
+  return deadlines.length?Math.max(...deadlines):null;
+}
+
+/** The failed browser never fetched site assets or inspected source. Preserving
+ * this fixed startup failure cannot turn it into an application observation. */
+export function isPreservableBrowserStartupFailure(receipt:CapabilityResult):boolean {
+  const output=receipt.output as any,e=output?.evidence,d=e?.startupDiagnostics;
+  return receipt.capability.id==='software-journey-tester'&&receipt.status==='SUCCEEDED'&&output?.result==='INCOMPLETE_EVIDENCE'&&e?.actor==='SARA_RUNTIME'&&e.provenance==='ISOLATED'&&e.status==='INCOMPLETE_EVIDENCE'&&Array.isArray(e.steps)&&e.steps.length===0&&Array.isArray(e.assets)&&e.assets.length===0&&d?.classificationBasis==='FIRST_FATAL_LINE'&&['SANDBOX_CREDENTIALS_FAILURE','NAMESPACE_SANDBOX_FAILURE','LINUX_SANDBOX_FAILURE','SANDBOX_HELPER_FAILURE','ZYGOTE_STARTUP_FAILURE','PROFILE_INITIALIZATION_FAILURE'].includes(d.classification)&&e.failureCode===`JOURNEY_BROWSER_${d.classification}`;
+}
+
 const softwareResources = ['anonymous-public-GitHub-GET', 'credential-free-isolated-browser', 'existing-durable-receipts'];
 const ceilings: Record<string, { effect: string; authority: string; resources: string[] }> = {
   'goal-to-work-queue-compiler': { effect: 'DRAFT_ONLY', authority: 'DRAFT_ONLY', resources: ['supplied-input', 'kernel-read-only-projection'] },

@@ -1,3 +1,4 @@
+import { SoftwareSourceReadError } from './software-source-reader.ts';
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -215,7 +216,7 @@ function decodeBoundedSource(content: GitHubContent, remainingBytes: number): { 
 }
 
 async function readBoundedJson<T>(response: Response, label: string, maximumBytes = MAX_RESPONSE_BYTES): Promise<T> {
-  if (!response.ok) throw new Error(`${label} failed with status ${response.status}.`);
+  if (!response.ok) throw new SoftwareSourceReadError("PROVIDER_REJECTED", "Public repository provider refused collection.", response);
   const bytes = Buffer.from(await response.arrayBuffer());
   if (bytes.length > maximumBytes) throw new Error(`${label} exceeded its response limit.`);
   try {

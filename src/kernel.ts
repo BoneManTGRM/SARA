@@ -1,6 +1,7 @@
+import { repositoryCollectionRetryDue, repositoryCollectionFailure, repositoryCollectionRetryAt, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import {unresolvedRevenueAllowance} from './revenue-pilot.ts';
 import {revenueStepBlocker,mandateContinuationBlocker} from './revenue-step-eligibility.ts';
-import { reauthorizeSoftwareWork, type SoftwareWorkReauthorization } from './owner-software-recovery.ts';
+import { reauthorizeSoftwareWork, sourceQuotaRetryDeadline, maximumOwnerSourceRetries, isPreservableBrowserStartupFailure, type OwnerSourceRetry, type SoftwareWorkReauthorization } from './owner-software-recovery.ts';
 import {compilePublicRevenueIntake,type PublicRevenueIntakeInput} from './public-revenue-intake.ts';
 import {isSoftwareWorkCapability,softwareRuntimeDependencyDigest} from './digital-capabilities/software-runtime-identity.ts';
 import {serviceWorkContext} from './owner-service-work.ts';
@@ -1627,6 +1628,53 @@ export class SaraKernel {
     });
   }
 
+  beginRevenueRepositoryCollection(principal: Principal, jobId: string, requestedAt = new Date().toISOString()): Promise<RevenueRepositoryCollection | null> {
+    return this.serializeMutation(async () => {
+      if (principal.kind !== 'sara' || !principal.authenticated) throw new Error('Only authenticated SARA may collect paid repository evidence.');
+      const now = new Date(requestedAt);
+      if (!Number.isFinite(now.getTime())) throw new Error('Invalid repository collection time.');
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find(candidate => candidate.id === jobId);
+      if (!job?.plan.repository || !job.nextRole || !['queued','running'].includes(job.status)) throw new Error('Eligible paid repository job is required.');
+      const blocker = revenueStepBlocker(state, job, now);
+      if (blocker) throw new Error(blocker);
+      const previous = job.repositoryCollection;
+      if (previous && !repositoryCollectionRetryDue(previous,now)) return null;
+      const collection: RevenueRepositoryCollection = {
+        attemptId: randomUUID(), attempts: (previous?.attempts ?? 0) + 1,
+        repository: job.plan.repository, state: 'PENDING', startedAt: now.toISOString(),
+        completedAt: null, failure: null, retryAt: null, snapshotDigest: null,
+      };
+      await this.#store.append('revenue_pilot_snapshot', principal, {...job,repositoryCollection:collection,updatedAt:now.toISOString()});
+      return structuredClone(collection);
+    });
+  }
+
+  finishRevenueRepositoryCollection(principal: Principal, jobId: string, attemptId: string,
+    outcome: {snapshotDigest: string} | {error: unknown}, requestedAt = new Date().toISOString()): Promise<RevenueRepositoryCollection> {
+    return this.serializeMutation(async () => {
+      if (principal.kind !== 'sara' || !principal.authenticated) throw new Error('Only authenticated SARA may record paid repository evidence.');
+      const now = new Date(requestedAt);
+      if (!Number.isFinite(now.getTime())) throw new Error('Invalid repository collection time.');
+      const state = await this.state();
+      const job = state.revenuePilotJobs.find(candidate => candidate.id === jobId);
+      const previous = job?.repositoryCollection;
+      if (!job || !previous || previous.attemptId !== attemptId || previous.repository !== job.plan.repository) throw new Error('Stale repository collection result.');
+      const digest = 'snapshotDigest' in outcome ? outcome.snapshotDigest : null;
+      if (digest !== null && !/^[a-f0-9]{64}$/u.test(digest)) throw new Error('Invalid repository evidence digest.');
+      if (previous.state !== 'PENDING') {
+        if (previous.state === 'COLLECTED' && digest === previous.snapshotDigest) return structuredClone(previous);
+        throw new Error('Repository collection attempt already settled.');
+      }
+      const failure = 'error' in outcome ? repositoryCollectionFailure(outcome.error) : null;
+      const collection: RevenueRepositoryCollection = {...previous,state:failure?'FAILED':'COLLECTED',completedAt:now.toISOString(),failure,snapshotDigest:digest,retryAt:failure?repositoryCollectionRetryAt(failure,previous.attempts,now):null};
+      // Recording an already-finished read preserves evidence even if stop or
+      // authority changed in flight. Claim and model dispatch recheck eligibility.
+      await this.#store.append('revenue_pilot_snapshot', principal, {...job,repositoryCollection:collection,updatedAt:now.toISOString()});
+      return structuredClone(collection);
+    });
+  }
+
   claimRevenuePilotRole(
     principal: Principal,
     workerId: string,
@@ -2391,7 +2439,7 @@ export class SaraKernel {
     return this.receiveBoundedWork(principal,supplied);
   }
 
-  private async receiveBoundedWork(principal:Principal,supplied:unknown) {
+  private async receiveBoundedWork(principal:Principal,supplied:unknown,quotaRetryReceipt?:string) {
     const request=parseWorkMessage(supplied),requestDigest=sha256(canonicalJson(request));
     const record=await this.serializeMutation(async()=>{
       const state=await this.state();
@@ -2405,6 +2453,21 @@ export class SaraKernel {
           await this.authorize(principal,{action:'sandbox_development',targetId:request.requestId,external:false});
           const refreshed=reauthorizeSoftwareWork(saved,await capabilityContracts(),this.boundedWorkReceipts(saved,state),this.capabilityAuthorityDigest(state));
           await this.#store.append('owner_work_reauthorized',principal,refreshed);return refreshed.record;
+        }
+        if(quotaRetryReceipt&&this.isVerifiedOwner(principal)&&saved.workflow==='software-inspection'&&saved.plan&&!state.emergencyStopped&&!state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===request.requestId)){
+          const receipts=this.boundedWorkReceipts(saved,state),source=receipts.find(r=>r.capability.id==='software-source-inspector');
+          const observed=state.events.filter(e=>e.type==='digital_capability_executed'&&(e.data as {result:CapabilityResult}).result.resultDigest===quotaRetryReceipt).at(-1);
+          const retries=state.events.filter(e=>e.type==='owner_source_retry_authorized'&&e.actor.kind==='owner'&&e.actor.id===principal.id).map(e=>e.data as OwnerSourceRetry).filter(e=>e.ownerRequestId===request.requestId);
+          const deadline=source&&observed?sourceQuotaRetryDeadline(source,observed.occurredAt):null;
+          if(source?.resultDigest===quotaRetryReceipt&&deadline!==null&&Date.now()>=deadline&&retries.length<maximumOwnerSourceRetries&&!retries.some(e=>e.priorResultDigest===quotaRetryReceipt)&&source.subject.softwareRuntimeDigest===softwareRuntimeDependencyDigest(source.capability.id,this.#softwareRuntime,saved.softwareTarget?.scope)){
+            // Reuse the exact bounded recipe validator without changing contracts.
+            reauthorizeSoftwareWork(saved,await capabilityContracts(),receipts,this.capabilityAuthorityDigest(state));
+            if(!this.softwareWorkReceiptContractChanged(saved,state)){
+              await this.authorize(principal,{action:'external_read',targetId:`software:${saved.softwareTarget!.repository}`,external:true});
+              const retry:OwnerSourceRetry={ownerRequestId:request.requestId,requestDigest:saved.requestDigest,planId:saved.plan.id,stepRequestId:source.requestId,priorResultDigest:source.resultDigest,inputDigest:source.inputDigest,contractDigest:source.capability.contractDigest,runtimeDigest:source.subject.softwareRuntimeDigest!,authorityContextDigest:this.capabilityAuthorityDigest(state),notBefore:new Date(deadline).toISOString(),attempt:retries.length+1};
+              await this.#store.append('owner_source_retry_authorized',principal,retry);
+            }
+          }
         }
         return structuredClone(saved);
       }
@@ -2431,7 +2494,9 @@ export class SaraKernel {
     validateSchema(idSchema,requestId);
     const state=await this.state(),event=state.events.find(e=>e.type==='owner_work_received'&&e.actor.id===principal.id&&(e.data as WorkRecord).request.requestId===requestId);
     if(!event)throw new Error('OWNER_WORK_NOT_FOUND');
-    return this.executeOwnerMessage(principal,(event.data as WorkRecord).request);
+    const record=this.currentOwnerWorkRecord(event.data as WorkRecord,state);
+    const source=this.boundedWorkReceipts(record,state).find(r=>r.capability.id==='software-source-inspector');
+    return this.receiveBoundedWork(principal,record.request,source?.resultDigest);
   }
 
   private currentOwnerWorkRecord(record:WorkRecord,state:Awaited<ReturnType<SaraKernel['state']>>):WorkRecord {
@@ -2465,6 +2530,18 @@ export class SaraKernel {
     return record.workflow==='software-inspection'?sha256(canonicalJson(record.plan?.steps.filter(step=>isSoftwareWorkCapability(step.capabilityId)).map(step=>({stepId:step.id,digest:softwareRuntimeDependencyDigest(step.capabilityId,this.#softwareRuntime,record.softwareTarget?.scope)}))??[])):undefined;
   }
 
+  private projectSourceRetryBoundary(record:WorkRecord,result:ReturnType<typeof workResult>,state:KernelState){
+    if(record.workflow!=='software-inspection'||result.status==='CANCELLED')return;
+    const authorizations=state.events.filter(e=>e.type==='owner_source_retry_authorized'&&e.actor.kind==='owner'&&e.actor.id===this.#constitution.ownerAuthority.ownerIdentity&&(e.data as OwnerSourceRetry).ownerRequestId===record.request.requestId);
+    const uncertain=authorizations.some(a=>{const retry=a.data as OwnerSourceRetry,dispatch=state.events.find(e=>e.type==='owner_source_retry_dispatched'&&(e.data as {authorizationHash:string}).authorizationHash===a.hash);return dispatch&&!state.events.some(e=>e.type==='digital_capability_executed'&&e.sequence>dispatch.sequence&&e.actor.id===SARA_PRINCIPAL.id&&(e.data as {result:CapabilityResult}).result.requestId===retry.stepRequestId);});
+    const source=this.boundedWorkReceipts(record,state).find(r=>r.capability.id==='software-source-inspector');
+    const exhausted=source&&(source.output as {result?:string})?.result==='SOURCE_UNAVAILABLE'&&authorizations.length>=maximumOwnerSourceRetries;
+    const reason=uncertain?'SOURCE_RETRY_OUTCOME_UNKNOWN':exhausted?'SOURCE_RETRY_LIMIT':null;
+    if(!reason||result.blockers.some(b=>b.reason===reason))return;
+    const detail=uncertain?'The admitted source retry was interrupted without an acknowledged result. Reconcile the interrupted read before any further dispatch; the prior receipt does not establish its outcome.':'The two bounded source retry admissions are consumed. Changed provider facts require reviewed recovery; repeated Resume cannot restart the allowance.';
+    result.status='BLOCKED';result.blockers.push({subjectId:record.request.requestId,reason,missing:[detail]});result.outputText+=' '+detail;
+  }
+
   private async currentWorkSourceDigest(){const state=await this.state();return workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities);}
 
   private async continueBoundedWork(record:WorkRecord,maximumSteps=16) {
@@ -2478,6 +2555,7 @@ export class SaraKernel {
     const state=await this.state();
     const receipts=this.boundedWorkReceipts(record,state);
     const result=workResult(record,execution,receipts);
+    this.projectSourceRetryBoundary(record,result,state);
     if(state.emergencyStopped){result.status='BLOCKED';result.verification='NOT_VERIFIED';result.blockers.push({subjectId:request.requestId,reason:'EMERGENCY_STOP',missing:['Existing trusted stop restoration']});}
     if(this.serviceWorkChanged(record,state)||(record.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of the changed durable work']});}
     if(await this.softwareWorkContractChanged(record)||this.softwareWorkReceiptContractChanged(record,state)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'SOFTWARE_CONTRACT_CHANGED',missing:['Authenticated owner must resume this exact work under current bounded contracts.']});}
@@ -2503,6 +2581,7 @@ export class SaraKernel {
       if(record&&this.softwareWorkRuntimeChanged(record,state)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.outputText='Runtime configuration changed; the previous software result is historical. '+result.outputText;if(!result.blockers.some(b=>b.reason==='SOFTWARE_RUNTIME_CHANGED'))result.blockers.push({subjectId:result.requestId,reason:'SOFTWARE_RUNTIME_CHANGED',missing:['Resume the same request to re-evaluate only affected steps.']});}
       if(state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===result.requestId)){result.status='CANCELLED';result.verification='NOT_VERIFIED';}
       if(record&&(await this.softwareWorkContractChanged(record)||this.softwareWorkReceiptContractChanged(record,state))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:result.requestId,reason:'SOFTWARE_CONTRACT_CHANGED',missing:['Authenticated owner must resume this exact work under current bounded contracts.']});}
+      if(record)this.projectSourceRetryBoundary(record,result,state);
       return result;}));
   }
 
@@ -2528,7 +2607,8 @@ export class SaraKernel {
         // retry. A crash before acknowledgment remains resumable and idempotent.
         const changedRuntime=this.softwareWorkRuntimeChanged(record,state)&&(latest.data as {softwareRuntimeEvaluationDigest?:string}).softwareRuntimeEvaluationDigest!==this.softwareWorkConfigurationDigest(record);
         const pendingOwnerRefresh=state.events.some(e=>e.type==='owner_work_reauthorized'&&e.sequence>latest.sequence&&(e.data as SoftwareWorkReauthorization).record.requestDigest===record.requestDigest&&(e.data as SoftwareWorkReauthorization).authorityContextDigest===this.capabilityAuthorityDigest(state));
-        if(result.execution?.status!=='PAUSED'&&!changedRuntime&&!pendingOwnerRefresh)continue;
+        const pendingSourceRetry=state.events.some(e=>e.type==='owner_source_retry_authorized'&&e.sequence>latest.sequence&&(e.data as OwnerSourceRetry).ownerRequestId===record.request.requestId&&(e.data as OwnerSourceRetry).authorityContextDigest===this.capabilityAuthorityDigest(state)&&!state.events.some(d=>d.type==='owner_source_retry_dispatched'&&(d.data as {authorizationHash:string}).authorizationHash===e.hash));
+        if(result.execution?.status!=='PAUSED'&&!changedRuntime&&!pendingOwnerRefresh&&!pendingSourceRetry)continue;
       }
       return this.continueBoundedWork(record,4);
     }
@@ -2719,14 +2799,19 @@ export class SaraKernel {
           if(ids){context.authoritativeJobAccounting=buildAuthoritativeJobAccounting(ids,state.ledger,state.revenuePilotJobs);context.currentIdentity.jobAccountingDigest=context.authoritativeJobAccounting.basisDigest;}
         }catch(error){if(!(error instanceof CapabilityInputError))throw error;}
       }
+      const sourceRetryEvents=state.events.filter(e=>e.type==='owner_source_retry_authorized'&&e.actor.kind==='owner'&&e.actor.id===this.#constitution.ownerAuthority.ownerIdentity);
+      const sourceWasRetried=(prior:CapabilityResult)=>sourceRetryEvents.some(e=>{const retry=e.data as OwnerSourceRetry;return retry.priorResultDigest===prior.resultDigest&&retry.stepRequestId===prior.requestId&&retry.authorityContextDigest===authorityContextDigest&&state.events.some(d=>d.type==='owner_source_retry_dispatched'&&(d.data as {authorizationHash:string}).authorizationHash===e.hash);});
+      const latestSourceReceipt=(prior:CapabilityResult)=>state.events.filter(e=>e.type==='digital_capability_executed'&&e.actor.id===SARA_PRINCIPAL.id&&(e.data as {result:CapabilityResult}).result.requestId===prior.requestId).at(-1)?.data as {result:CapabilityResult}|undefined;
       const referenceMemo=new Map<string,boolean>(),visiting=new Set<string>();let referenceNodes=0;
       const referencedEvents=new Map(state.events.filter(e=>e.type==='digital_capability_executed'&&(context.ownerAuthenticated||e.actor.id===principal.id)).map(e=>[(e.data as {result:CapabilityResult}).result.resultDigest,e]));
-      const referenceIsCurrent=async(prior:CapabilityResult,metadata:unknown,depth=0):Promise<boolean>=>{
-        if(referenceMemo.has(prior.resultDigest))return referenceMemo.get(prior.resultDigest)!;
+      const referenceIsCurrent=async(prior:CapabilityResult,metadata:unknown,depth=0,preservePreNavigationFailure=false):Promise<boolean>=>{
+        const memoKey=`${prior.resultDigest}:${preservePreNavigationFailure}`;
+        if(referenceMemo.has(memoKey))return referenceMemo.get(memoKey)!;
         if(depth>64||++referenceNodes>512||visiting.has(prior.resultDigest))return false;
         visiting.add(prior.resultDigest);
         const priorContract=await capabilityContract(prior.capability.id);
         let referenceCurrent=prior.authority.contextDigest===authorityContextDigest&&prior.capability.implementationDigest===priorContract?.implementationDigest&&prior.capability.contractDigest===priorContract?.contractDigest;
+        if(!preservePreNavigationFailure&&prior.capability.id==='software-source-inspector'&&sourceWasRetried(prior)&&latestSourceReceipt(prior)?.result.resultDigest!==prior.resultDigest)referenceCurrent=false;
         const dependencyInput=(metadata as {dependencyInput?:Record<string,Json>}).dependencyInput;
         if(isSoftwareWorkCapability(prior.capability.id))referenceCurrent=referenceCurrent&&prior.subject.softwareRuntimeDigest===softwareRuntimeDependencyDigest(prior.capability.id,this.#softwareRuntime,dependencyInput?.softwareScope);
         if(hasReceiptDependencies(prior.subject)){
@@ -2767,10 +2852,10 @@ export class SaraKernel {
             if(!found){referenceCurrent=false;break;}
             const candidate=(found.data as {result:CapabilityResult}).result,{resultDigest,...unsigned}=candidate;
             if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError('Transitive capability receipt failed its content digest.');
-            if(!await referenceIsCurrent(candidate,found.data,depth+1)){referenceCurrent=false;break;}
+            if(!await referenceIsCurrent(candidate,found.data,depth+1,isPreservableBrowserStartupFailure(prior)&&candidate.capability.id==='software-source-inspector'&&sourceWasRetried(candidate))){referenceCurrent=false;break;}
           }
         }
-        visiting.delete(prior.resultDigest);referenceMemo.set(prior.resultDigest,referenceCurrent);return referenceCurrent;
+        visiting.delete(prior.resultDigest);referenceMemo.set(memoKey,referenceCurrent);return referenceCurrent;
       };
       if(existing){
         const stored=existing.data as {requestDigest:string;result:CapabilityResult};
@@ -2790,6 +2875,13 @@ export class SaraKernel {
             changedDependencies=true;for(const event of after)if(!await referenceIsCurrent((event!.data as {result:CapabilityResult}).result,event!.data)){changedDependencies=false;break;}
           }
         }
+        if(current&&sameBoundary&&Boolean(admittedSoftware)&&isPreservableBrowserStartupFailure(stored.result)&&!request.evidence?.length&&Array.isArray(request.evidenceReceiptIds)){
+          const before=stored.result.evidence.filter(e=>e.integrity==='KERNEL_RECEIPT'&&e.sourceId.startsWith('kernel:capability:')).map(e=>referencedEvents.get(e.contentDigest));
+          const after=[...new Set(request.evidenceReceiptIds)].map(digest=>referencedEvents.get(digest));
+          const oldSource=before.length===1&&before[0]?(before[0].data as {result:CapabilityResult}).result:null,newSource=after.length===1&&after[0]?(after[0].data as {result:CapabilityResult}).result:null;
+          if(oldSource?.capability.id==='software-source-inspector'&&newSource?.capability.id===oldSource.capability.id&&newSource.requestId===oldSource.requestId&&newSource.inputDigest===oldSource.inputDigest&&sourceWasRetried(oldSource)&&latestSourceReceipt(oldSource)?.result.resultDigest===newSource.resultDigest&&await referenceIsCurrent(newSource,after[0]!.data))return {...structuredClone(stored.result),replayed:true,receiptValidity:{current:true,reason:'Unchanged pre-navigation browser failure; source quota retry cannot affect this observation.'}};
+        }
+        const retryAuthorization=sourceRetryEvents.find(e=>{const retry=e.data as OwnerSourceRetry;return principal===SARA_PRINCIPAL&&Boolean(admittedSoftware)&&current&&sameBoundary&&stored.requestDigest===requestDigest&&retry.stepRequestId===request!.requestId&&retry.priorResultDigest===stored.result.resultDigest&&retry.inputDigest===stored.result.inputDigest&&retry.contractDigest===contract?.contractDigest&&retry.runtimeDigest===context.currentIdentity.softwareRuntimeDigest&&retry.authorityContextDigest===authorityContextDigest&&Date.now()>=Date.parse(retry.notBefore)&&!state.emergencyStopped&&contract?.status==='ENABLED'&&contract.qualification.status==='PASSED'&&!state.events.some(d=>d.type==='owner_work_cancelled'&&(d.data as {requestId:string}).requestId===retry.ownerRequestId)&&!state.events.some(d=>d.type==='owner_source_retry_dispatched'&&(d.data as {authorizationHash:string}).authorizationHash===e.hash);});
         const runtimeChanged=stored.result.subject.softwareRuntimeDigest!==context.currentIdentity.softwareRuntimeDigest;
         const refreshed=state.events.filter(event=>event.type==='owner_work_reauthorized'&&event.actor.kind==='owner'&&event.actor.id===this.#constitution.ownerAuthority.ownerIdentity).map(event=>event.data as SoftwareWorkReauthorization).reverse().find(event=>event.authorityContextDigest===authorityContextDigest&&event.steps.some(step=>step.requestId===request!.requestId&&step.capabilityId===request!.capabilityId&&step.priorResultDigest===stored.result.resultDigest&&step.newContractDigest===contract?.contractDigest));
         const refreshedStep=refreshed?.record.plan?.steps.find(step=>step.capabilityId===request!.capabilityId&&`plan-${sha256(canonicalJson({planId:refreshed.record.plan!.id,version:refreshed.record.plan!.version,stepId:step.id}))}`===request!.requestId);
@@ -2800,9 +2892,12 @@ export class SaraKernel {
           ownerRenewal=references.length===expected.size&&new Set(references.filter(Boolean).map(event=>(event!.data as {result:CapabilityResult}).result.requestId)).size===expected.size&&references.every(event=>Boolean(event)&&expected.has((event!.data as {result:CapabilityResult}).result.requestId));
           for(const event of references)if(event&&!await referenceIsCurrent((event.data as {result:CapabilityResult}).result,event.data))ownerRenewal=false;
         }
-        const renewable=(Boolean(admittedSoftware)&&!current&&sameBoundary&&(runtimeChanged||changedDependencies)||ownerRenewal)&&!request.evidence?.length&&stored.result.evidence.every(e=>e.integrity==='KERNEL_RECEIPT');
+        const renewable=(Boolean(retryAuthorization)||Boolean(admittedSoftware)&&!current&&sameBoundary&&(runtimeChanged||changedDependencies)||ownerRenewal)&&!request.evidence?.length&&stored.result.evidence.every(e=>e.integrity==='KERNEL_RECEIPT');
         if(stored.requestDigest!==requestDigest&&!renewable)throw new Error("CAPABILITY_REQUEST_REPLAY_CONFLICT");
         if(!renewable)return {...structuredClone(stored.result),replayed:true,receiptValidity:{current,reason:current?"Unchanged material authority and implementation identity.":"Historical receipt only; current identity differs. Re-evaluate before relying on it."}};
+        // Claim before dispatch. An interruption without a result is uncertain,
+        // never permission to spend this retry again after reboot.
+        if(retryAuthorization)await this.#store.append('owner_source_retry_dispatched',SARA_PRINCIPAL,{authorizationHash:retryAuthorization.hash,priorResultDigest:stored.result.resultDigest,stepRequestId:request.requestId});
       }
       let status:CapabilityResult["status"]="SUCCEEDED",result:import("./digital-capabilities/types.ts").ExecutionOutput;
       try {

@@ -3,9 +3,9 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import type { Capability } from "./types.ts";
 
 export const REVENUE_CAPABILITY_MIGRATION_ID = "revenue-pilot-capabilities" as const;
-// Version 7 requalifies paid-step authority, cost and interrupted-effect controls.
-// Append-only migration preserves frozen version-5/6 evidence and same-version guards.
-export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 7 as const;
+// Version 8 binds bounded provider collection recovery and its helper dependencies.
+// Append-only migration preserves frozen version-5/6/7 evidence and same-version guards.
+export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 8 as const;
 
 type Definition = {
   id: string;
@@ -19,7 +19,7 @@ const DEFINITIONS: readonly Definition[] = [
   {
     id: "public-repository-inventory",
     name: "Immutable public repository inventory",
-    implementationFiles: ["src/public-repository-evidence.ts"],
+    implementationFiles: ["src/public-repository-evidence.ts", "src/software-source-reader.ts", "src/revenue-repository-collection.ts"],
     evidenceTests: ["tests/public-repository-evidence.test.ts"],
     limitations: ["Anonymous public GitHub repositories only."],
   },
@@ -33,7 +33,7 @@ const DEFINITIONS: readonly Definition[] = [
   {
     id: "independent-report-verification",
     name: "Independent report verification",
-    implementationFiles: ["src/revenue-pilot.ts", "src/revenue-pilot-operator.ts"],
+    implementationFiles: ["src/revenue-pilot.ts", "src/revenue-pilot-operator.ts", "src/revenue-repository-collection.ts"],
     evidenceTests: ["tests/revenue-pilot.test.ts", "tests/revenue-pilot-operator.test.ts"],
     limitations: [
       "Logical role separation is enforced; automated delivery is disclosed and requires a passing verifier.",
