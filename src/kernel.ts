@@ -1,3 +1,5 @@
+import {compilePublicRevenueIntake,type PublicRevenueIntakeInput} from './public-revenue-intake.ts';
+import {isSoftwareWorkCapability,softwareRuntimeDependencyDigest} from './digital-capabilities/software-runtime-identity.ts';
 import {serviceWorkContext} from './owner-service-work.ts';
 import {compileGoalExecution} from './digital-capabilities/goal-plan.ts';
 import {jobEconomicSubjectDigest,currentJobEconomics,compareJobEconomics} from './digital-capabilities/economic-scheduling.ts';
@@ -479,6 +481,7 @@ export type SaraStatus = {
 
 export class SaraKernel {
   private mutationTail: Promise<void> = Promise.resolve();
+  #softwareRuntime?:import('./digital-capabilities/software-work.ts').SoftwareRuntime;
   #nicoObserver?:import('./digital-capabilities/nico/observer.ts').NicoReadObserver;
   readonly #store: KernelEventStore;
   #verificationPool?: KernelVerificationPool;
@@ -516,6 +519,7 @@ export class SaraKernel {
 
   static async boot(options: {
     stateDirectory: string;
+    softwareRuntime?:import('./digital-capabilities/software-work.ts').SoftwareRuntime;
     nicoObserver?:import('./digital-capabilities/nico/observer.ts').NicoReadObserver;
     ownerTokenSha256?: string;
     constitutionPath?: string;
@@ -554,6 +558,11 @@ export class SaraKernel {
         loaded.digest,
         ownerTokenSha256,
       );
+      if(options.softwareRuntime){
+        const identity=options.softwareRuntime.configurationIdentity;
+        if(identity&&(!/^[a-f0-9]{64}$/u.test(identity.sourceDigest)||!/^[a-f0-9]{64}$/u.test(identity.journeyDigest)))throw new Error('SOFTWARE_RUNTIME_CONFIGURATION_IDENTITY_REQUIRED');
+        kernel.#softwareRuntime=Object.freeze({...options.softwareRuntime,...(identity?{configurationIdentity:Object.freeze({...identity})}:{})});
+      }
       if(options.nicoObserver)kernel.#nicoObserver=Object.freeze({...options.nicoObserver});
       await store.append("system_booted", SARA_PRINCIPAL, {
         constitutionDigest: loaded.digest,
@@ -2310,6 +2319,15 @@ export class SaraKernel {
     return reachability(await capabilityContracts());
   }
 
+  createPublicRevenueIntake(principal:Principal,input:PublicRevenueIntakeInput){return this.serializeMutation(async()=>{
+    await this.authorize(principal,{action:'external_read',targetId:`revenue-pilot-intake:${input.clientSecretDigest}`,external:true});
+    await this.authorize(principal,{action:'sandbox_development',targetId:`revenue-payment-intake:${input.clientSecretDigest}`,external:false});
+    const result=compilePublicRevenueIntake(await this.state(),input);
+    if(result.persistJob)await this.#store.append('revenue_pilot_snapshot',principal,result.job);
+    if(result.persistIntent)await this.#store.append('revenue_payment_intent_snapshot',principal,result.intent);
+    return structuredClone(result.intent);
+  });}
+
   async executeOwnerMessage(principal:Principal,supplied:unknown) {
     if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
     return this.receiveBoundedWork(principal,supplied);
@@ -2329,8 +2347,13 @@ export class SaraKernel {
       if(prior){const saved=prior.data as WorkRecord;if(saved.requestDigest!==requestDigest)throw new Error('OWNER_WORK_REQUEST_CONFLICT');return structuredClone(saved);}
       await this.authorize(principal,{action:'record_memory',targetId:`owner-work:${request.requestId}`,external:false});
       const materials=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord).filter(r=>r.request.suppliedText?.trim()).map(r=>({body:r.request.suppliedText!,sourceId:`owner-material:${r.requestDigest}`,receivedAt:r.receivedAt,workflow:r.workflow}));
-      const compiled=await compileOwnerWork(request,state.jobs,await capabilityContracts(),new Date().toISOString(),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),{jobCapabilities:state.capabilities,materials,service:serviceWorkContext(state,new Date().toISOString())});
-      if(compiled.plan?.steps.some(step=>step.capabilityId==='isolated-defect-reproducer')){
+      // Never skip an intervening unresolved project selection to resurrect an
+      // older target. Only the latest turn in this bounded conversation supplies
+      // follow-up context, including after a restart.
+      const latestConversationWork=request.conversationId?state.events.filter(e=>e.type==='owner_work_received'&&e.actor.id===principal.id).map(e=>e.data as WorkRecord).filter(r=>r.request.conversationId===request.conversationId).at(-1):undefined;
+      const previousSoftware=latestConversationWork?.softwareTarget&&Date.now()-Date.parse(latestConversationWork.receivedAt)<24*60*60*1000?latestConversationWork:undefined;
+      const compiled=await compileOwnerWork(request,state.jobs,await capabilityContracts(),new Date().toISOString(),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),{jobCapabilities:state.capabilities,materials,service:serviceWorkContext(state,new Date().toISOString()),...(previousSoftware?{software:{target:previousSoftware.softwareTarget!,requestId:previousSoftware.request.requestId,receivedAt:previousSoftware.receivedAt}}:{})});
+      if(compiled.plan?.steps.some(step=>['isolated-defect-reproducer','software-source-inspector','software-journey-tester'].includes(step.capabilityId))){
         if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REPRODUCTION_REQUIRED');
         await this.authorize(principal,{action:'sandbox_development',targetId:request.requestId,external:false});
       }
@@ -2341,6 +2364,20 @@ export class SaraKernel {
   }
 
   private serviceWorkChanged(record:WorkRecord,state:Awaited<ReturnType<SaraKernel['state']>>){return record.workflow==='revenue-work'&&(record.serviceIdentity!==serviceWorkContext(state,new Date().toISOString()).identity||record.sourceDigest!==workSourceDigest(state.jobs.filter(j=>!j.learningCampaignId),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities));}
+
+  private boundedWorkReceipts(record:WorkRecord,state:Awaited<ReturnType<SaraKernel['state']>>){
+    const ids=new Set(record.plan?.steps.map(s=>`plan-${sha256(canonicalJson({planId:record.plan!.id,version:record.plan!.version,stepId:s.id}))}`)??[]);
+    const receipts=state.events.filter(e=>e.type==='digital_capability_executed'&&e.actor.id===SARA_PRINCIPAL.id).map(e=>(e.data as {result:CapabilityResult}).result).filter(r=>ids.has(r.requestId));
+    return record.workflow==='software-inspection'?[...new Map(receipts.map(r=>[r.requestId,r])).values()]:receipts;
+  }
+
+  private softwareWorkRuntimeChanged(record:WorkRecord,state:Awaited<ReturnType<SaraKernel['state']>>){
+    return record.workflow==='software-inspection'&&this.boundedWorkReceipts(record,state).some(r=>isSoftwareWorkCapability(r.capability.id)&&r.subject.softwareRuntimeDigest!==softwareRuntimeDependencyDigest(r.capability.id,this.#softwareRuntime,record.softwareTarget?.scope));
+  }
+
+  private softwareWorkConfigurationDigest(record:WorkRecord){
+    return record.workflow==='software-inspection'?sha256(canonicalJson(record.plan?.steps.filter(step=>isSoftwareWorkCapability(step.capabilityId)).map(step=>({stepId:step.id,digest:softwareRuntimeDependencyDigest(step.capabilityId,this.#softwareRuntime,record.softwareTarget?.scope)}))??[])):undefined;
+  }
 
   private async currentWorkSourceDigest(){const state=await this.state();return workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities);}
 
@@ -2353,14 +2390,15 @@ export class SaraKernel {
     const interrupted=async()=>await cancelled()||await sourceChanged();
     const execution=record.plan&&!(await this.state()).emergencyStopped&&!(await interrupted())?await this.runCapabilityPlan(SARA_PRINCIPAL,record.plan,maximumSteps,interrupted):null;
     const state=await this.state();
-    const requestIds=new Set(record.plan?.steps.map(s=>`plan-${sha256(canonicalJson({planId:record.plan!.id,version:record.plan!.version,stepId:s.id}))}`)??[]);
-    const receipts=state.events.filter(e=>e.type==='digital_capability_executed'&&e.actor.id===SARA_PRINCIPAL.id).map(e=>(e.data as {result:CapabilityResult}).result).filter(r=>requestIds.has(r.requestId));
+    const receipts=this.boundedWorkReceipts(record,state);
     const result=workResult(record,execution,receipts);
     if(state.emergencyStopped){result.status='BLOCKED';result.verification='NOT_VERIFIED';result.blockers.push({subjectId:request.requestId,reason:'EMERGENCY_STOP',missing:['Existing trusted stop restoration']});}
     if(this.serviceWorkChanged(record,state)||(record.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of the changed durable work']});}
+    if(this.softwareWorkRuntimeChanged(record,state)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'SOFTWARE_RUNTIME_CHANGED',missing:['Resume the existing request under current runtime configuration.']});}
     if(await cancelled()){result.status='CANCELLED';result.verification='NOT_VERIFIED';result.outputText='Cancelled. Historical executed-step evidence is preserved.';}
     await this.serializeMutation(async()=>{const current=await this.state();const digest=sha256(canonicalJson(result));
-      if(!current.events.some(e=>e.type==='owner_work_result'&&(e.data as {digest:string}).digest===digest))await this.#store.append('owner_work_result',SARA_PRINCIPAL,{digest,result});});
+      const softwareRuntimeEvaluationDigest=this.softwareWorkConfigurationDigest(record);
+      if(!current.events.some(e=>e.type==='owner_work_result'&&(e.data as {digest:string}).digest===digest&&(e.data as {softwareRuntimeEvaluationDigest?:string}).softwareRuntimeEvaluationDigest===softwareRuntimeEvaluationDigest))await this.#store.append('owner_work_result',SARA_PRINCIPAL,{digest,result,...(softwareRuntimeEvaluationDigest?{softwareRuntimeEvaluationDigest}:{})});});
     return result;
   }
 
@@ -2369,13 +2407,13 @@ export class SaraKernel {
     const state=await this.state(),latest=new Map<string,ReturnType<typeof workResult>>();
     for(const e of state.events){
       if(e.type==='owner_work_received'){const record=e.data as WorkRecord;
-        const ids=new Set(record.plan?.steps.map(s=>`plan-${sha256(canonicalJson({planId:record.plan!.id,version:record.plan!.version,stepId:s.id}))}`)??[]);
-        const receipts=state.events.filter(event=>event.type==='digital_capability_executed'&&event.actor.id===SARA_PRINCIPAL.id).map(event=>(event.data as {result:CapabilityResult}).result).filter(r=>ids.has(r.requestId));
+        const receipts=this.boundedWorkReceipts(record,state);
         latest.set(record.request.requestId,workResult(record,null,receipts));}
       if(e.type==='owner_work_result'){const result=(e.data as {result:ReturnType<typeof workResult>}).result;latest.set(result.requestId,result);}}
     const records=new Map(state.events.filter(e=>e.type==='owner_work_received').map(e=>[(e.data as WorkRecord).request.requestId,e.data as WorkRecord]));
     return [...latest.values()].slice(-25).reverse().map(stored=>{const result=structuredClone(stored),record=records.get(result.requestId);
       if(record&&(this.serviceWorkChanged(record,state)||(record.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities)))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';if(!result.blockers.some(b=>b.reason==='WORK_SOURCE_CHANGED'))result.blockers.push({subjectId:result.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of changed durable work']});}
+      if(record&&this.softwareWorkRuntimeChanged(record,state)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.outputText='Runtime configuration changed; the previous software result is historical. '+result.outputText;if(!result.blockers.some(b=>b.reason==='SOFTWARE_RUNTIME_CHANGED'))result.blockers.push({subjectId:result.requestId,reason:'SOFTWARE_RUNTIME_CHANGED',missing:['Resume the same request to re-evaluate only affected steps.']});}
       if(state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===result.requestId)){result.status='CANCELLED';result.verification='NOT_VERIFIED';}
       return result;});
   }
@@ -2400,7 +2438,8 @@ export class SaraKernel {
       if(latest){const result=(latest.data as {result:ReturnType<typeof workResult>}).result;
         // A blocked/completed result requires new facts or an explicit owner
         // retry. A crash before acknowledgment remains resumable and idempotent.
-        if(result.execution?.status!=='PAUSED')continue;
+        const changedRuntime=this.softwareWorkRuntimeChanged(record,state)&&(latest.data as {softwareRuntimeEvaluationDigest?:string}).softwareRuntimeEvaluationDigest!==this.softwareWorkConfigurationDigest(record);
+        if(result.execution?.status!=='PAUSED'&&!changedRuntime)continue;
       }
       return this.continueBoundedWork(record,4);
     }
@@ -2541,10 +2580,12 @@ export class SaraKernel {
       if (!request) return capabilityResult({requestId:"invalid-invocation",capabilityId:"invalid-invocation",inputDigest:sha256(inputError!),context,
         persisted:false,status:"INVALID_INPUT",result:{output:{code:inputError!},unknowns:["The malformed request was not executed or persisted."]}});
       const requestDigest = sha256(canonicalJson(request));
-      const existing = state.events.find(event=>event.type==="digital_capability_executed" &&
-        (event.data as {requestId:string;actorId:string}).requestId===request!.requestId && (event.data as {actorId:string}).actorId===principal.id);
+      const existing = state.events.filter(event=>event.type==="digital_capability_executed" &&
+        (event.data as {requestId:string;actorId:string}).requestId===request!.requestId && (event.data as {actorId:string}).actorId===principal.id).at(-1);
       const contract=await capabilityContract(request.capabilityId),definition=capabilityDefinition(request.capabilityId);
       if(contract)context.currentIdentity={...context.currentIdentity,capabilityId:contract.id,implementationDigest:contract.implementationDigest,contractDigest:contract.contractDigest};
+      if(isSoftwareWorkCapability(request.capabilityId))context.currentIdentity.softwareRuntimeDigest=softwareRuntimeDependencyDigest(request.capabilityId,this.#softwareRuntime,(request.input as {scope?:unknown}|null)?.scope);
+      const admittedSoftware=isSoftwareWorkCapability(request.capabilityId)&&state.events.find(event=>event.type==='owner_work_received'&&event.actor.kind==='owner'&&event.actor.id===this.#constitution.ownerAuthority.ownerIdentity&&(event.data as WorkRecord).plan?.steps.some(step=>step.capabilityId===request!.capabilityId&&`plan-${sha256(canonicalJson({planId:(event.data as WorkRecord).plan!.id,version:(event.data as WorkRecord).plan!.version,stepId:step.id}))}`===request!.requestId&&canonicalJson(step.input)===canonicalJson(request!.input)));
       if(definition?.sourceFiles.some(path=>path.startsWith('procedural/'))&&contract){
         context.proceduralKnowledge=await ProceduralKnowledgeStore.inspectExisting(this.#store.stateDirectory);
         try{validateSchema(contract.inputSchema,request.input as Json);context.currentIdentity.proceduralKnowledgeDigest=proceduralDependencyDigest(request.capabilityId,request.input as Record<string,Json>,context.proceduralKnowledge);}catch(error){if(!(error instanceof CapabilityInputError))throw error;}
@@ -2590,6 +2631,7 @@ export class SaraKernel {
         const priorContract=await capabilityContract(prior.capability.id);
         let referenceCurrent=prior.authority.contextDigest===authorityContextDigest&&prior.capability.implementationDigest===priorContract?.implementationDigest&&prior.capability.contractDigest===priorContract?.contractDigest;
         const dependencyInput=(metadata as {dependencyInput?:Record<string,Json>}).dependencyInput;
+        if(isSoftwareWorkCapability(prior.capability.id))referenceCurrent=referenceCurrent&&prior.subject.softwareRuntimeDigest===softwareRuntimeDependencyDigest(prior.capability.id,this.#softwareRuntime,dependencyInput?.softwareScope);
         if(hasReceiptDependencies(prior.subject)){
           if(!dependencyInput)referenceCurrent=false;
           else{
@@ -2635,11 +2677,26 @@ export class SaraKernel {
       };
       if(existing){
         const stored=existing.data as {requestDigest:string;result:CapabilityResult};
-        if(stored.requestDigest!==requestDigest)throw new Error("CAPABILITY_REQUEST_REPLAY_CONFLICT");
         const {resultDigest,...unsigned}=stored.result;
         if(sha256(canonicalJson(unsigned))!==resultDigest)throw new EventStoreIntegrityError("Capability receipt digest does not match its content.");
         const current=await referenceIsCurrent(stored.result,existing.data);
-        return {...structuredClone(stored.result),replayed:true,receiptValidity:{current,reason:current?"Unchanged material authority and implementation identity.":"Historical receipt only; current identity differs. Re-evaluate before relying on it."}};
+        // Only this read-only/isolated software path may renew a step receipt
+        // when relevant trusted runtime facts change. Keep the exact input,
+        // contract and authority; append a new receipt without replacing history.
+        const sameBoundary=stored.result.capability.id===request.capabilityId&&stored.result.inputDigest===sha256(canonicalJson(request.input))&&stored.result.capability.contractDigest===contract?.contractDigest&&stored.result.capability.implementationDigest===contract?.implementationDigest&&stored.result.authority.contextDigest===authorityContextDigest;
+        let changedDependencies=false;
+        if(isSoftwareWorkCapability(request.capabilityId)&&!current&&sameBoundary&&stored.requestDigest!==requestDigest&&Array.isArray(request.evidenceReceiptIds)){
+          const before=stored.result.evidence.filter(e=>e.integrity==='KERNEL_RECEIPT'&&e.sourceId.startsWith('kernel:capability:')).map(e=>referencedEvents.get(e.contentDigest));
+          const after=[...new Set(request.evidenceReceiptIds)].map(digest=>referencedEvents.get(digest));
+          const subject=(event:NonNullable<typeof before[number]>)=>{const r=(event.data as {result:CapabilityResult}).result;return `${r.capability.id}:${r.requestId}`;};
+          if(before.length===after.length&&before.every(Boolean)&&after.every(Boolean)&&canonicalJson(before.map(e=>subject(e!)).sort())===canonicalJson(after.map(e=>subject(e!)).sort())){
+            changedDependencies=true;for(const event of after)if(!await referenceIsCurrent((event!.data as {result:CapabilityResult}).result,event!.data)){changedDependencies=false;break;}
+          }
+        }
+        const runtimeChanged=stored.result.subject.softwareRuntimeDigest!==context.currentIdentity.softwareRuntimeDigest;
+        const renewable=Boolean(admittedSoftware)&&!current&&sameBoundary&&(runtimeChanged||changedDependencies)&&!request.evidence?.length&&stored.result.evidence.every(e=>e.integrity==='KERNEL_RECEIPT');
+        if(stored.requestDigest!==requestDigest&&!renewable)throw new Error("CAPABILITY_REQUEST_REPLAY_CONFLICT");
+        if(!renewable)return {...structuredClone(stored.result),replayed:true,receiptValidity:{current,reason:current?"Unchanged material authority and implementation identity.":"Historical receipt only; current identity differs. Re-evaluate before relying on it."}};
       }
       let status:CapabilityResult["status"]="SUCCEEDED",result:import("./digital-capabilities/types.ts").ExecutionOutput;
       try {
@@ -2677,6 +2734,16 @@ export class SaraKernel {
         else if(contract.qualification.status!=="PASSED"){status="BLOCKED";result={output:{code:"QUALIFICATION_FAILED"}};}
         else {
           validateSchema(contract.inputSchema,request.input as Json);
+          if(['software-source-inspector','software-journey-tester'].includes(request.capabilityId)){
+            const admitted=state.events.find(event=>event.type==='owner_work_received'&&event.actor.kind==='owner'&&event.actor.id===this.#constitution.ownerAuthority.ownerIdentity&&(event.data as WorkRecord).plan?.steps.some(step=>step.capabilityId===request!.capabilityId&&`plan-${sha256(canonicalJson({planId:(event.data as WorkRecord).plan!.id,version:(event.data as WorkRecord).plan!.version,stepId:step.id}))}`===request!.requestId&&canonicalJson(step.input)===canonicalJson(request!.input)));
+            const cancelled=admitted&&state.events.some(event=>event.type==='owner_work_cancelled'&&(event.data as {requestId:string}).requestId===(admitted.data as WorkRecord).request.requestId);
+            context.softwareWorkAuthorized=!cancelled&&(this.isVerifiedOwner(principal)||Boolean(admitted));
+            if(context.softwareWorkAuthorized&&!state.emergencyStopped){
+              await this.authorize(principal,{action:'external_read',targetId:`software:${String((request.input as Record<string,Json>).repository)}`,external:true});
+              if(request.capabilityId==='software-journey-tester')await this.authorize(principal,{action:'sandbox_development',targetId:request.requestId,external:false});
+              context.softwareRuntime=this.#softwareRuntime;
+            }
+          }
           if(request.capabilityId==='isolated-defect-reproducer'){
             // The event can only be admitted through verified owner authentication.
             // Bind worker authority to the exact immutable plan step and input;

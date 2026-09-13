@@ -1,3 +1,4 @@
+import {softwareWorkDefinitions} from './software-work.ts';
 import {reproductionDefinition} from './engineering/reproduction.ts';
 import {nicoDefinitions} from './nico/definitions.ts';
 import {webDefinitions} from './web/definitions.ts';
@@ -16,8 +17,8 @@ import { snapshotJson, validateSchema, type Json } from "./schema.ts";
 import type { CapabilityContract, CapabilityDefinition, ExecutionContext } from "./types.ts";
 
 // Only reviewed, statically imported implementations enter this registry. Customer manifests and learned artifacts cannot register code here.
-const DEFINITIONS:readonly CapabilityDefinition[]=[reproductionDefinition,...foundationDefinitions,...engineeringDefinitions,...troubleshootingDefinitions,...secretaryDefinitions,...economicDefinitions,...businessDefinitions,...proceduralDefinitions,...selfManagementDefinitions,...nicoDefinitions,...webDefinitions,...agentDefinitions];
-const COMMON_FILES=["goal-plan.ts","economic-scheduling.ts","types.ts","schema.ts","registry.ts","evidence.ts","boundary.ts","receipt.ts","receipt-dependencies.ts","foundation.ts","../kernel.ts","../owner-work.ts","../owner-service-work.ts","../revenue-service-catalog.ts","../revenue-job-accounting.ts","../owner-work-inputs.ts","../owner-defect-work.ts","../learning-campaign.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts","observed-evidence.ts","plan.ts"];
+const DEFINITIONS:readonly CapabilityDefinition[]=[...softwareWorkDefinitions,reproductionDefinition,...foundationDefinitions,...engineeringDefinitions,...troubleshootingDefinitions,...secretaryDefinitions,...economicDefinitions,...businessDefinitions,...proceduralDefinitions,...selfManagementDefinitions,...nicoDefinitions,...webDefinitions,...agentDefinitions];
+const COMMON_FILES=["goal-plan.ts","economic-scheduling.ts","types.ts","schema.ts","registry.ts","evidence.ts","boundary.ts","receipt.ts","receipt-dependencies.ts","foundation.ts","../kernel.ts","../owner-work.ts","../owner-software-work.ts","../owner-service-work.ts","../revenue-service-catalog.ts","../revenue-job-accounting.ts","../owner-work-inputs.ts","../owner-defect-work.ts","../learning-campaign.ts","../policy.ts","../effect-boundary.ts","../canonical.ts","../memory-fabric.ts","../server.ts","production-proof.ts","observed-evidence.ts","plan.ts"];
 function freezeReviewed(value:unknown):void {
   if(!value||typeof value!=="object"||Object.isFrozen(value))return;
   for(const descriptor of Object.values(Object.getOwnPropertyDescriptors(value)))if("value" in descriptor)freezeReviewed(descriptor.value);

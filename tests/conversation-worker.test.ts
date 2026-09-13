@@ -165,7 +165,7 @@ test('bounded routing handles paraphrases and rejects unrelated domain distracto
 
 test('reachability covers the live inventory and excludes trusted owner controls from ordinary tools',()=>fixture(async({kernel})=>{
  const contracts=await kernel.inspectCapabilityContracts(),matrix=reachability(contracts);
- assert.deepEqual(matrix.map(r=>r.id),contracts.map(c=>c.id));assert.equal(matrix.length,94);
+ assert.deepEqual(matrix.map(r=>r.id),contracts.map(c=>c.id));assert.equal(matrix.length,97);
  for(const id of ['decision-register','learned-capability-disable-and-quarantine','experience-to-procedure-compiler'])assert.equal(matrix.find(r=>r.id===id)?.disposition,'EXPLICIT_OWNER_OPERATION');
  assert.ok(matrix.every(r=>r.externalAuthorityGranted===false));
 }));

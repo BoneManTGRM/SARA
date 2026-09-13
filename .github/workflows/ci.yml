@@ -19,4 +19,13 @@ jobs:
         run: node --import tsx src/digital-capabilities/web/browser-qualification.ts
       - name: Qualify actual owner conversation on desktop and mobile
         run: node --import tsx scripts/qualify-owner-conversation-ui.ts
+      - name: Preserve isolated owner runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: owner-software-runtime-evidence
+          path: |
+            artifacts/owner-software-runtime-qualification.json
+            artifacts/owner-software-runtime-*.png
+          if-no-files-found: ignore
       - run: npm run verify

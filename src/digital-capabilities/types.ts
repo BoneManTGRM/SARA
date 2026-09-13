@@ -22,6 +22,8 @@ export type CapabilityContract = {
 };
 export type ExecutionOutput = {output:Json;capturedEvidence?:readonly EvidenceRecord[];observed?:Json[];inferred?:Json[];unknowns?:string[];confidence?:{level:"HIGH"|"MEDIUM"|"LOW"|"UNASSESSED";basis:string};status?:"SUCCEEDED"|"BLOCKED"|"INCOMPLETE_EVIDENCE"};
 export type ExecutionContext = {
+  softwareWorkAuthorized?:boolean;
+  softwareRuntime?:import('./software-work.ts').SoftwareRuntime;
   isolatedReproductionAuthorized?:boolean;
   ownerAuthenticated:boolean;emergencyStopped:boolean;authorityContextDigest:string;constitutionDigest:string;
   mandateDigest:string|null;mandateId:string|null;evidence:readonly EvidenceRecord[];currentIdentity:ProcedureApplicabilityIdentity;

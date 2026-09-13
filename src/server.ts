@@ -286,30 +286,18 @@ async function handlePublicCommerce(
     if (!new Set(["security_baseline", "release_readiness", "dependency_health"]).has(primaryGoal)) {
       throw new Error("Select one supported readiness goal.");
     }
+    // Clients may persist a cryptographically random 32-byte base64url secret
+    // before dispatch so a lost response can recover the same checkout. Legacy
+    // clients still receive a generated secret; it is never durably stored raw.
+    if (body.recoverySecret !== undefined && (typeof body.recoverySecret !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(body.recoverySecret))) {
+      throw new Error("Checkout recovery secret must be 32 random bytes encoded as base64url.");
+    }
+    const clientSecret = body.recoverySecret as string | undefined ?? randomBytes(32).toString("base64url");
     const repository = await verifiedPublicRepository(String(body.repoUrl ?? ""), fetchImpl);
-    const opportunityId = `inbound-${randomUUID()}`;
-    const job = await kernel.createRevenuePilotJob(SARA_PRINCIPAL, {
-      opportunityId,
-      sourceUrl: repository.repository,
-      sourceAllowsAutomatedDiscovery: true,
-      discoveredFromPublicSource: true,
-      repoUrl: repository.repository,
-      repositoryIsPublic: true,
-      repositoryOwnerPermissionConfirmed: true,
-      requiresPrivateAccess: false,
-      containsRegulatedOrPrivateData: false,
-      requestsProductionChanges: false,
-      requestsExploitValidation: false,
-      primaryGoal,
-      customerBudgetUsd: 149,
-      desiredTurnaroundDays: 3,
+    const intent = await kernel.createPublicRevenueIntake(SARA_PRINCIPAL, {
+      repository: repository.repository,
       recentCommitDays: repository.recentCommitDays,
-      requestedServiceId: "public-repository-readiness-snapshot",
-    });
-    const clientSecret = randomBytes(32).toString("base64url");
-    const intent = await kernel.createRevenuePaymentIntent(SARA_PRINCIPAL, {
-      id: `pay_${randomUUID()}`,
-      jobId: job.id,
+      primaryGoal,
       recipientAddress: options.commerce.recipientAddress,
       clientSecretDigest: paymentClientSecretDigest(clientSecret),
       customerReferenceDigest: sha256(customerReference),

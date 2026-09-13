@@ -1,18 +1,21 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp,readFile,rm} from 'node:fs/promises';
+import {mkdir,mkdtemp,readFile,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {dirname,join} from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import type {AddressInfo} from 'node:net';
 import {legacyLearningRetryFixture} from '../tests/fixtures/legacy-learning-retry.ts';
 import {createSaraServer} from '../src/server.ts';
 import {compileCommercialTerms} from '../src/commercial-terms.ts';
 import {PILOT_REQUIRED_CAPABILITIES} from '../src/revenue-pilot.ts';
-import {SARA_PRINCIPAL} from '../src/kernel.ts';
+import {SaraKernel,SARA_PRINCIPAL} from '../src/kernel.ts';
 import {sha256} from '../src/canonical.ts';
 import {waitForSandboxBrowserEndpoint} from '../src/digital-capabilities/web/sandbox-browser.ts';
 import {installOwnerDashboardThemeRuntime} from '../src/owner-dashboard-theme-runtime.ts';
+import {collectSoftwareSource} from '../src/software-source-reader.ts';
+import {runNicosMovementJourney} from '../src/software-journey-browser.ts';
+import {assertNicosJourneyQualification} from './software-journey-qualification.ts';
 
 // Isolated product E2E qualification. These credentials belong only to the
 // disposable test kernel. This cannot authenticate a production owner.
@@ -20,7 +23,14 @@ const directory=await mkdtemp(join(tmpdir(),'sara-owner-ui-'));
 const legacy=await legacyLearningRetryFixture();
 const credential=legacy.token;
 installOwnerDashboardThemeRuntime();
-const kernel=legacy.kernel;
+const runtimeDispatches={source:0,browser:0};
+// Trusted boot wiring only: the owner request must cause these adapters to gather
+// their own public inputs. No fixture repository packet or browser result enters
+// the request, and the old synthetic service/learning state remains unchanged.
+const kernel=await SaraKernel.boot({stateDirectory:legacy.directory,ownerTokenSha256:sha256(credential),softwareRuntime:{
+ inspectSource:async(repository,journey)=>{runtimeDispatches.source++;return collectSoftwareSource(repository,journey);},
+ testJourney:async()=>{runtimeDispatches.browser++;return runNicosMovementJourney();},
+}});
 const terms=compileCommercialTerms({businessName:'Synthetic owner UI fixture',contactEmail:'owner@example.com',governingLaw:'Synthetic test terms'});
 const recipientAddress=`0x${'2'.repeat(40)}`;
 const server=createSaraServer(kernel,{stateDirectory:legacy.directory,ownerTokenSha256:sha256(credential),commerce:{terms,recipientAddress,rpcUrl:'https://mainnet.base.org',publicOrigin:'https://saraseed.app',fetchImpl:async()=>{throw new Error('SYNTHETIC_NETWORK_NOT_EXPECTED');}}});
@@ -45,7 +55,7 @@ try{
  sessionId=(await send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
  await send('Page.enable');await send('Runtime.enable');await send('Fetch.enable',{patterns:[{urlPattern:'*'}]});
  const evaluate=async(expression:string)=>{const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error('Owner UI script exception');return r.result.value;};
- const until=async(expression:string)=>{const deadline=performance.now()+20000;while(performance.now()<deadline){if(await evaluate(expression))return;await delay(100);}throw new Error('Owner UI acceptance timed out');};
+ const until=async(expression:string,maximumMilliseconds=20000)=>{const deadline=performance.now()+maximumMilliseconds;while(performance.now()<deadline){if(await evaluate(expression))return;await delay(100);}throw new Error('Owner UI acceptance timed out');};
  await send('Page.navigate',{url:origin});await until("Boolean(document.querySelector('#owner-work-text'))");
  assert.equal(await evaluate("document.querySelector('#owner-work-fields').disabled"),true);
  assert.equal(await evaluate("Boolean(document.querySelector('#owner-work-results').closest('.owner-job-activity'))"),true,'Qualify the actual production activity transform');
@@ -106,7 +116,7 @@ try{
  const owner=kernel.authenticateOwnerToken(credential);
  const expenseJob=await kernel.createRevenuePilotJob(owner,{opportunityId:'synthetic-ui-expense-job',sourceUrl:'https://github.com/example/project/issues/1',sourceAllowsAutomatedDiscovery:true,discoveredFromPublicSource:true,repoUrl:'https://github.com/example/project',repositoryIsPublic:true,repositoryOwnerPermissionConfirmed:true,requiresPrivateAccess:false,containsRegulatedOrPrivateData:false,requestsProductionChanges:false,requestsExploitValidation:false,primaryGoal:'release_readiness',customerBudgetUsd:149,desiredTurnaroundDays:3,recentCommitDays:2});
  await kernel.createRevenuePaymentIntent(owner,{id:'synthetic-ui-expense-intent',jobId:expenseJob.id,recipientAddress,clientSecretDigest:sha256('synthetic-ui-unused-secret'),customerReferenceDigest:sha256('synthetic-ui-customer'),terms});
- await send('Page.reload');await until("document.body.dataset.owner==='connected' && Boolean(document.querySelector('.commerce-expense-form'))");
+ await send('Page.reload');await until("document.body?.dataset.owner==='connected' && Boolean(document.querySelector('.commerce-expense-form'))");
  for(const width of [390,1280]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
   await evaluate("document.querySelector('.commerce-expense-form').closest('details').open=true");
@@ -141,7 +151,73 @@ try{
  }
  const qualifiedCount=(await kernel.inspectAudit()).filter(e=>e.type==='digital_capability_executed').length;
  assert.equal(qualifiedCount,finalCount+20);
- console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:13,executedReceipts:qualifiedCount,defectNoFailure:true,isolatedReproduction:true,defectReplay:true,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received').length,13,'Preserve the existing 13-request qualification baseline');
+ assert.deepEqual(runtimeDispatches,{source:0,browser:0},'Historical supplied analysis must not dispatch the new source or browser adapters');
+
+ // One genuine ordinary request in an isolated authenticated owner UI. The
+ // public repository and application assets are self-gathered by SARA's runtime.
+ // Mobile checks the owner UI and replays this same job; it does not claim a
+ // second application/mobile journey test or create a duplicate external job.
+ const softwareGoal='Test the movement-to-scanner journey on Nico’s World using https://nicos-world.com/ and BoneManTGRM/Nicos-Adventures. Inspect the current source and existing tests, gather the evidence yourself, and give me a defect report with what passed, what failed, what remains untested, and what still needs my decision.';
+ const softwareReportPath=process.env.SARA_OWNER_SOFTWARE_UI_REPORT_PATH??join(process.cwd(),'artifacts','owner-software-runtime-qualification.json');
+ await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
+ await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(softwareGoal)};document.querySelector('#owner-work-material').value='';document.querySelector('#owner-work-submit').click()`);
+ // This is the only path with the extended bound: source collection (30s) and
+ // the sandboxed browser (60s) still enforce their own smaller runtime limits.
+ try{await until("!document.querySelector('#owner-work-submit').disabled && document.querySelector('#owner-work-results').textContent.includes('software-evidence-reviewer')",120000);}
+ catch{
+  const failedAudit=await kernel.inspectAudit();
+  const failedReceipts=failedAudit.filter(e=>e.type==='digital_capability_executed').slice(qualifiedCount).map(e=>{const result=(e.data as {result:{capability:{id:string};resultDigest:string;status:string}}).result;return {capability:result.capability.id,resultDigest:result.resultDigest,status:result.status};});
+  await mkdir(dirname(softwareReportPath),{recursive:true});
+  await writeFile(softwareReportPath,JSON.stringify({status:'INCOMPLETE_EVIDENCE',provenance:'ISOLATED',syntheticOwner:true,goal:softwareGoal,runtimeDispatches,receipts:failedReceipts,boundary:'Actual owner software UI did not reach its required reviewer within the bounded wait.',productionAcceptance:false},null,2)+'\n',{mode:0o600});
+  throw new Error(`Actual owner software UI qualification incomplete; evidence preserved at ${softwareReportPath}`);
+ }
+ const auditAfterSoftware=await kernel.inspectAudit();
+ const softwareWork=auditAfterSoftware.filter(e=>e.type==='owner_work_received').at(-1)!;
+ const workData=softwareWork.data as {request:{requestId:string;text:string;suppliedText?:string};plan?:{id:string;steps:{id:string;capabilityId:string}[]}};
+ const newReceipts=auditAfterSoftware.filter(e=>e.type==='digital_capability_executed').slice(qualifiedCount).map(e=>(e.data as {result:{requestId:string;capability:{id:string;contractDigest:string};resultDigest:string;inputDigest:string;output:unknown;cost:{actualCashMicroUsd:number}}}).result);
+ const sourceReceipt=newReceipts.find(r=>r.capability.id==='software-source-inspector');
+ const journeyReceipt=newReceipts.find(r=>r.capability.id==='software-journey-tester');
+ const reviewerReceipt=newReceipts.find(r=>r.capability.id==='software-evidence-reviewer');
+ const sourceOutput=sourceReceipt?.output as {result?:string;evidence?:{repository:string;immutableCommitSha:string;treeSha:string;files:Array<{path:string;role:string;gitBlobSha:string;contentSha256:string;byteLength:number;sourceTruncated:boolean}>;limitations:string[]}}|undefined;
+ const journeyOutput=journeyReceipt?.output as {result?:string;evidence?:unknown}|undefined;
+ const reviewOutput=reviewerReceipt?.output as {qualified?:boolean;summary?:string;remaining?:string[];evidence?:unknown}|undefined;
+ const softwareReport={status:reviewOutput?.qualified===true?'PENDING_INDEPENDENT_VERIFICATION':'INCOMPLETE_EVIDENCE',provenance:'ISOLATED',syntheticOwner:true,request:workData.request,
+  implementationRevision:/^[a-f0-9]{40}$/u.test(process.env.GITHUB_SHA??'')?process.env.GITHUB_SHA:null,
+  ownerInterface:'actual authenticated served dashboard',requestedOwnerViewports:[1280,390],applicationViewportScope:'isolated desktop only',sourceProvenance:'EXTERNAL_READ_ONLY',sourceCollectionActor:'SARA_RUNTIME',journeyActor:'SARA_RUNTIME',independentVerifierActor:'IMPLEMENTATION_AGENT',planId:workData.plan?.id,
+  runtimeDispatches:{...runtimeDispatches},receiptChain:newReceipts.map(({requestId,capability,resultDigest,inputDigest,cost})=>({requestId,capability,resultDigest,inputDigest,cost})),
+  source:sourceOutput?.evidence?{...sourceOutput.evidence,files:sourceOutput.evidence.files.map(({path,role,gitBlobSha,contentSha256,byteLength,sourceTruncated})=>({path,role,gitBlobSha,contentSha256,byteLength,sourceTruncated}))}:null,
+  journey:journeyOutput?.evidence??null,review:reviewOutput??null,ownerScreenshotDigests:[] as Array<{width:number;sha256:string}>,replayVerified:false,
+  workflowCashMicroUsd:newReceipts.reduce((sum,r)=>sum+r.cost.actualCashMicroUsd,0),infrastructureAllocation:'UNKNOWN',productionAcceptance:false,commercialFulfillment:false,realRevenueVerified:false,authorityDelta:0};
+ const saveSoftwareReport=async()=>{await mkdir(dirname(softwareReportPath),{recursive:true});await writeFile(softwareReportPath,JSON.stringify(softwareReport,null,2)+'\n',{mode:0o600});};
+ await saveSoftwareReport(); // Preserve exact incomplete evidence if any assertion below fails.
+ assert.equal(workData.request.text,softwareGoal);assert.equal(workData.request.suppliedText??'','');
+ assert.deepEqual(runtimeDispatches,{source:1,browser:1});assert.equal(newReceipts.length,5);
+ assert.equal(sourceOutput?.result,'SOURCE_COLLECTED',JSON.stringify({boundary:sourceReceipt?.output,report:softwareReportPath}));
+ assertNicosJourneyQualification(journeyOutput?.evidence);
+ assert.equal(reviewOutput?.qualified,true,JSON.stringify({boundary:reviewOutput,report:softwareReportPath}));
+ assert.equal(await evaluate("document.querySelector('#owner-work-status').textContent"),'COMPLETE · VERIFIED_ANALYSIS');
+ for(const width of [1280,390]){
+  await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+  if(width===390){
+   await evaluate("document.querySelector('#owner-work-submit').click()");
+   await until("!document.querySelector('#owner-work-submit').disabled && document.querySelector('#owner-work-status').textContent==='COMPLETE · VERIFIED_ANALYSIS'");
+  }
+  await evaluate("for(const detail of document.querySelectorAll('#owner-work-results details'))detail.open=true");
+  for(const phrase of ['No defect was reproduced','isolated','software-source-inspector','software-journey-tester','software-evidence-reviewer','Recorded cost $0.000000'])assert.equal(await evaluate(`document.querySelector('#owner-work-results').innerText.includes(${JSON.stringify(phrase)})`),true,`Software owner result must show ${phrase}`);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Actual software results must fit each owner viewport');
+  await evaluate("document.querySelector('#owner-work-results').scrollIntoView()");
+  const screenshot=await send('Page.captureScreenshot',{format:'png'}),bytes=Buffer.from(screenshot.data,'base64');
+  const screenshotPath=join(dirname(softwareReportPath),`owner-software-runtime-${width}.png`);
+  await writeFile(screenshotPath,bytes,{mode:0o600});softwareReport.ownerScreenshotDigests.push({width,sha256:sha256(bytes)});
+ }
+ const finalAudit=await kernel.inspectAudit();
+ assert.equal(finalAudit.filter(e=>e.type==='owner_work_received').length,14);
+ assert.equal(finalAudit.filter(e=>e.type==='digital_capability_executed').length,qualifiedCount+5);
+ assert.deepEqual(runtimeDispatches,{source:1,browser:1},'Identical desktop/mobile submission must reuse self-gathered source and journey receipts');
+ assert.equal((await kernel.learningCampaignStatus()).campaign?.reserved,3);
+ softwareReport.replayVerified=true;softwareReport.status='VERIFIED';await saveSoftwareReport();
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:14,executedReceipts:qualifiedCount+5,preservedBaseline:{ordinaryRequests:13,executedReceipts:qualifiedCount},softwareRuntimeQualification:softwareReport,softwareReportPath,defectNoFailure:true,isolatedReproduction:true,defectReplay:true,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
  socket?.close();chrome.kill('SIGKILL');
