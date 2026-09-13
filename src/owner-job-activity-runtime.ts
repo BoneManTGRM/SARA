@@ -70,11 +70,17 @@ const OWNER_JOB_ACTIVITY_STYLE = String.raw`<style ${OWNER_JOB_ACTIVITY_MARKER}>
 }
 .owner-job-activity details[open] { border-color: rgba(69,233,255,.30); }
 .owner-job-activity summary {
+  display: list-item;
+  min-height: 44px;
+  align-content: center;
   cursor: pointer;
   color: #d8f6ff;
   font: 700 .64rem/1.4 var(--mono);
   overflow-wrap: anywhere;
 }
+.owner-job-activity summary::marker { color: var(--cyan); }
+.owner-job-activity summary:focus-visible { outline: 2px solid var(--cyan); outline-offset: 4px; }
+.owner-job-activity summary.activity-title { display: list-item; }
 .owner-job-activity .activity-raw {
   margin: 12px 0 0;
   padding-top: 10px;
@@ -102,21 +108,25 @@ const OWNER_JOB_ACTIVITY_PANEL = String.raw`
         </div>
         <div class="activity-summary" id="owner-job-activity-summary" aria-live="polite"></div>
         <div class="activity-grid">
-          <div class="activity-panel current" id="owner-job-current">
-            <span class="activity-title">Owner state locked</span>
+          <details class="activity-panel current" id="owner-job-current">
+            <summary class="activity-title">Current work · Owner state locked</summary>
             <p class="activity-copy">Authenticate to inspect current work.</p>
-          </div>
-          <div class="activity-panel">
-            <span class="card-label">Useful job ledger</span>
+          </details>
+          <details class="activity-panel" id="owner-job-ledger">
+            <summary>Useful job ledger</summary>
             <div class="activity-list" id="owner-job-list"><p class="activity-copy">Owner state locked.</p></div>
             <p class="activity-raw" id="owner-job-raw">Raw execution records remain private.</p>
-          </div>
+          </details>
         </div>
       </section>
 `;
 
 const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
     const ownerLearningRetryCeiling = ${LEARNING_MAXIMUM_FAILED_ROOTS_PER_CAPABILITY};
+    document.querySelector('a[href="#owner-work-results"]')?.addEventListener('click', () => {
+      const panel = document.querySelector('#owner-work-panel');
+      if (panel) panel.open = true;
+    });
 
     function ownerJobStatus(records) {
       const statuses = new Set(records.map((job) => String(job.status || '').toLowerCase()));
@@ -142,6 +152,13 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
       const parsed = Date.parse(value || '');
       return Number.isFinite(parsed) ? new Date(parsed).toLocaleString() : 'time unavailable';
     }
+
+    function ownerJobHeading(group) {
+      const title = String(group.capabilityId || group.objective).replace(/\s+/g, ' ').trim();
+      return group.status + ' · ' + (title.length > 100 ? title.slice(0, 97) + '…' : title);
+    }
+
+    const ownerJobExpandedKeys = new Set();
 
     function ownerJobGroups(jobs) {
       const groups = new Map();
@@ -210,9 +227,12 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
         || groups.find((group) => group.status === 'BLOCKED')
         || groups.find((group) => group.status === 'QUEUED');
       current.replaceChildren();
-      const currentTitle = document.createElement('span');
+      const currentTitle = document.createElement('summary');
       currentTitle.className = 'activity-title';
-      currentTitle.textContent = active ? active.objective : 'SARA is idle';
+      currentTitle.textContent = active ? ownerJobHeading(active) : 'SARA is idle';
+      const currentObjective = document.createElement('p');
+      currentObjective.className = 'activity-copy';
+      currentObjective.textContent = active ? active.objective : '';
       const currentStep = document.createElement('p');
       currentStep.className = 'activity-copy';
       currentStep.textContent = active ? ownerJobStep(active.status) : 'No job is currently running, blocked, or queued.';
@@ -222,8 +242,11 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
         ? 'Status ' + active.status + ' · run records ' + active.records.length + ' · max spend ' + money(active.maximumBudgetUsd)
           + ' · owner value ' + active.ownerValue + (active.capabilityId ? ' · capability ' + active.capabilityId : '')
         : groups.length + ' useful job groups retained.';
-      current.append(currentTitle, currentStep, currentMeta);
+      current.append(currentTitle, currentObjective, currentStep, currentMeta);
 
+      for (const key of ownerJobExpandedKeys) {
+        if (!groups.some((group) => group.key === key)) ownerJobExpandedKeys.delete(key);
+      }
       list.replaceChildren();
       if (!groups.length) {
         const empty = document.createElement('p');
@@ -233,8 +256,17 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
       } else {
         for (const group of groups.slice(0, 10)) {
           const details = document.createElement('details');
+          details.open = ownerJobExpandedKeys.has(group.key);
+          details.addEventListener('toggle', () => {
+            if (!details.isConnected) return;
+            if (details.open) ownerJobExpandedKeys.add(group.key);
+            else ownerJobExpandedKeys.delete(group.key);
+          });
           const heading = document.createElement('summary');
-          heading.textContent = group.status + ' · ' + group.objective;
+          heading.textContent = ownerJobHeading(group);
+          const objective = document.createElement('p');
+          objective.className = 'activity-copy';
+          objective.textContent = group.objective;
           const step = document.createElement('p');
           step.className = 'activity-copy';
           step.textContent = ownerJobStep(group.status);
@@ -244,7 +276,7 @@ const OWNER_JOB_ACTIVITY_SCRIPT = String.raw`
             + ' · max spend ' + money(group.maximumBudgetUsd) + ' · acceptance checks ' + group.criteriaCount
             + (group.capabilityId ? ' · capability ' + group.capabilityId : '')
             + (group.campaignId ? ' · authority ' + group.campaignId : ' · bounded job record');
-          details.append(heading, step, meta);
+          details.append(heading, objective, step, meta);
           list.append(details);
         }
       }
@@ -277,7 +309,7 @@ export function applyOwnerJobActivityPanel(html: string): string {
 
   const workAnchor = '<div id="owner-work-results" aria-live="polite"></div>';
   const activityPanel = html.includes(workAnchor)
-    ? OWNER_JOB_ACTIVITY_PANEL.replace('      </section>', '        <div class="activity-panel"><span class="activity-title">Conversation work and evidence</span>' + workAnchor + '</div>\n      </section>')
+    ? OWNER_JOB_ACTIVITY_PANEL.replace('      </section>', '        <details class="activity-panel" id="owner-work-panel"><summary class="activity-title">Conversation work and evidence</summary>' + workAnchor + '</details>\n      </section>')
     : OWNER_JOB_ACTIVITY_PANEL;
   return html
     .replace(workAnchor, '<a class="button" href="#owner-work-results">View conversation work and evidence</a>')
