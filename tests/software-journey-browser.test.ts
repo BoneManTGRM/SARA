@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { nicosJourneyResourceAllowed, isPublicJourneyIPv4, JourneyResourceBudget, NICOS_JOURNEY_PROFILE, nicosJourneyBrowserArguments, nicosJourneyChildIdentity, validateJourneyAssetResponse, parseJourneyPackagedIdentity, verifyJourneyBrowserCommandLine, nicosJourneyRequestOptions, nicosJourneyObservationCall } from '../src/software-journey-browser.ts';
+import { nicosJourneyResourceAllowed, isPublicJourneyIPv4, JourneyResourceBudget, NICOS_JOURNEY_PROFILE, nicosJourneyBrowserArguments, nicosJourneyChildIdentity, validateJourneyAssetResponse, parseJourneyPackagedIdentity, verifyJourneyBrowserCommandLine, nicosJourneyRequestOptions, nicosJourneyObservationCall, JourneyBrowserStartupDiagnostics } from '../src/software-journey-browser.ts';
 
 test('outbound request fixes TLS authority and permits only the validated static path with a public pinned address',()=>{
   const signal=new AbortController().signal;
@@ -99,4 +99,18 @@ test('observed browser command line rejects sandbox bypass and duplicate network
   for (const forbidden of ['--no-sandbox', '--disable-setuid-sandbox', '--disable-seccomp-filter-sandbox', '--single-process', '--no-proxy-server', '--proxy-pac-url=https://example.com/config']) assert.throws(() => verifyJourneyBrowserCommandLine([...args, forbidden]), /SANDBOX_ARGUMENT_DENIED/);
   assert.throws(() => verifyJourneyBrowserCommandLine([...args, '--proxy-server=http://other.test']), /NETWORK_ARGUMENT_UNVERIFIED/);
   assert.throws(() => verifyJourneyBrowserCommandLine(args.filter(x => !x.startsWith('--host-resolver-rules='))), /NETWORK_ARGUMENT_UNVERIFIED/);
+});
+
+
+test('browser startup diagnostics classify fixed launch symptoms without returning raw stderr or secrets',()=>{
+ const cases=[['No usable sandbox!','SANDBOX_UNAVAILABLE'],['Failed to move to new namespace: Operation not permitted','NAMESPACE_UNAVAILABLE'],['Failed to create a new namespace: Operation not permitted','NAMESPACE_UNAVAILABLE'],['The SUID sandbox helper binary was found, but is not configured correctly. /private/synthetic-secret/chrome-sandbox','SANDBOX_HELPER_CONFIGURATION'],['error while loading shared libraries: libX.so: cannot open shared object file','MISSING_LIBRARY'],['chrome_crashpad_handler: --database is required','CRASHPAD_FAILURE'],['open /private/secret: Permission denied','ACCESS_DENIED'],['unrecognized environment failure token=synthetic-secret','UNKNOWN']] as const;
+ for(const [message,classification] of cases){const diagnostics=new JourneyBrowserStartupDiagnostics();diagnostics.append(Buffer.from(message+' token=synthetic-secret'));const report=diagnostics.snapshot({exitCode:1,signal:null,spawnErrorCode:null});assert.equal(report.classification,classification);assert.equal(report.exitCode,1);assert.match(report.diagnosticDigest,/^[a-f0-9]{64}$/u);assert.equal(JSON.stringify(report).includes('synthetic-secret'),false);assert.equal(JSON.stringify(report).includes('/private'),false);}
+ const diagnostics=new JourneyBrowserStartupDiagnostics();assert.equal(diagnostics.snapshot({exitCode:null,signal:'SIGSEGV',spawnErrorCode:null}).classification,'PROCESS_CRASH');assert.equal(diagnostics.snapshot({exitCode:null,signal:null,spawnErrorCode:'EACCES'}).classification,'ACCESS_DENIED');assert.equal(diagnostics.snapshot({exitCode:null,signal:null,spawnErrorCode:'SECRET_PATH'}).spawnErrorCode,'UNKNOWN');
+});
+test('startup diagnostics cap retained bytes at 16KiB, preserve chunk identity and never infer from discarded output',()=>{
+ const first=new JourneyBrowserStartupDiagnostics(),second=new JourneyBrowserStartupDiagnostics(),state={exitCode:1,signal:null,spawnErrorCode:null};
+ first.append(Buffer.alloc(16384,120));first.append(Buffer.from('No usable sandbox! synthetic-secret'));
+ second.append(Buffer.alloc(8192,120));second.append(Buffer.alloc(8192,120));second.append(Buffer.from('different discarded suffix'));
+ const a=first.snapshot(state),b=second.snapshot(state);assert.equal(a.capturedBytes,16384);assert.equal(a.truncated,true);assert.equal(a.classification,'UNKNOWN');assert.equal(a.diagnosticDigest,b.diagnosticDigest);
+ first.discard();first.append(Buffer.from('Permission denied'));assert.equal(first.snapshot(state).capturedBytes,0);
 });

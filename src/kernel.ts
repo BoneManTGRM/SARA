@@ -1,3 +1,6 @@
+import {unresolvedRevenueAllowance} from './revenue-pilot.ts';
+import {revenueStepBlocker,mandateContinuationBlocker} from './revenue-step-eligibility.ts';
+import { reauthorizeSoftwareWork, type SoftwareWorkReauthorization } from './owner-software-recovery.ts';
 import {compilePublicRevenueIntake,type PublicRevenueIntakeInput} from './public-revenue-intake.ts';
 import {isSoftwareWorkCapability,softwareRuntimeDependencyDigest} from './digital-capabilities/software-runtime-identity.ts';
 import {serviceWorkContext} from './owner-service-work.ts';
@@ -90,6 +93,7 @@ import {
   executeWorkerModelTask,
   planWorkerModelTask,
   WorkerModelExecutionError,
+  WorkerModelDispatchRejectedError,
   workerModelRouteKey,
   type WorkerDataClassification,
   type WorkerModelClient,
@@ -1219,10 +1223,7 @@ export class SaraKernel {
         targetId: ledgerTarget,
         external: false,
       });
-      if (state.ledger.some((entry) => entry.description.includes(intent.payment!.transactionReferenceDigest))) {
-        throw new Error("The on-chain payment is already recorded.");
-      }
-      const revenue: LedgerEntry = {
+      const proposedRevenue: LedgerEntry = {
         id: randomUUID(),
         kind: "revenue",
         source: "customer",
@@ -1232,14 +1233,20 @@ export class SaraKernel {
         description: `Revenue pilot ${jobId}; verified Base USDC evidence ${intent.payment.transactionReferenceDigest}; intent evidence ${paymentIntentEvidenceDigest(intent)}`,
         occurredAt: intent.payment.verifiedAt,
       };
-      const authorizedJob = authorizeRevenuePilot(job, {
+      const existingRevenue = state.ledger.filter(entry => entry.description.includes(intent.payment!.transactionReferenceDigest));
+      if (existingRevenue.length > 1) throw new Error('Conflicting duplicate payment ledger evidence.');
+      const previous = existingRevenue[0];
+      if (previous && (previous.description !== proposedRevenue.description || previous.kind !== 'revenue' || previous.source !== 'customer' || !previous.realized || previous.recurringMonthly || previous.amountUsd !== proposedRevenue.amountUsd || previous.occurredAt !== proposedRevenue.occurredAt)) throw new Error('Payment ledger evidence does not match the exact job, intent and approval provenance.');
+      const revenue = previous ?? proposedRevenue;
+      if (job.revenueEvidenceId && job.revenueEvidenceId !== revenue.id) throw new Error('Job is bound to different payment evidence.');
+      const authorizedJob = job.revenueEvidenceId ? structuredClone(job) : authorizeRevenuePilot(job, {
         collectedRevenueUsd: revenue.amountUsd,
         revenueEvidenceId: revenue.id,
         ownerApprovalTarget: approval.targetId,
       });
       const authorizedIntent = authorizedRevenuePaymentIntent(intent, revenue.id);
-      await this.#store.append("ledger_recorded", principal, revenue);
-      await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
+      if (!previous) await this.#store.append("ledger_recorded", principal, revenue);
+      if (!job.revenueEvidenceId) await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
       await this.#store.append("revenue_payment_intent_snapshot", principal, authorizedIntent);
       return { job: structuredClone(authorizedJob), paymentIntent: structuredClone(authorizedIntent) };
     });
@@ -1266,6 +1273,11 @@ export class SaraKernel {
       if (intent.amountUsd !== job.plan.priceUsd || intent.termsDigest.length !== 64) {
         throw new Error("Payment intent does not match the job price and accepted terms.");
       }
+      const priorDecision = state.events.find(event => event.type === 'autonomy_decision' && (event.data as AutonomyDecision).requestId === `fixed-service-fulfillment:${intent.id}` && (event.data as AutonomyDecision).outcome === 'automatic');
+      if (priorDecision) {
+        const blocker = mandateContinuationBlocker(state, priorDecision, job);
+        if (blocker) throw new Error(blocker);
+      }
       const decision = await this.authorizeAutonomousRoutine(principal, state, {
         id: `fixed-service-fulfillment:${intent.id}`,
         kind: "fixed_service_fulfillment",
@@ -1277,9 +1289,7 @@ export class SaraKernel {
         requestedAt,
         platform: "owner_site",
       });
-      const duplicate = state.ledger.find((entry) => entry.description.includes(intent.payment!.transactionReferenceDigest));
-      if (duplicate) throw new Error("The on-chain payment is already recorded.");
-      const revenue: LedgerEntry = {
+      const proposedRevenue: LedgerEntry = {
         id: randomUUID(),
         kind: "revenue",
         source: "customer",
@@ -1289,14 +1299,20 @@ export class SaraKernel {
         description: `Revenue pilot ${jobId}; cryptographically verified Base USDC evidence ${intent.payment.transactionReferenceDigest}; intent evidence ${paymentIntentEvidenceDigest(intent)}; mandate ${decision.mandateId}`,
         occurredAt: intent.payment.verifiedAt,
       };
-      const authorizedJob = authorizeRevenuePilot(job, {
+      const existingRevenue = state.ledger.filter(entry => entry.description.includes(intent.payment!.transactionReferenceDigest));
+      if (existingRevenue.length > 1) throw new Error('Conflicting duplicate payment ledger evidence.');
+      const previous = existingRevenue[0];
+      if (previous && (previous.description !== proposedRevenue.description || previous.kind !== 'revenue' || previous.source !== 'customer' || !previous.realized || previous.recurringMonthly || previous.amountUsd !== proposedRevenue.amountUsd || previous.occurredAt !== proposedRevenue.occurredAt)) throw new Error('Payment ledger evidence does not match the exact job, intent and approval provenance.');
+      const revenue = previous ?? proposedRevenue;
+      if (job.revenueEvidenceId && job.revenueEvidenceId !== revenue.id) throw new Error('Job is bound to different payment evidence.');
+      const authorizedJob = job.revenueEvidenceId ? structuredClone(job) : authorizeRevenuePilot(job, {
         collectedRevenueUsd: revenue.amountUsd,
         revenueEvidenceId: revenue.id,
         ownerApprovalTarget: `revenue-pilot:${job.id}:fulfillment`,
       });
       const authorizedIntent = authorizedRevenuePaymentIntent(intent, revenue.id);
-      await this.#store.append("ledger_recorded", principal, revenue);
-      await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
+      if (!previous) await this.#store.append("ledger_recorded", principal, revenue);
+      if (!job.revenueEvidenceId) await this.#store.append("revenue_pilot_snapshot", principal, authorizedJob);
       await this.#store.append("revenue_payment_intent_snapshot", principal, authorizedIntent);
       return {
         job: structuredClone(authorizedJob),
@@ -1633,30 +1649,54 @@ export class SaraKernel {
         return available && (!expected || (candidate.id === expected.jobId && candidate.nextRole === expected.role));
       });
       if (!job) throw new Error("No revenue pilot role is available for execution.");
+      if (job.activeLease && job.activeLease.dispatchState !== 'NOT_DISPATCHED') throw new Error('Unresolved provider effect: reconcile the existing lease before another claim.');
+      const blocker = revenueStepBlocker(state, job, now);
+      if (blocker) throw new Error(blocker);
       const claimed = claimPilotRole(job, workerId, now, leaseSeconds);
       await this.#store.append("revenue_pilot_snapshot", principal, claimed.job);
       return structuredClone(claimed);
     });
   }
 
-  completeRevenuePilotRole(
-    principal: Principal,
-    jobId: string,
-    result: Parameters<typeof completePilotRole>[1],
-  ): Promise<RevenuePilotJob> {
+  private async persistRevenueRoleResult(principal: Principal, jobId: string, result: Parameters<typeof completePilotRole>[1]): Promise<RevenuePilotJob> {
+    const state = await this.state();
+    const job = state.revenuePilotJobs.find(candidate => candidate.id === jobId);
+    if (!job) throw new Error(`Revenue pilot ${jobId} does not exist.`);
+    if (job.activeLease?.pendingDispatch && !result.modelExecution && !result.modelFailure) throw new Error('Unresolved provider dispatch requires exact model result evidence.');
+    const blocker = revenueStepBlocker(state, job);
+    const reconciled = blocker && !result.executionFailed
+      ? { ...result, verificationPassed: null, reportDigest: undefined, executionFailed: true, failureStage: 'eligibility_changed' as const }
+      : result;
+    const completed = completePilotRole(job, reconciled);
+    await this.#store.append('revenue_pilot_snapshot', principal, completed);
+    return structuredClone(completed);
+  }
+
+  completeRevenuePilotRole(principal: Principal, jobId: string, result: Parameters<typeof completePilotRole>[1]): Promise<RevenuePilotJob> {
     return this.serializeMutation(async () => {
-      await this.authorize(principal, {
-        action: "sandbox_development",
-        targetId: `revenue-pilot:${jobId}:${result.role}`,
-        external: false,
-      });
-      const state = await this.state();
-      const job = state.revenuePilotJobs.find((candidate) => candidate.id === jobId);
-      if (!job) throw new Error(`Revenue pilot ${jobId} does not exist.`);
-      const completed = completePilotRole(job, result);
-      await this.#store.append("revenue_pilot_snapshot", principal, completed);
-      return structuredClone(completed);
+      await this.authorize(principal, { action: 'sandbox_development', targetId: `revenue-pilot:${jobId}:${result.role}`, external: false });
+      return this.persistRevenueRoleResult(principal, jobId, result);
     });
+  }
+
+  /** Only the model-dispatch method can settle its already-incurred result.
+   * Stop may prohibit new work, never erase cost evidence from an existing lease.
+   * The private compiler validates the exact lease and conservatively stops any
+   * result whose current eligibility changed; no external effect is dispatched. */
+  private settleDispatchedRevenueRole(principal: Principal, jobId: string, result: Parameters<typeof completePilotRole>[1], executionId: string): Promise<RevenuePilotJob> {
+    return this.serializeMutation(async () => {
+      await this.authorize(principal, { action: 'internal_read', targetId: `revenue-pilot:${jobId}:settle-dispatched-role`, external: false });
+      if (!result.modelExecution && !result.modelFailure) throw new Error('A dispatched role requires actual model execution or failure evidence.');
+      const pending=(await this.state()).revenuePilotJobs.find(job=>job.id===jobId)?.activeLease?.pendingDispatch;
+      if(pending&&pending.executionId!==executionId)throw new Error('A competing invocation cannot settle another pending provider effect.');
+      return this.persistRevenueRoleResult(principal, jobId, result);
+    });
+  }
+
+  async inspectRevenuePilotStepEligibility(principal: Principal, jobId: string): Promise<string | null> {
+    await this.authorize(principal, { action: 'internal_read', targetId: `revenue-pilot:${jobId}:step-eligibility`, external: false });
+    const state = await this.state(), job = state.revenuePilotJobs.find(candidate => candidate.id === jobId);
+    return job ? revenueStepBlocker(state, job) : 'Funded job is unavailable.';
   }
 
   async runRevenuePilotRoleWithModel(
@@ -1725,11 +1765,14 @@ export class SaraKernel {
       throw new Error("The active role lease is too short for the bounded model route.");
     }
 
-    let execution;
-    try {
-      await this.serializeMutation(async()=>{
+    const executionId = randomUUID();
+    const settle=(result:Parameters<typeof completePilotRole>[1])=>this.settleDispatchedRevenueRole(principal,input.jobId,result,executionId);
+    const assertPaidDispatch = (reserve = false) => this.serializeMutation(async()=>{
         const current=await this.state();
         const funded=current.revenuePilotJobs.find(candidate=>candidate.id===job.id);
+        if (funded?.activeLease && funded.activeLease.dispatchState !== 'NOT_DISPATCHED' && funded.activeLease.pendingDispatch?.executionId !== executionId) throw new Error('Unresolved provider effect: this lease cannot be dispatched again.');
+        const blocker=funded?revenueStepBlocker(current,funded):'Funded job unavailable.';
+        if(blocker)throw new Error(blocker);
         const gate=enforceEffectBoundary({action:'funded_model_generation',target:`${job.id}:${input.leaseId}`,external:true,
           emergencyStopped:current.emergencyStopped,effect:'EXTERNAL',authority:'EXACT_FUNDED_JOB',
           authorityIdentity:funded?.revenueEvidenceId??null,cost:input.maximumTaskCostUsd,credentials:true,
@@ -1737,14 +1780,25 @@ export class SaraKernel {
             code:'FUNDED_JOB_LEASE',reason:'The existing funded job and exact active role lease are required.'}});
         await this.#store.append('policy_decision',principal,{request:{action:'funded_model_generation',targetId:`${job.id}:${input.leaseId}`,external:true},decision:gate});
         if(!gate.allowed)throw new PolicyDeniedError(gate,'funded_model_generation');
+        if (reserve && funded?.activeLease && !funded.activeLease.pendingDispatch) {
+          const pending = {...funded,activeLease:{...funded.activeLease,dispatchState:'PENDING' as const,pendingDispatch:{executionId,promptDigest:sha256(input.prompt),maximumCostUsd:input.maximumTaskCostUsd,startedAt:new Date().toISOString()}}};
+          unresolvedRevenueAllowance(pending);
+          await this.#store.append('revenue_pilot_snapshot',principal,pending);
+        }
       });
-      execution = await executeWorkerModelTask(modelPlan, input.prompt, input.clients);
+    let execution;
+    try {
+      await assertPaidDispatch();
+      execution = await executeWorkerModelTask(modelPlan, input.prompt, input.clients, async () => {
+        await assertPaidDispatch(true);
+        return true;
+      });
     } catch (error) {
       if (!(error instanceof WorkerModelExecutionError)) throw error;
       const conservativeWholeCentCost = Math.ceil(
         (error.evidence.accountedCostUsd - Number.EPSILON) * 100,
       ) / 100;
-      await this.completeRevenuePilotRole(principal, input.jobId, {
+      await settle({
         leaseId: input.leaseId,
         role: job.activeLease.role,
         outputDigest: error.evidence.failureDigest,
@@ -1772,7 +1826,7 @@ export class SaraKernel {
           role: job.activeLease.role,
         });
       } catch {
-        await this.completeRevenuePilotRole(principal, input.jobId, {
+        await settle({
           leaseId: input.leaseId,
           role: job.activeLease.role,
           outputDigest: execution.evidence.outputDigest,
@@ -1786,7 +1840,7 @@ export class SaraKernel {
         throw new Error("Private artifact persistence failed; model cost was recorded and the job stopped.");
       }
     }
-    const completed = await this.completeRevenuePilotRole(principal, input.jobId, {
+    const completed = await settle({
       leaseId: input.leaseId,
       role: job.activeLease.role,
       outputDigest: execution.evidence.outputDigest,
@@ -2344,7 +2398,18 @@ export class SaraKernel {
     const record=await this.serializeMutation(async()=>{
       const state=await this.state();
       const prior=state.events.find(e=>e.type==='owner_work_received'&&e.actor.id===principal.id&&(e.data as WorkRecord).request.requestId===request.requestId);
-      if(prior){const saved=prior.data as WorkRecord;if(saved.requestDigest!==requestDigest)throw new Error('OWNER_WORK_REQUEST_CONFLICT');return structuredClone(saved);}
+      if(prior){
+        const initial=prior.data as WorkRecord;if(initial.requestDigest!==requestDigest)throw new Error('OWNER_WORK_REQUEST_CONFLICT');
+        const saved=this.currentOwnerWorkRecord(initial,state);
+        if(saved.workflow==='software-inspection'&&await this.softwareWorkContractChanged(saved)){
+          if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REAUTHORIZATION_REQUIRED');
+          if(state.emergencyStopped||state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===request.requestId))return structuredClone(saved);
+          await this.authorize(principal,{action:'sandbox_development',targetId:request.requestId,external:false});
+          const refreshed=reauthorizeSoftwareWork(saved,await capabilityContracts(),this.boundedWorkReceipts(saved,state),this.capabilityAuthorityDigest(state));
+          await this.#store.append('owner_work_reauthorized',principal,refreshed);return refreshed.record;
+        }
+        return structuredClone(saved);
+      }
       await this.authorize(principal,{action:'record_memory',targetId:`owner-work:${request.requestId}`,external:false});
       const materials=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord).filter(r=>r.request.suppliedText?.trim()).map(r=>({body:r.request.suppliedText!,sourceId:`owner-material:${r.requestDigest}`,receivedAt:r.receivedAt,workflow:r.workflow}));
       // Never skip an intervening unresolved project selection to resurrect an
@@ -2353,7 +2418,7 @@ export class SaraKernel {
       const latestConversationWork=request.conversationId?state.events.filter(e=>e.type==='owner_work_received'&&e.actor.id===principal.id).map(e=>e.data as WorkRecord).filter(r=>r.request.conversationId===request.conversationId).at(-1):undefined;
       const previousSoftware=latestConversationWork?.softwareTarget&&Date.now()-Date.parse(latestConversationWork.receivedAt)<24*60*60*1000?latestConversationWork:undefined;
       const compiled=await compileOwnerWork(request,state.jobs,await capabilityContracts(),new Date().toISOString(),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),{jobCapabilities:state.capabilities,materials,service:serviceWorkContext(state,new Date().toISOString()),...(previousSoftware?{software:{target:previousSoftware.softwareTarget!,requestId:previousSoftware.request.requestId,receivedAt:previousSoftware.receivedAt}}:{})});
-      if(compiled.plan?.steps.some(step=>['isolated-defect-reproducer','software-source-inspector','software-journey-tester'].includes(step.capabilityId))){
+      if(compiled.plan?.steps.some(step=>['isolated-defect-reproducer','isolated-defect-repairer','software-source-inspector','software-journey-tester'].includes(step.capabilityId))){
         if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REPRODUCTION_REQUIRED');
         await this.authorize(principal,{action:'sandbox_development',targetId:request.requestId,external:false});
       }
@@ -2361,6 +2426,29 @@ export class SaraKernel {
       return compiled;
     });
     return this.continueBoundedWork(record);
+  }
+
+  async resumeOwnerMessage(principal:Principal,requestId:string) {
+    if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
+    validateSchema(idSchema,requestId);
+    const state=await this.state(),event=state.events.find(e=>e.type==='owner_work_received'&&e.actor.id===principal.id&&(e.data as WorkRecord).request.requestId===requestId);
+    if(!event)throw new Error('OWNER_WORK_NOT_FOUND');
+    return this.executeOwnerMessage(principal,(event.data as WorkRecord).request);
+  }
+
+  private currentOwnerWorkRecord(record:WorkRecord,state:Awaited<ReturnType<SaraKernel['state']>>):WorkRecord {
+    const refreshed=state.events.filter(e=>e.type==='owner_work_reauthorized'&&e.actor.kind==='owner'&&e.actor.id===this.#constitution.ownerAuthority.ownerIdentity&&(e.data as SoftwareWorkReauthorization).record.requestDigest===record.requestDigest).at(-1);
+    return refreshed?(refreshed.data as SoftwareWorkReauthorization).record:record;
+  }
+
+  private softwareWorkReceiptContractChanged(record:WorkRecord,state:Awaited<ReturnType<SaraKernel['state']>>) {
+    return record.workflow==='software-inspection'&&this.boundedWorkReceipts(record,state).some(receipt=>record.plan?.steps.find(step=>`plan-${sha256(canonicalJson({planId:record.plan!.id,version:record.plan!.version,stepId:step.id}))}`===receipt.requestId)?.contractDigest!==receipt.capability.contractDigest);
+  }
+
+  private async softwareWorkContractChanged(record:WorkRecord) {
+    if(record.workflow!=='software-inspection'||!record.plan)return false;
+    for(const step of record.plan.steps)if((await capabilityContract(step.capabilityId))?.contractDigest!==step.contractDigest)return true;
+    return false;
   }
 
   private serviceWorkChanged(record:WorkRecord,state:Awaited<ReturnType<SaraKernel['state']>>){return record.workflow==='revenue-work'&&(record.serviceIdentity!==serviceWorkContext(state,new Date().toISOString()).identity||record.sourceDigest!==workSourceDigest(state.jobs.filter(j=>!j.learningCampaignId),state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities));}
@@ -2394,6 +2482,7 @@ export class SaraKernel {
     const result=workResult(record,execution,receipts);
     if(state.emergencyStopped){result.status='BLOCKED';result.verification='NOT_VERIFIED';result.blockers.push({subjectId:request.requestId,reason:'EMERGENCY_STOP',missing:['Existing trusted stop restoration']});}
     if(this.serviceWorkChanged(record,state)||(record.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of the changed durable work']});}
+    if(await this.softwareWorkContractChanged(record)||this.softwareWorkReceiptContractChanged(record,state)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'SOFTWARE_CONTRACT_CHANGED',missing:['Authenticated owner must resume this exact work under current bounded contracts.']});}
     if(this.softwareWorkRuntimeChanged(record,state)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:request.requestId,reason:'SOFTWARE_RUNTIME_CHANGED',missing:['Resume the existing request under current runtime configuration.']});}
     if(await cancelled()){result.status='CANCELLED';result.verification='NOT_VERIFIED';result.outputText='Cancelled. Historical executed-step evidence is preserved.';}
     await this.serializeMutation(async()=>{const current=await this.state();const digest=sha256(canonicalJson(result));
@@ -2406,16 +2495,17 @@ export class SaraKernel {
     if(!this.isVerifiedOwner(principal))throw new Error('AUTHENTICATED_OWNER_REQUIRED');
     const state=await this.state(),latest=new Map<string,ReturnType<typeof workResult>>();
     for(const e of state.events){
-      if(e.type==='owner_work_received'){const record=e.data as WorkRecord;
+      if(e.type==='owner_work_received'){const record=this.currentOwnerWorkRecord(e.data as WorkRecord,state);
         const receipts=this.boundedWorkReceipts(record,state);
         latest.set(record.request.requestId,workResult(record,null,receipts));}
       if(e.type==='owner_work_result'){const result=(e.data as {result:ReturnType<typeof workResult>}).result;latest.set(result.requestId,result);}}
-    const records=new Map(state.events.filter(e=>e.type==='owner_work_received').map(e=>[(e.data as WorkRecord).request.requestId,e.data as WorkRecord]));
-    return [...latest.values()].slice(-25).reverse().map(stored=>{const result=structuredClone(stored),record=records.get(result.requestId);
+    const records=new Map(state.events.filter(e=>e.type==='owner_work_received').map(e=>[(e.data as WorkRecord).request.requestId,this.currentOwnerWorkRecord(e.data as WorkRecord,state)]));
+    return Promise.all([...latest.values()].slice(-25).reverse().map(async stored=>{const result=structuredClone(stored),record=records.get(result.requestId);
       if(record&&(this.serviceWorkChanged(record,state)||(record.workflow==='unfinished-work'&&record.sourceDigest!==workSourceDigest(state.jobs,state.revenuePilotJobs,sha256(canonicalJson(state.ledger)),state.capabilities)))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';if(!result.blockers.some(b=>b.reason==='WORK_SOURCE_CHANGED'))result.blockers.push({subjectId:result.requestId,reason:'WORK_SOURCE_CHANGED',missing:['A fresh review of changed durable work']});}
       if(record&&this.softwareWorkRuntimeChanged(record,state)){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.outputText='Runtime configuration changed; the previous software result is historical. '+result.outputText;if(!result.blockers.some(b=>b.reason==='SOFTWARE_RUNTIME_CHANGED'))result.blockers.push({subjectId:result.requestId,reason:'SOFTWARE_RUNTIME_CHANGED',missing:['Resume the same request to re-evaluate only affected steps.']});}
       if(state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===result.requestId)){result.status='CANCELLED';result.verification='NOT_VERIFIED';}
-      return result;});
+      if(record&&(await this.softwareWorkContractChanged(record)||this.softwareWorkReceiptContractChanged(record,state))){result.status='BLOCKED';result.verification='HISTORICAL_ANALYSIS';result.blockers.push({subjectId:result.requestId,reason:'SOFTWARE_CONTRACT_CHANGED',missing:['Authenticated owner must resume this exact work under current bounded contracts.']});}
+      return result;}));
   }
 
   async cancelOwnerWork(principal:Principal,requestId:string) {
@@ -2430,16 +2520,17 @@ export class SaraKernel {
   /** Consumed by the existing runtime worker. Never selects new idle goals. */
   async resumeOwnerWorkTick() {
     const state=await this.state();if(state.emergencyStopped)return {status:'BLOCKED',reason:'EMERGENCY_STOP'};
-    const records=state.events.filter(e=>e.type==='owner_work_received').map(e=>e.data as WorkRecord);
+    const records=state.events.filter(e=>e.type==='owner_work_received').map(e=>this.currentOwnerWorkRecord(e.data as WorkRecord,state));
     for(const record of records){
-      if(!record.plan)continue;
+      if(!record.plan||await this.softwareWorkContractChanged(record))continue;
       if(state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===record.request.requestId))continue;
       const latest=state.events.filter(e=>e.type==='owner_work_result'&&(e.data as {result:{planId:string}}).result.planId===record.plan!.id).at(-1);
       if(latest){const result=(latest.data as {result:ReturnType<typeof workResult>}).result;
         // A blocked/completed result requires new facts or an explicit owner
         // retry. A crash before acknowledgment remains resumable and idempotent.
         const changedRuntime=this.softwareWorkRuntimeChanged(record,state)&&(latest.data as {softwareRuntimeEvaluationDigest?:string}).softwareRuntimeEvaluationDigest!==this.softwareWorkConfigurationDigest(record);
-        if(result.execution?.status!=='PAUSED'&&!changedRuntime)continue;
+        const pendingOwnerRefresh=state.events.some(e=>e.type==='owner_work_reauthorized'&&e.sequence>latest.sequence&&(e.data as SoftwareWorkReauthorization).record.requestDigest===record.requestDigest&&(e.data as SoftwareWorkReauthorization).authorityContextDigest===this.capabilityAuthorityDigest(state));
+        if(result.execution?.status!=='PAUSED'&&!changedRuntime&&!pendingOwnerRefresh)continue;
       }
       return this.continueBoundedWork(record,4);
     }
@@ -2513,7 +2604,15 @@ export class SaraKernel {
     const plan=validatePlan(supplied),planDigest=sha256(canonicalJson(plan));
     await this.serializeMutation(async()=>{
       const state=await this.state();const existing=state.events.find(e=>e.type==='capability_plan_registered'&&(e.data as {id:string;version:number}).id===plan.id&&(e.data as {version:number}).version===plan.version);
-      if(existing){if((existing.data as {planDigest:string}).planDigest!==planDigest)throw new Error('PLAN_IDENTITY_CONFLICT');return;}
+      if(existing){
+        let acceptedDigest=(existing.data as {planDigest:string}).planDigest;
+        if(acceptedDigest!==planDigest){
+          const refreshes=state.events.filter(e=>e.type==='owner_work_reauthorized'&&e.actor.kind==='owner'&&e.actor.id===this.#constitution.ownerAuthority.ownerIdentity).map(e=>e.data as SoftwareWorkReauthorization).filter(e=>e.record.plan?.id===plan.id&&e.record.plan.version===plan.version);
+          for(const refresh of refreshes){if(refresh.previousPlanDigest!==acceptedDigest)throw new Error('PLAN_REAUTHORIZATION_CHAIN_CONFLICT');acceptedDigest=refresh.currentPlanDigest;}
+          if(acceptedDigest!==planDigest||refreshes.at(-1)?.authorityContextDigest!==this.capabilityAuthorityDigest(state))throw new Error('PLAN_IDENTITY_CONFLICT');
+        }
+        return;
+      }
       await this.authorize(principal,{action:'sandbox_development',targetId:`capability-plan:${plan.id}:${plan.version}`,external:false});
       await this.#store.append('capability_plan_registered',principal,{id:plan.id,version:plan.version,planDigest,plan});
     });
@@ -2694,7 +2793,16 @@ export class SaraKernel {
           }
         }
         const runtimeChanged=stored.result.subject.softwareRuntimeDigest!==context.currentIdentity.softwareRuntimeDigest;
-        const renewable=Boolean(admittedSoftware)&&!current&&sameBoundary&&(runtimeChanged||changedDependencies)&&!request.evidence?.length&&stored.result.evidence.every(e=>e.integrity==='KERNEL_RECEIPT');
+        const refreshed=state.events.filter(event=>event.type==='owner_work_reauthorized'&&event.actor.kind==='owner'&&event.actor.id===this.#constitution.ownerAuthority.ownerIdentity).map(event=>event.data as SoftwareWorkReauthorization).reverse().find(event=>event.authorityContextDigest===authorityContextDigest&&event.steps.some(step=>step.requestId===request!.requestId&&step.capabilityId===request!.capabilityId&&step.priorResultDigest===stored.result.resultDigest&&step.newContractDigest===contract?.contractDigest));
+        const refreshedStep=refreshed?.record.plan?.steps.find(step=>step.capabilityId===request!.capabilityId&&`plan-${sha256(canonicalJson({planId:refreshed.record.plan!.id,version:refreshed.record.plan!.version,stepId:step.id}))}`===request!.requestId);
+        let ownerRenewal=Boolean(refreshedStep)&&principal===SARA_PRINCIPAL&&!current&&stored.result.inputDigest===sha256(canonicalJson(request.input))&&canonicalJson(refreshedStep!.input)===canonicalJson(request.input)&&stored.result.authority.contextDigest===authorityContextDigest&&!state.emergencyStopped&&!state.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===refreshed!.record.request.requestId);
+        if(ownerRenewal){
+          const expected=new Set(refreshedStep!.dependsOn.map(stepId=>`plan-${sha256(canonicalJson({planId:refreshed!.record.plan!.id,version:refreshed!.record.plan!.version,stepId}))}`));
+          const references=[...new Set(request.evidenceReceiptIds??[])].map(digest=>referencedEvents.get(digest));
+          ownerRenewal=references.length===expected.size&&new Set(references.filter(Boolean).map(event=>(event!.data as {result:CapabilityResult}).result.requestId)).size===expected.size&&references.every(event=>Boolean(event)&&expected.has((event!.data as {result:CapabilityResult}).result.requestId));
+          for(const event of references)if(event&&!await referenceIsCurrent((event.data as {result:CapabilityResult}).result,event.data))ownerRenewal=false;
+        }
+        const renewable=(Boolean(admittedSoftware)&&!current&&sameBoundary&&(runtimeChanged||changedDependencies)||ownerRenewal)&&!request.evidence?.length&&stored.result.evidence.every(e=>e.integrity==='KERNEL_RECEIPT');
         if(stored.requestDigest!==requestDigest&&!renewable)throw new Error("CAPABILITY_REQUEST_REPLAY_CONFLICT");
         if(!renewable)return {...structuredClone(stored.result),replayed:true,receiptValidity:{current,reason:current?"Unchanged material authority and implementation identity.":"Historical receipt only; current identity differs. Re-evaluate before relying on it."}};
       }
@@ -2729,8 +2837,16 @@ export class SaraKernel {
           }
           context.evidence=evidence;
         }
+        if(request.capabilityId==='experience-to-procedure-compiler'&&(request.input as Record<string,Json>)?.sourceKind==='ISOLATED_REPAIR_RECEIPT'){
+          // Preserve owner-only direct invocation. A worker receives only the
+          // exact candidate-record step of an authenticated owner repair recipe;
+          // it never receives an owner principal or legacy compiler authority.
+          const admitted=state.events.find(event=>event.type==='owner_work_received'&&event.actor.kind==='owner'&&event.actor.id===this.#constitution.ownerAuthority.ownerIdentity&&(event.data as WorkRecord).plan?.steps.some(step=>step.capabilityId===request!.capabilityId&&`plan-${sha256(canonicalJson({planId:(event.data as WorkRecord).plan!.id,version:(event.data as WorkRecord).plan!.version,stepId:step.id}))}`===request!.requestId&&canonicalJson(step.input)===canonicalJson(request!.input)&&step.dependsOn.some(dependency=>{const source=(event.data as WorkRecord).plan!.steps.find(s=>s.id===dependency);return source?.capabilityId==='isolated-defect-repairer'&&`plan-${sha256(canonicalJson({planId:(event.data as WorkRecord).plan!.id,version:(event.data as WorkRecord).plan!.version,stepId:source.id}))}`===(request!.input as Record<string,Json>).sourceRequestId;})));
+          const cancelled=admitted&&state.events.some(event=>event.type==='owner_work_cancelled'&&(event.data as {requestId:string}).requestId===(admitted.data as WorkRecord).request.requestId);
+          context.ownerProcedureCompilationAuthorized=Boolean(admitted)&&!cancelled&&!state.emergencyStopped;
+        }
         if(!definition||!contract){status="BLOCKED";result={output:{code:"UNREGISTERED_CAPABILITY"}};}
-        else if(!policyDecision.allowed||definition.ownerOnly&&!context.ownerAuthenticated){status="BLOCKED";result={output:{code:policyDecision.allowed?"AUTHENTICATED_OWNER_REQUIRED":policyDecision.code}};}
+        else if(!policyDecision.allowed||definition.ownerOnly&&!context.ownerAuthenticated&&!context.ownerProcedureCompilationAuthorized){status="BLOCKED";result={output:{code:policyDecision.allowed?"AUTHENTICATED_OWNER_REQUIRED":policyDecision.code}};}
         else if(contract.qualification.status!=="PASSED"){status="BLOCKED";result={output:{code:"QUALIFICATION_FAILED"}};}
         else {
           validateSchema(contract.inputSchema,request.input as Json);
@@ -2744,13 +2860,15 @@ export class SaraKernel {
               context.softwareRuntime=this.#softwareRuntime;
             }
           }
-          if(request.capabilityId==='isolated-defect-reproducer'){
+          if(['isolated-defect-reproducer','isolated-defect-repairer'].includes(request.capabilityId)){
             // The event can only be admitted through verified owner authentication.
             // Bind worker authority to the exact immutable plan step and input;
             // a trusted bridge/internal principal does not gain this authority.
             const admitted=state.events.find(event=>event.type==='owner_work_received'&&event.actor.kind==='owner'&&event.actor.id===this.#constitution.ownerAuthority.ownerIdentity&&(event.data as WorkRecord).plan?.steps.some(step=>step.capabilityId===request!.capabilityId&&`plan-${sha256(canonicalJson({planId:(event.data as WorkRecord).plan!.id,version:(event.data as WorkRecord).plan!.version,stepId:step.id}))}`===request!.requestId&&canonicalJson(step.input)===canonicalJson(request!.input)));
             const cancelled=admitted&&state.events.some(event=>event.type==='owner_work_cancelled'&&(event.data as {requestId:string}).requestId===(admitted.data as WorkRecord).request.requestId);
             context.isolatedReproductionAuthorized=!cancelled&&(this.isVerifiedOwner(principal)||Boolean(admitted));
+            context.isolatedRepairAuthorized=request.capabilityId==='isolated-defect-repairer'&&context.isolatedReproductionAuthorized;
+            if(context.isolatedRepairAuthorized)context.isolatedRepairGuard=async()=>{const current=await this.state();if(current.emergencyStopped)throw new Error('EMERGENCY_STOP');if(admitted&&current.events.some(e=>e.type==='owner_work_cancelled'&&(e.data as {requestId:string}).requestId===(admitted.data as WorkRecord).request.requestId))throw new Error('CANCELLED');const live=await capabilityContract(request.capabilityId);if(live?.contractDigest!==contract.contractDigest||live.status!=='ENABLED')throw new Error('CAPABILITY_CHANGED');};
             if(context.isolatedReproductionAuthorized&&!state.emergencyStopped)await this.authorize(principal,{action:'sandbox_development',targetId:request.requestId,external:false});
           }
           const procedural=definition.sourceFiles.some(path=>path.startsWith('procedural/'));
@@ -3659,8 +3777,16 @@ export class SaraKernel {
           await this.#store.append("model_budget_reserved",SARA_PRINCIPAL,{id,routeKey:client.routeKey,amountMicrousd,inputTokens,maximumOutputTokens:input.maximumOutputTokens,promptDigest:sha256(input.prompt)});
           return id;
         });
+        // The shared wrapper itself awaited token counting and reservation.
+        // Recheck the caller's exact gate at the final raw-provider boundary.
+        if(input.beforeDispatch){
+          let permitted=false;
+          try{permitted=await input.beforeDispatch();}catch{/* fail closed before provider */}
+          if(!permitted)throw new WorkerModelDispatchRejectedError('Current paid-dispatch authority was refused before provider invocation.');
+        }
         // Never release a reservation on errors, crashes, or absent usage evidence.
-        const result=await client.execute(input);
+        const {beforeDispatch:_gate,...providerInput}=input;
+        const result=await client.execute(providerInput);
         await this.serializeMutation(async()=>{
           if(!Number.isSafeInteger(result.inputTokens)||result.inputTokens<0||result.inputTokens>inputTokens||
             !Number.isSafeInteger(result.billableOutputTokens)||result.billableOutputTokens<0||result.billableOutputTokens>input.maximumOutputTokens) {

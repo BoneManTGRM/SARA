@@ -5,7 +5,7 @@ import type {CapabilityPlan} from './digital-capabilities/plan.ts';
 
 type ProposedStep={id:string;input:Json;completion:CapabilityPlan['steps'][number]['completion'];reason:string};
 /** Bounded extraction of attributed facts, never policy, evidence grades or commands. */
-export function suppliedReview(kind:string,body:string,sourceId:string,executeReproduction=false){
+export function suppliedReview(kind:string,body:string,sourceId:string,executeReproduction=false,prepareRepair=false){
  const steps:ProposedStep[]=[],missing:string[]=[],fields:{field:string;kind:'OBSERVED'|'DERIVED'|'UNKNOWN';source:string}[]=[];
  const fact=(name:string,labels:string[],maximum=2048):string|null=>{
   const label=labels.join('|');
@@ -23,7 +23,7 @@ export function suppliedReview(kind:string,body:string,sourceId:string,executeRe
   fields.push({field:`${name}.microUsd`,kind:'DERIVED',source:`Exact integer conversion of ${sourceId}`});return micro;
  };
  const add=(id:string,input:Json,path:string[],equals:Json,reason:string)=>steps.push({id,input,completion:[{path,equals}],reason});
- if(kind==='supplied-defect')return defectReview(body,sourceId,executeReproduction);
+ if(kind==='supplied-defect')return defectReview(body,sourceId,executeReproduction,prepareRepair);
  else{
   fields.push({field:'opportunityId',kind:'DERIVED',source:`Unapproved supplied material identity: ${sourceId}`});
   const price=money('price',['price','proposed price']),cost={directCashMicroUsd:money('direct cash cost',['direct cash cost']),modelApiMicroUsd:money('model API cost',['model API cost']),infrastructureMicroUsd:money('infrastructure cost',['infrastructure cost']),toolingMicroUsd:money('tooling cost',['tooling cost']),allocatedMicroUsd:null,modeledLaborMicroUsd:null};

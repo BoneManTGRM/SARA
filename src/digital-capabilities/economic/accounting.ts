@@ -1,6 +1,6 @@
 import {canonicalJson,sha256} from '../../canonical.ts';
 import type {LedgerEntry} from '../../types.ts';
-import type {RevenuePilotJob} from '../../revenue-pilot.ts';
+import {unresolvedRevenueAllowance,type RevenuePilotJob} from '../../revenue-pilot.ts';
 import type {ExecutionContext} from '../types.ts';
 import {CapabilityInputError,type Json} from '../schema.ts';
 import {roleCostDigest} from '../../revenue-job-accounting.ts';
@@ -16,6 +16,7 @@ export function buildAuthoritativeJobAccounting(jobIds:string[],ledger:readonly 
  const entries:Data[]=[],unknowns=['Refunds, hosting/tooling allocations and other expenses remain unknown unless explicitly job-attributed; absence of records does not prove zero expense.','Unreconciled model expense uses conservatively accounted durable role costs, including failures. Owner-attested invoice records cover exact role receipts without creating independent provider invoice attestations.'];
  const boundRevenueIds=new Set(jobs.flatMap(j=>j.revenueEvidenceId?[j.revenueEvidenceId]:[]));
  for(const job of selected){
+  if(job.activeLease&&job.activeLease.dispatchState!=='NOT_DISPATCHED')unknowns.push(`Job ${job.id}: unresolved provider dispatch; reserved allowance USD${unresolvedRevenueAllowance(job).toFixed(6)} is not actual cash expense. Preserve the lease and reconcile exact provider/output evidence before retry; recorded costs do not establish zero for this attempt.`);
   const expenses=ledger.filter(e=>e.realized&&e.jobAccounting?.jobId===job.id);
   const reconciled=new Set(expenses.filter(e=>e.jobAccounting!.category==='MODEL_API').flatMap(e=>e.jobAccounting!.roleReceiptDigests??[]));
   for(const expense of expenses)entries.push({id:`expense-${expense.id}`,jobId:job.id,sourceId:`ledger:${expense.id}`,kind:expense.jobAccounting!.category,amountMicroUsd:micro(expense.amountUsd),realized:true});
@@ -41,7 +42,7 @@ export function buildAuthoritativeJobAccounting(jobIds:string[],ledger:readonly 
  if(unattributed.length>128)unknowns.push('Unattributed entry details are bounded to 128; the source digest binds the entire unattributed set. Full profitability is not established.');
  if(missingJobIds.length)unknowns.push(`Requested job records missing: ${missingJobIds.join(', ')}.`);
  const jobStatuses=selected.map(j=>({jobId:j.id,status:j.status}));
- const basisDigest=sha256(canonicalJson({jobIds:ids,entries,missingJobIds,unattributed,jobStatuses,attributions:ledger.filter(e=>ids.includes(e.jobAccounting?.jobId??'')),aggregates:selected.map(j=>({id:j.id,actualExecutionCostMicroUsd:micro(j.actualExecutionCostUsd)}))}));
+ const basisDigest=sha256(canonicalJson({jobIds:ids,entries,missingJobIds,unattributed,jobStatuses,attributions:ledger.filter(e=>ids.includes(e.jobAccounting?.jobId??'')),aggregates:selected.map(j=>({id:j.id,actualExecutionCostMicroUsd:micro(j.actualExecutionCostUsd),pendingLease:j.activeLease??null}))}));
  return {jobIds:ids,entries,unknowns,basisDigest,missingJobIds,unattributedEntries:unattributed.slice(0,128),unattributedEntryCount:unattributed.length,jobStatuses};
 }
 export function projectAuthoritativeJobAccounting(jobIds:string[],context:ExecutionContext):AuthoritativeJobAccounting {

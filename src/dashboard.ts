@@ -1233,7 +1233,10 @@ export const DASHBOARD_HTML = `<!doctype html>
           const output = receipt.output || {};
           const lines = [...(output.commitments || []).map(item => item.statement), ...(output.followUps || []).map(item => item.reason), ...(output.ambiguities || []), ...(output.responseDraft ? [output.responseDraft] : []), ...(output.sections || []).flatMap(section => section.items.map(item => item.summary)), ...(output.basis === 'AUTHORITATIVE_JOB_STATE' ? output.jobs.map(job => job.jobId + ': linked realized revenue $' + (job.realizedRevenueMicroUsd / 1000000).toFixed(6) + '; recorded model and direct costs $' + ((job.modelApiMicroUsd + job.directExternalMicroUsd) / 1000000).toFixed(6) + '; refunds $' + (job.refundsMicroUsd / 1000000).toFixed(6) + '; allocated costs $' + (job.allocatedMicroUsd / 1000000).toFixed(6) + '; recorded net contribution $' + (job.recordedNetContributionMicroUsd === null ? 'unknown' : (job.recordedNetContributionMicroUsd / 1000000).toFixed(6)) + '; full profit remains unverified') : []), ...(output.accountingUnknowns || [])];
           if (receipt.capability.id === 'bug-reproduction-planner') lines.push(output.summary || ('Reproduction plan: ' + output.status), ...(result.receipts.some(r => r.capability.id === 'isolated-defect-reproducer') ? [] : ['Reproduction has not been executed.']), output.nextDiagnostic || '', ...output.steps.map(step => step.action));
+          if (receipt.capability.id === 'software-journey-tester' && output.evidence && output.evidence.failureCode) lines.push('Browser boundary: ' + output.evidence.failureCode + '. No application defect is established by this environment failure.');
           if (receipt.capability.id.startsWith('software-')) lines.push(...(output.evidence && output.evidence.ciRuns ? output.evidence.ciRuns.map(run => 'Source CI: ' + run.name + ' · ' + run.status + ' · ' + (run.conclusion || 'pending') + ' · ' + run.headSha) : []), ...(output.evidence && output.evidence.files ? ['Inspected: ' + output.evidence.files.map(file => file.path).join(', ')] : []), ...(output.evidence && output.evidence.steps ? output.evidence.steps.map(step => step.action + ': expected ' + step.expected + '; observed ' + step.observed + ' · ' + (step.passed ? 'PASSED' : 'NOT PASSED')) : []), output.summary || '', ...(output.remaining || []), ...(output.evidence && output.evidence.untested ? ['Untested: ' + output.evidence.untested.join('; ')] : []), ...(output.evidence && output.evidence.sourceRevision ? ['Source revision: ' + output.evidence.sourceRevision] : []), 'Recorded workflow cash excludes unresolved infrastructure allocation.');
+          if (receipt.capability.id === 'experience-to-procedure-compiler' && output.persisted && output.candidate) lines.push('Procedure candidate preserved. Independent procedure qualification is still required; execution authority is unchanged.');
+          if (receipt.capability.id === 'isolated-defect-repairer') lines.push('SYNTHETIC / ISOLATED repair: ' + output.summary, 'This is an adapted seeded source copy. The live application was not changed.', 'Recorded workflow cash excludes unresolved infrastructure allocation.');
           if (receipt.capability.id === 'isolated-defect-reproducer') lines.push('Isolated reproduction: ' + output.result + '. ' + output.summary, 'Fixture artifact: ' + (output.artifactDigest || 'not executed'), 'Source revision (supplied): ' + output.revision);
           if (receipt.capability.id === 'root-cause-analyzer') lines.push('Root cause remains unconfirmed. ' + output.nextDiagnostic);
           if (receipt.capability.id === 'quote-margin-guard') lines.push('Quote calculation: ' + output.status + '. Expected cash contribution: ' + (output.contributionMicroUsd === null ? 'unknown' : '$' + (output.contributionMicroUsd / 1000000).toFixed(6)) + '; cash margin: ' + (output.marginPpm === null ? 'unknown' : (output.marginPpm / 10000).toFixed(2) + '%') + '. These are supplied estimates, not realized revenue.');
@@ -1251,6 +1254,24 @@ export const DASHBOARD_HTML = `<!doctype html>
           const pre = document.createElement('pre'); pre.style.whiteSpace = 'pre-wrap'; pre.style.overflowWrap = 'anywhere'; pre.textContent = JSON.stringify({result: receipt.output, evidence: receipt.resultDigest, cost: receipt.cost}, null, 2); details.appendChild(pre);
         }
         article.appendChild(details);
+        if (result.workflow === 'software-inspection') {
+          const resume = document.createElement('button'); resume.type = 'button'; resume.textContent = 'Resume this work';
+          resume.addEventListener('click', async () => {
+            if (body.dataset.owner !== 'connected') return;
+            const epoch = ownerWorkEpoch; resume.disabled = true;
+            document.querySelector('#owner-work-status').textContent = 'Reconciling this preserved request under current controls…';
+            try {
+              const response = await fetch('/api/owner/work/resume', {method:'POST', signal:AbortSignal.timeout(120000), headers:{...auth(),'Content-Type':'application/json'}, body:JSON.stringify({requestId:result.requestId})});
+              if (response.status === 401) { setConnected(false); return; }
+              const updated = await response.json();
+              if (body.dataset.owner !== 'connected' || epoch !== ownerWorkEpoch) return;
+              if (!response.ok) throw new Error(updated.error || 'Work reconciliation failed.');
+              renderOwnerWork([updated]); document.querySelector('#owner-work-status').textContent = updated.status + ' · ' + updated.verification;
+            } catch (error) { if (body.dataset.owner === 'connected' && epoch === ownerWorkEpoch) document.querySelector('#owner-work-status').textContent = 'Reconciliation interrupted. Resume the same work again. ' + error.message; }
+            finally { resume.disabled = false; }
+          });
+          article.appendChild(resume);
+        }
         list.appendChild(article);
       }
     }

@@ -15,7 +15,7 @@ import {
   readRevenuePilotArtifact,
   type RevenuePilotArtifact,
 } from "./revenue-pilot-artifacts.ts";
-import type { RevenuePilotJob, RevenuePilotLease } from "./revenue-pilot.ts";
+import { unresolvedRevenueAllowance, type RevenuePilotJob, type RevenuePilotLease } from "./revenue-pilot.ts";
 import { getRevenueService } from "./revenue-service-catalog.ts";
 import {
   persistRepositoryReadinessReportArtifact,
@@ -31,7 +31,7 @@ export type RevenuePilotOperatorTick =
   | { outcome: "nico_run_created" | "nico_run_advanced" | "nico_package_authorized"; jobId: string; runId: string }
   | {
     outcome: "idle";
-    reason: "no_authorized_job" | "active_lease" | "emergency_stop" | "monthly_budget" | "repository_evidence_unavailable";
+    reason: "no_authorized_job" | "active_lease" | "emergency_stop" | "monthly_budget" | "repository_evidence_unavailable" | "eligibility_changed" | "unresolved_provider_effect";
   };
 
 export type RevenuePilotOperatorStatus = {
@@ -39,6 +39,7 @@ export type RevenuePilotOperatorStatus = {
   running: boolean;
   monthlyBudgetUsd: number;
   currentMonthCostUsd: number;
+  unresolvedReservedUsd: number;
   lastTickAt: string | null;
   lastOutcome: RevenuePilotOperatorTick | null;
 };
@@ -290,6 +291,7 @@ export class RevenuePilotOperator {
       running: this.#running,
       monthlyBudgetUsd: this.#monthlyBudgetUsd,
       currentMonthCostUsd: currentMonthCost(state.revenuePilotJobs, this.#now(), this.#monthlyCostOffsetUsd),
+      unresolvedReservedUsd: state.revenuePilotJobs.reduce((sum,job)=>sum+unresolvedRevenueAllowance(job),0),
       lastTickAt: this.#lastTickAt,
       lastOutcome: this.#lastOutcome ? structuredClone(this.#lastOutcome) : null,
     };
@@ -364,17 +366,20 @@ export class RevenuePilotOperator {
     const workOrder=await this.#kernel.orderRevenuePilotWork(SARA_PRINCIPAL);
     const job = status.revenuePilotJobs.find(candidate=>candidate.id===workOrder[0]);
     if (!job || !job.nextRole) return this.#record({ outcome: "idle", reason: "no_authorized_job" });
-    if (job.activeLease && Date.parse(job.activeLease.expiresAt) > now.getTime()) {
+    if (job.activeLease) {
       const profile = ROLE_PROFILES[job.activeLease.role];
       const pending = job.activeLease.workerId === profile.workerId
-        ? await readPendingRevenuePilotArtifact({
-          stateDirectory: this.#stateDirectory,
-          jobId: job.id,
-          role: job.activeLease.role,
-        })
-        : null;
-      if (!pending) return this.#record({ outcome: "idle", reason: "active_lease" });
-      return this.#completePending(job, job.activeLease, pending);
+        ? await readPendingRevenuePilotArtifact({stateDirectory:this.#stateDirectory,jobId:job.id,role:job.activeLease.role}) : null;
+      if (pending) {
+        const stored=Date.parse(pending.storedAt);
+        if(stored<Date.parse(job.activeLease.claimedAt)||stored>Date.parse(job.activeLease.expiresAt))return this.#record({outcome:'idle',reason:'unresolved_provider_effect'});
+        return this.#completePending(job,job.activeLease,pending);
+      }
+      if(job.activeLease.dispatchState!=='NOT_DISPATCHED')return this.#record({outcome:'idle',reason:'unresolved_provider_effect'});
+      if(Date.parse(job.activeLease.expiresAt)>now.getTime())return this.#record({outcome:'idle',reason:'active_lease'});
+    }
+    if (await this.#kernel.inspectRevenuePilotStepEligibility(SARA_PRINCIPAL, job.id)) {
+      return this.#record({ outcome: "idle", reason: "eligibility_changed" });
     }
     let repositoryEvidence: StoredPublicRepositoryEvidence;
     try {
@@ -395,7 +400,8 @@ export class RevenuePilotOperator {
       return this.#record({ outcome: "idle", reason: "repository_evidence_unavailable" });
     }
     const profile = ROLE_PROFILES[job.nextRole];
-    const spent = currentMonthCost(status.revenuePilotJobs, now, this.#monthlyCostOffsetUsd);
+    const spent = currentMonthCost(status.revenuePilotJobs, now, this.#monthlyCostOffsetUsd)
+      + status.revenuePilotJobs.reduce((sum,job)=>sum+unresolvedRevenueAllowance(job),0);
     if (spent + profile.maximumTaskCostUsd > this.#monthlyBudgetUsd + Number.EPSILON) {
       return this.#record({ outcome: "idle", reason: "monthly_budget" });
     }
@@ -573,7 +579,7 @@ export class RevenuePilotOperator {
           outputDigest: artifact.outputDigest,
           costUsd,
           verificationPassed: null,
-          completedAt: this.#now().toISOString(),
+          completedAt: artifact.storedAt,
           modelExecution: artifact.modelExecution,
           executionFailed: true,
           failureStage: "artifact_persistence",
@@ -587,7 +593,7 @@ export class RevenuePilotOperator {
       outputDigest: artifact.outputDigest,
       costUsd,
       verificationPassed,
-      completedAt: this.#now().toISOString(),
+      completedAt: artifact.storedAt,
       modelExecution: artifact.modelExecution,
       ...(reportDigest ? { reportDigest } : {}),
     });
