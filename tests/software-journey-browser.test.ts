@@ -114,3 +114,23 @@ test('startup diagnostics cap retained bytes at 16KiB, preserve chunk identity a
  const a=first.snapshot(state),b=second.snapshot(state);assert.equal(a.capturedBytes,16384);assert.equal(a.truncated,true);assert.equal(a.classification,'UNKNOWN');assert.equal(a.diagnosticDigest,b.diagnosticDigest);
  first.discard();first.append(Buffer.from('Permission denied'));assert.equal(first.snapshot(state).capturedBytes,0);
 });
+
+test('first fatal Chromium callsite overrides unrelated DBus permission errors and binds only fatal errno',()=>{
+ const diagnostics=new JourneyBrowserStartupDiagnostics();
+ diagnostics.append(Buffer.from('[100:100:0913/000000:ERROR:dbus/bus.cc:408] Failed to connect to bus: Permission denied (13)\n[100:100:0913/000000:FATAL:sandbox/linux/services/credentials.cc:340] Check failed: SetGidAndUidMaps(gid, uid). : Operation not permitted (1)\n'));
+ const report=diagnostics.snapshot({exitCode:null,signal:'SIGABRT',spawnErrorCode:null});
+ assert.equal(report.classification,'SANDBOX_CREDENTIALS_FAILURE');assert.equal(report.classificationBasis,'FIRST_FATAL_LINE');assert.equal(report.fatalCallsite,'credentials.cc');assert.equal(report.fatalOperation,'SET_GID_UID_MAPS');assert.equal(report.fatalErrno,1);
+});
+test('fatal profile, namespace, sandbox helper and unknown sources stay distinct without private data',()=>{
+ const cases=[['sandbox/linux/services/namespace_sandbox.cc:277','Check failed: sys_sigaction(sig, &action, nullptr) == 0. : Permission denied (13)','NAMESPACE_SANDBOX_FAILURE','namespace_sandbox.cc'],['sandbox/policy/linux/sandbox_linux.cc:616','Check failed: proc_fd.is_valid(). : Permission denied (13)','LINUX_SANDBOX_FAILURE','sandbox_linux.cc'],['chrome/browser/process_singleton_posix.cc:313','Socket path too long: /private/synthetic-secret','PROFILE_INITIALIZATION_FAILURE','process_singleton_posix.cc'],['sandbox/linux/suid/client/setuid_sandbox_host.cc:166','The SUID sandbox helper binary was found, but is not configured correctly. /private/synthetic-secret','SANDBOX_HELPER_CONFIGURATION','setuid_sandbox_host.cc'],['/private/synthetic-secret.cc:13','unknown synthetic-secret','UNKNOWN_FATAL',null]] as const;
+ for(const [source,message,classification,callsite] of cases){const diagnostics=new JourneyBrowserStartupDiagnostics();diagnostics.append(Buffer.from('DBus Permission denied (13)\n[123:123:0913/000000:FATAL:'+source+'] '+message));const report=diagnostics.snapshot({exitCode:null,signal:'SIGABRT',spawnErrorCode:null});assert.equal(report.classification,classification);assert.equal(report.fatalCallsite,callsite);assert.equal(report.classificationBasis,'FIRST_FATAL_LINE');assert.equal(JSON.stringify(report).includes('synthetic-secret'),false);assert.equal(JSON.stringify(report).includes('/private'),false);}
+});
+test('fatal precedence is chronological, allows legacy source formatting and excludes unrelated errno and identifiers',()=>{
+ const diagnostics=new JourneyBrowserStartupDiagnostics();diagnostics.append(Buffer.from('[100:100:FATAL:credentials.cc(365)] Check failed: DropAllCapabilitiesOnCurrentThread(). : Permission denied (13)\n[100:100:FATAL:process_singleton_posix.cc(313)] Socket path too long: /private/synthetic-secret\n'));
+ const report=diagnostics.snapshot({exitCode:null,signal:'SIGABRT',spawnErrorCode:null});assert.equal(report.fatalCallsite,'credentials.cc');assert.equal(report.fatalOperation,'DROP_CAPABILITIES');assert.equal(report.fatalErrno,13);
+ const unknown=new JourneyBrowserStartupDiagnostics();unknown.append(Buffer.from('[100:100:FATAL:credentials.cc:340] synthetic identifier (999999)\nPermission denied (13)'));const denied=unknown.snapshot({exitCode:1,signal:null,spawnErrorCode:null});assert.equal(denied.fatalErrno,null);assert.equal(denied.fatalOperation,null);
+});
+
+test('release fatal with omitted check retains only a bounded allowlisted public source line',()=>{
+ for(const [source,expected] of [['sandbox/linux/services/credentials.cc:340',340],['credentials.cc(365)',365],['credentials.cc:10001',null],['/private/synthetic-secret.cc:340',null]] as const){const diagnostics=new JourneyBrowserStartupDiagnostics();diagnostics.append(Buffer.from('[100:100:FATAL:'+source+'] Check failed: . : Permission denied (13)'));const report=diagnostics.snapshot({exitCode:null,signal:'SIGABRT',spawnErrorCode:null});assert.equal(report.fatalSourceLine,expected);assert.equal(report.fatalOperation,null);assert.equal(report.fatalErrno,13);assert.equal(JSON.stringify(report).includes('synthetic-secret'),false);}
+});
