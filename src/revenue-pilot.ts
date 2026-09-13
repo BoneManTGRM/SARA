@@ -77,7 +77,22 @@ export type RevenuePilotLease = {
   role: Exclude<RevenuePilotRole, "opportunity_scout" | "commercial_analyst">;
   claimedAt: string;
   expiresAt: string;
+  dispatchState?: 'NOT_DISPATCHED' | 'PENDING';
+  pendingDispatch?: { executionId: string; promptDigest: string; maximumCostUsd: number; startedAt: string };
 };
+
+/** A reserved allowance is not an actual charge. Legacy leases cannot prove
+ * whether their provider ran, so retain the remaining job ceiling conservatively. */
+export function unresolvedRevenueAllowance(job: RevenuePilotJob): number {
+  const lease=job.activeLease;
+  if(!lease)return 0;
+  if(lease.dispatchState==='NOT_DISPATCHED'&&!lease.pendingDispatch)return 0;
+  const remaining=Math.max(0,job.plan.maximumExecutionCostUsd-job.actualExecutionCostUsd);
+  if(lease.dispatchState===undefined&&!lease.pendingDispatch)return remaining;
+  const pending=lease.pendingDispatch;
+  if(lease.dispatchState!=='PENDING'||!pending||!Number.isFinite(pending.maximumCostUsd)||pending.maximumCostUsd<0||pending.maximumCostUsd>remaining||!/^[a-f0-9]{64}$/u.test(pending.promptDigest)||!pending.executionId||!Number.isFinite(Date.parse(pending.startedAt)))throw new Error('Invalid unresolved provider dispatch identity.');
+  return pending.maximumCostUsd;
+}
 
 export type RevenuePilotReceipt = {
   role: RevenuePilotRole;
@@ -88,7 +103,7 @@ export type RevenuePilotReceipt = {
   completedAt: string;
   modelExecution?: WorkerModelExecutionEvidence;
   modelFailure?: WorkerModelFailureEvidence;
-  failureStage?: "model_execution" | "artifact_persistence";
+  failureStage?: "model_execution" | "artifact_persistence" | "eligibility_changed";
   reportDigest?: string;
 };
 
@@ -382,6 +397,7 @@ export function claimRevenuePilotRole(
     role: job.nextRole,
     claimedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + leaseSeconds * 1_000).toISOString(),
+    dispatchState: 'NOT_DISPATCHED',
   };
   const claimed = copyJob(job);
   claimed.status = "running";
@@ -400,7 +416,7 @@ export type RevenuePilotRoleCompletion = {
   modelExecution?: WorkerModelExecutionEvidence;
   modelFailure?: WorkerModelFailureEvidence;
   executionFailed?: boolean;
-  failureStage?: "model_execution" | "artifact_persistence";
+  failureStage?: "model_execution" | "artifact_persistence" | "eligibility_changed";
   reportDigest?: string;
 };
 

@@ -66,6 +66,51 @@ export const NICOS_JOURNEY_PROFILE: readonly JourneyProfileStep[] = Object.freez
   { action: 'Pass movement test', selector: 'button[aria-label="Pass movement test"]', expectedSelector: '#boltbot-mission-title', expected: 'Scanner test' },
 ].map(step => Object.freeze(step)));
 
+export type JourneyBrowserStartupDiagnostic = {
+  classification: 'SANDBOX_UNAVAILABLE' | 'SANDBOX_HELPER_CONFIGURATION' | 'NAMESPACE_UNAVAILABLE' | 'MISSING_LIBRARY' | 'CRASHPAD_FAILURE' | 'ACCESS_DENIED' | 'EXECUTABLE_UNAVAILABLE' | 'RESOURCE_UNAVAILABLE' | 'PROCESS_CRASH' | 'UNKNOWN';
+  exitCode: number | null;
+  signal: string | null;
+  spawnErrorCode: string | null;
+  capturedBytes: number;
+  truncated: boolean;
+  diagnosticDigest: string;
+  digestScope: 'BOUNDED_STDERR_PREFIX_AND_EXIT';
+};
+
+/** Process output is diagnostic evidence, never instructions. Retain at most
+ * 16KiB in memory and emit only a closed classification, safe exit facts and
+ * their digest. Raw stderr, paths and arbitrary spawn errors never leave here. */
+export class JourneyBrowserStartupDiagnostics {
+  #buffer = Buffer.alloc(16 * 1024);
+  #bytes = 0;
+  #truncated = false;
+  #discarded = false;
+  append(chunk: Buffer): void {
+    if (this.#discarded) return;
+    const count = Math.min(chunk.length, this.#buffer.length - this.#bytes);
+    chunk.copy(this.#buffer, this.#bytes, 0, count); this.#bytes += count;
+    if (count < chunk.length) this.#truncated = true;
+  }
+  discard(): void { this.#buffer.fill(0); this.#bytes = 0; this.#truncated = false; this.#discarded = true; }
+  snapshot(state: { exitCode: number | null; signal: string | null; spawnErrorCode: string | null }): JourneyBrowserStartupDiagnostic {
+    const exitCode = Number.isSafeInteger(state.exitCode) && state.exitCode! >= 0 && state.exitCode! <= 255 ? state.exitCode : null;
+    const signal = ['SIGABRT','SIGSEGV','SIGILL','SIGBUS','SIGTRAP','SIGKILL','SIGTERM','SIGSYS','SIGHUP','SIGQUIT','SIGXCPU','SIGXFSZ'].includes(state.signal ?? '') ? state.signal : null;
+    const spawnErrorCode = state.spawnErrorCode === null ? null : ['ENOENT','EACCES','EPERM','ENOMEM','EAGAIN'].includes(state.spawnErrorCode) ? state.spawnErrorCode : 'UNKNOWN';
+    const stderr = this.#buffer.subarray(0, this.#bytes).toString('utf8');
+    let classification: JourneyBrowserStartupDiagnostic['classification'] = 'UNKNOWN';
+    if (/SUID sandbox helper binary was found, but is not configured correctly/iu.test(stderr)) classification = 'SANDBOX_HELPER_CONFIGURATION';
+    else if (/Failed to move to new namespace|Failed to create[^\r\n]*namespace/iu.test(stderr)) classification = 'NAMESPACE_UNAVAILABLE';
+    else if (/No usable sandbox|Running as root without --no-sandbox/iu.test(stderr)) classification = 'SANDBOX_UNAVAILABLE';
+    else if (/error while loading shared libraries|cannot open shared object file/iu.test(stderr)) classification = 'MISSING_LIBRARY';
+    else if (/chrome_crashpad_handler.*(?:required|failed|error|denied)|crashpad.*(?:failed|error|denied)/iu.test(stderr)) classification = 'CRASHPAD_FAILURE';
+    else if (spawnErrorCode === 'EACCES' || spawnErrorCode === 'EPERM' || /Permission denied|Access is denied/iu.test(stderr)) classification = 'ACCESS_DENIED';
+    else if (spawnErrorCode === 'ENOENT') classification = 'EXECUTABLE_UNAVAILABLE';
+    else if (spawnErrorCode === 'ENOMEM' || spawnErrorCode === 'EAGAIN' || /Cannot allocate memory|Resource temporarily unavailable/iu.test(stderr)) classification = 'RESOURCE_UNAVAILABLE';
+    else if (signal !== null && ['SIGABRT','SIGSEGV','SIGILL','SIGBUS','SIGTRAP','SIGSYS'].includes(signal)) classification = 'PROCESS_CRASH';
+    return { classification, exitCode, signal, spawnErrorCode, capturedBytes: this.#bytes, truncated: this.#truncated, diagnosticDigest: sha256(canonicalJson({ stderrPrefixSha256: sha256(this.#buffer.subarray(0, this.#bytes)), capturedBytes: this.#bytes, truncated: this.#truncated, exitCode, signal, spawnErrorCode })), digestScope: 'BOUNDED_STDERR_PREFIX_AND_EXIT' };
+  }
+}
+
 export type SoftwareJourneyResult = {
   schemaVersion: 1;
   actor: 'SARA_RUNTIME';
@@ -85,6 +130,7 @@ export type SoftwareJourneyResult = {
   fetchedBytes: number;
   elapsedMilliseconds: number;
   failureCode: string | null;
+  startupDiagnostics?: JourneyBrowserStartupDiagnostic | null;
   environment: JourneyEnvironmentIdentity;
   limitations: string[];
 };
@@ -270,9 +316,11 @@ export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> 
   const started = performance.now();
   const result: SoftwareJourneyResult = {
     schemaVersion: 1, actor: 'SARA_RUNTIME', target: 'https://nicos-world.com/', profile: 'nicos-movement-to-scanner-v1', provenance: 'ISOLATED', assetProvenance: 'EXTERNAL_READ_ONLY', status: 'INCOMPLETE_EVIDENCE', steps: [], assets: [], assetSetDigest: null, screenshotDigest: null, servingRevision: null, runtimeExceptionCount: 0, deniedRequestCount: 0, resourceFailureCount: 0, fetchedBytes: 0, elapsedMilliseconds: 0, failureCode: null,
-    environment: emptyJourneyEnvironment(),
+    startupDiagnostics: null, environment: emptyJourneyEnvironment(),
     limitations: ['Public static assets run in a new isolated browser profile with external effects blocked; this is not a full live-site integration test.', 'Serving git revision is unknown; static asset hashes must not be equated to a separately observed repository SHA.', 'Only desktop movement-to-scanner transition is tested. Mobile, persisted restart, scanner completion, full mission and other destinations remain untested.', 'Runtime or harness failure is incomplete evidence and does not by itself establish an application defect.', 'Recorded invocation cash does not establish allocated infrastructure expense.'],
   };
+  const startupDiagnostics = new JourneyBrowserStartupDiagnostics();
+  let startupComplete = false, launchError = false, spawnErrorCode: string | null = null, childClosed: Promise<void> | undefined;
   const budget = new JourneyResourceBudget();
   const controller = new AbortController();
   const pending = new Map<number, PendingCommand>();
@@ -354,8 +402,10 @@ export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> 
       try { await chown(directory, childIdentity.uid, childIdentity.gid); }
       catch { throw new Error('JOURNEY_BROWSER_USER_ISOLATION_UNAVAILABLE'); }
     }
-    child = spawn(executablePath, nicosJourneyBrowserArguments(directory), { ...childIdentity, stdio: 'ignore', env: { PATH: process.env.PATH, HOME: directory, LANG: 'en_US.UTF-8' } });
-    let launchError = false; child.on('error', () => { launchError = true; });
+    child = spawn(executablePath, nicosJourneyBrowserArguments(directory), { ...childIdentity, stdio: ['ignore', 'ignore', 'pipe'], env: { PATH: process.env.PATH, HOME: directory, LANG: 'en_US.UTF-8' } });
+    child.stderr!.on('data', (chunk: Buffer) => startupDiagnostics.append(chunk));
+    childClosed = new Promise<void>(resolve => child!.once('close', () => resolve()));
+    child.on('error', (error: NodeJS.ErrnoException) => { launchError = true; spawnErrorCode = typeof error.code === 'string' ? error.code : 'UNKNOWN'; });
     const endpoint = await waitForSandboxBrowserEndpoint({ read: () => readFile(join(directory!, 'DevToolsActivePort'), 'utf8'), alive: () => !launchError && child!.exitCode === null && child!.signalCode === null, now: () => performance.now(), pause: milliseconds => delay(milliseconds) });
     socket = new WebSocket(`ws://127.0.0.1:${endpoint.port}${endpoint.path}`);
     await new Promise<void>((resolve, reject) => {
@@ -393,6 +443,7 @@ export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> 
       result.environment.packagedVersionMatches = browserVersion.product.split('/')[1] === result.environment.packagedBuild.version;
       if (!result.environment.packagedVersionMatches) throw new Error('JOURNEY_BROWSER_VERSION_MISMATCH');
     }
+    startupComplete = true; startupDiagnostics.discard();
     const context = await send('Target.createBrowserContext', { disposeOnDetach: true }, true);
     await send('Browser.setDownloadBehavior', { behavior: 'deny', browserContextId: context.browserContextId }, true);
     const target = await send('Target.createTarget', { url: 'about:blank', browserContextId: context.browserContextId }, true);
@@ -444,9 +495,17 @@ export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> 
     result.status = 'PASSED';
   } catch (error) {
     const code = error instanceof Error ? error.message : '';
+    if (child && !startupComplete) {
+      // Let already-exited stderr drain, boundedly. Record exit facts before
+      // cleanup kills the child so cleanup cannot masquerade as a crash cause.
+      if (launchError || child.exitCode !== null || child.signalCode !== null) await Promise.race([childClosed, delay(100)]);
+      result.startupDiagnostics = startupDiagnostics.snapshot({ exitCode: child.exitCode, signal: child.signalCode, spawnErrorCode });
+      if (result.startupDiagnostics.classification !== 'UNKNOWN' && (code.startsWith('SANDBOX_BROWSER_') || ['JOURNEY_BROWSER_CONNECTION_FAILED','JOURNEY_BROWSER_CONNECT_TIMEOUT','JOURNEY_BROWSER_CLOSED'].includes(code))) result.failureCode ??= `JOURNEY_BROWSER_${result.startupDiagnostics.classification}`;
+    }
     result.failureCode ??= /^JOURNEY_[A-Z_]+$/u.test(code) ? code : /^SANDBOX_BROWSER_/u.test(code) ? 'JOURNEY_BROWSER_UNAVAILABLE' : controller.signal.aborted ? 'JOURNEY_LIFETIME_LIMIT' : 'JOURNEY_ENVIRONMENT_FAILURE';
     if (sessionId && !controller.signal.aborted) await capture().catch(() => undefined);
   } finally {
+    startupDiagnostics.discard();
     closed = true; controller.abort(); clearTimeout(lifetime);
     for (const resolve of waitingFetches.splice(0)) resolve();
     for (const wait of pending.values()) { clearTimeout(wait.timer); wait.reject(new Error('JOURNEY_BROWSER_CLOSED')); } pending.clear();

@@ -46,6 +46,9 @@ export type WorkerModelRawResult = {
   billableOutputTokens: number;
 };
 
+/** An admission refusal is proven not to have called the provider. */
+export class WorkerModelDispatchRejectedError extends Error {}
+
 export type WorkerModelClient = {
   routeKey: string;
   maximumWallTimeMs: number;
@@ -54,6 +57,7 @@ export type WorkerModelClient = {
     prompt: string;
     reasoningLevel: WorkerModelRoute["reasoningLevel"];
     maximumOutputTokens: number;
+    beforeDispatch?: () => Promise<boolean>;
   }): Promise<WorkerModelRawResult>;
 };
 
@@ -296,6 +300,7 @@ export async function executeWorkerModelTask(
   plan: WorkerModelPlan,
   prompt: string,
   clients: readonly WorkerModelClient[],
+  beforeDispatch?: () => Promise<boolean>,
 ): Promise<WorkerModelExecution> {
   if (!prompt.trim()) throw new Error("A non-empty worker prompt is required.");
   if (plan.routes.length === 0 || plan.routes.length > plan.maximumAttempts || plan.maximumAttempts > 2) {
@@ -353,14 +358,30 @@ export async function executeWorkerModelTask(
       continue;
     }
 
+    // A caller's existing authority/reservation gate can change during token
+    // counting or a failed attempt. Refusal is not a provider charge and must
+    // stop fallback, while prior attempted usage remains in failure evidence.
+    if (beforeDispatch) {
+      let permitted = false;
+      try { permitted = await beforeDispatch(); } catch { /* fail closed */ }
+      if (!permitted) {
+        attempts.push({ provider: candidate.provider, model: candidate.model, billingMode: candidate.billingMode, outcome: 'rejected', accountedCostUsd: 0 });
+        break;
+      }
+    }
     let result: WorkerModelRawResult;
     try {
       result = await client.execute({
         prompt,
         reasoningLevel: candidate.reasoningLevel,
         maximumOutputTokens: candidate.maximumOutputTokens,
+        ...(beforeDispatch ? { beforeDispatch } : {}),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof WorkerModelDispatchRejectedError) {
+        attempts.push({provider:candidate.provider,model:candidate.model,billingMode:candidate.billingMode,outcome:'rejected',accountedCostUsd:0});
+        break;
+      }
       addCost(candidate.worstCaseCostUsd);
       attempts.push({
         provider: candidate.provider,

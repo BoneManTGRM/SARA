@@ -768,6 +768,11 @@ async function handleOwnerRevenueWrite(
   if(url.pathname==='/api/owner/work'&&request.method==='GET'){
     json(response,200,await kernel.inspectOwnerWork(owner));return true;
   }
+  if(url.pathname==='/api/owner/work/resume'&&request.method==='POST'){
+    const body=await readJson(request);
+    if(Object.keys(body).some(key=>key!=='requestId'))throw new Error('OWNER_WORK_RESUME_EXACT_ID_ONLY');
+    json(response,200,await kernel.resumeOwnerMessage(owner,boundedText(body.requestId,1,128,'requestId')));return true;
+  }
   if(url.pathname==='/api/owner/work/cancel'&&request.method==='POST'){
     const body=await readJson(request);json(response,200,await kernel.cancelOwnerWork(owner,boundedText(body.requestId,1,128,'requestId')));return true;
   }

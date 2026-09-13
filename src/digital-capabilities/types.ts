@@ -25,6 +25,9 @@ export type ExecutionContext = {
   softwareWorkAuthorized?:boolean;
   softwareRuntime?:import('./software-work.ts').SoftwareRuntime;
   isolatedReproductionAuthorized?:boolean;
+  isolatedRepairAuthorized?:boolean;
+  isolatedRepairGuard?:()=>Promise<void>;
+  ownerProcedureCompilationAuthorized?:boolean;
   ownerAuthenticated:boolean;emergencyStopped:boolean;authorityContextDigest:string;constitutionDigest:string;
   mandateDigest:string|null;mandateId:string|null;evidence:readonly EvidenceRecord[];currentIdentity:ProcedureApplicabilityIdentity;
   nicoObserver?:import('./nico/observer.ts').NicoReadObserver;

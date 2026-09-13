@@ -5,6 +5,7 @@ import { CapabilityInputError,validateSchema,type Json } from '../schema.ts';
 import type { ExecutionContext,ExecutionOutput } from '../types.ts';
 import { data,rows,strings,digest,unique,requireUnique,type Data } from '../engineering/common.ts';
 import { schemas } from './contracts.ts';
+import {verifiedRepairCandidate,repairCandidateSource} from './repair-candidate.ts';
 export type ProceduralContext=ExecutionContext&{proceduralKnowledge?:ProceduralKnowledgeSnapshot|null};
 const knowledge=(ctx:ExecutionContext)=>(ctx as ProceduralContext).proceduralKnowledge??null;
 const key=(p:{id:string;version:number})=>`${p.id}@${p.version}`;
@@ -13,6 +14,11 @@ const current=(p:ProceduralPlaybook,ctx:ExecutionContext)=>decidePriorEvidenceRe
 const outcomeHistory=(k:ProceduralKnowledgeSnapshot,p:{id:string;version:number})=>k.outcomes.filter(o=>o.playbookId===p.id&&o.playbookVersion===p.version);
 function result(output:Data,k:ProceduralKnowledgeSnapshot|null,unknowns:string[]=[]):ExecutionOutput{return {output,observed:k?[{basis:'EXISTING_PROCEDURAL_STORE',snapshotDigest:digest(k)}]:[],unknowns:unique([...(!k?['Trusted procedural knowledge is unavailable.']:[]),...unknowns]),confidence:{level:k?'MEDIUM':'UNASSESSED',basis:k?'Deterministic analysis of persisted qualified knowledge and recorded outcomes; relevance and real-world generalization remain conditional.':'No trusted stored execution evidence.'}};}
 export function compileCandidate(input:Data,ctx:ExecutionContext):ExecutionOutput {
+ if(input.sourceKind==='ISOLATED_REPAIR_RECEIPT'){
+  const k=knowledge(ctx),candidate=verifiedRepairCandidate(input,ctx);
+  return result({status:candidate?'CANDIDATE_READY':'EVIDENCE_REQUIRED',candidate:candidate?{id:candidate.id,version:1,status:'CANDIDATE',sourcePlaybookId:null,outcomeDigests:[],procedure:candidate.procedure,acceptanceCriteria:candidate.acceptanceCriteria,qualificationRequired:true}:null,persisted:false,sourceKnowledgeDigest:kd(k),reasons:candidate?['SYNTHETIC candidate only; no procedure promotion, fabricated reuse outcome, customer work or execution authority.']:['A current exact independently verified isolated repair receipt with causal and artifact evidence is required.'],executionAuthorized:false},k);
+ }
+ if(input.sourceRequestId!==undefined||!input.playbookId||!input.playbookVersion||!Array.isArray(input.outcomeDigests))throw new CapabilityInputError('EXACT_PROCEDURE_SOURCE_REQUIRED');
  const k=knowledge(ctx);const reasons:string[]=[];if(!k)return result({status:'EVIDENCE_REQUIRED',candidate:null,persisted:false,sourceKnowledgeDigest:null,reasons:['Trusted procedure history required.'],executionAuthorized:false},k);
  const p=k.playbooks.find(p=>p.id===input.playbookId&&p.version===input.playbookVersion);const requested=strings(input.outcomeDigests!);if(new Set(requested).size!==requested.length)throw new CapabilityInputError('DUPLICATE_OUTCOME_DIGEST');
  if(!p||p.status!=='VERIFIED'||p.qualificationStatus!=='independently_qualified'||p.supersededBy)reasons.push('A current independently qualified source playbook is required.');
@@ -91,7 +97,16 @@ export async function executeProceduralCapability(id:string,input:Data,context:E
  const execute=executions[id];if(!execute)throw new CapabilityInputError('UNKNOWN_PROCEDURAL_CAPABILITY');validateSchema(schemas[id]!.input,input);
  const snapshot=await ProceduralKnowledgeStore.inspectExisting(stateDirectory);const ctx:ProceduralContext={...context,proceduralKnowledge:snapshot};const initial=execute(input,ctx);const output=data(initial.output);
  const mutation=id==='experience-to-procedure-compiler'&&output.status==='CANDIDATE_READY'||id==='memory-conflict-resolver'&&input.operation==='SUPERSEDE';if(!mutation)return initial;
- if(!context.ownerAuthenticated||!context.policyDecision.allowed||context.emergencyStopped)return {...initial,output:{...output,status:'BLOCKED',reasons:['Authenticated owner, existing record_memory authority and emergency-stop clear are required.']},status:'BLOCKED'};
+ const ownerBound=context.ownerAuthenticated||id==='experience-to-procedure-compiler'&&input.sourceKind==='ISOLATED_REPAIR_RECEIPT'&&context.ownerProcedureCompilationAuthorized===true;
+ if(!ownerBound||!context.policyDecision.allowed||context.emergencyStopped)return {...initial,output:{...output,status:'BLOCKED',reasons:['Authenticated owner admission, existing record_memory authority and emergency-stop clear are required.']},status:'BLOCKED'};
+ if(id==='experience-to-procedure-compiler'&&input.sourceKind==='ISOLATED_REPAIR_RECEIPT'){
+  const candidate=verifiedRepairCandidate(input,ctx);if(!candidate)throw new CapabilityInputError('EXACT_REPAIR_RECEIPT_REQUIRED');
+  const store=await ProceduralKnowledgeStore.open(stateDirectory,[]);
+  const existing=store.snapshot().playbooks.find(p=>p.id===candidate.id&&p.version===1);
+  if(existing){const {createdAt:_,...material}=candidate;const {createdAt:__,...stored}=existing;if(digest(material)!==digest(stored))throw new CapabilityInputError('CANDIDATE_IDENTITY_CONFLICT');}
+  else await store.addCandidatePlaybook(candidate);
+  return {...initial,output:{...output,persisted:true}};
+ }
  if(!snapshot)return initial;
  if(id==='experience-to-procedure-compiler'){
   const source=snapshot.playbooks.find(p=>p.id===input.playbookId&&p.version===input.playbookVersion)!;const history=outcomeHistory(snapshot,source).filter(o=>strings(input.outcomeDigests!).includes(digest(o)));const candidate=buildCandidate(source,history);const existing=snapshot.playbooks.find(p=>p.id===candidate.id&&p.version===1);
@@ -110,6 +125,8 @@ export async function executeProceduralCapability(id:string,input:Data,context:E
 
 /** Minimum persistent dependencies for reusable capability receipts; timestamps and unrelated families do not churn proofs. */
 export function proceduralDependencyDigest(id:string,input:Data,snapshot:ProceduralKnowledgeSnapshot|null):string {
+ if(id==='experience-to-procedure-compiler'&&input.sourceKind==='ISOLATED_REPAIR_RECEIPT')return digest({candidates:(snapshot?.playbooks??[]).filter(p=>p.provenance.source===repairCandidateSource(String(input.sourceRequestId)))});
+ if(id==='solution-reuse-ranker')return digest({playbooks:(snapshot?.playbooks??[]).filter(p=>p.taskFamily===input.taskFamily),outcomes:(snapshot?.outcomes??[]).filter(o=>o.taskFamily===input.taskFamily)});
  if(!snapshot)return digest({state:'ABSENT'});
  if(id==='experience-to-procedure-compiler'||id==='memory-conflict-resolver'&&input.operation==='SUPERSEDE')return digest(snapshot);
  if(id==='procedure-effectiveness-scorer')return digest({outcomes:snapshot.outcomes.filter(o=>o.playbookId===input.playbookId&&o.playbookVersion===input.playbookVersion)});
@@ -118,6 +135,5 @@ export function proceduralDependencyDigest(id:string,input:Data,snapshot:Procedu
  if(id==='confidence-calibrator'){const taskDigests=new Set(rows(input.forecasts!).map(f=>f.taskReferenceDigest));return digest({outcomes:snapshot.outcomes.filter(o=>o.taskFamily===input.taskFamily&&taskDigests.has(o.taskReferenceDigest))});}
  if(id==='counterexample-seeker')return digest({lessons:snapshot.lessons.filter(l=>l.taskFamily===input.taskFamily&&(l.claimKey??l.id)===input.claimKey)});
  if(id==='memory-conflict-resolver')return digest({lessons:snapshot.lessons.filter(l=>l.taskFamily===input.taskFamily),playbooks:snapshot.playbooks.filter(p=>p.taskFamily===input.taskFamily)});
- if(id==='solution-reuse-ranker')return digest({playbooks:snapshot.playbooks.filter(p=>p.taskFamily===input.taskFamily),outcomes:snapshot.outcomes.filter(o=>o.taskFamily===input.taskFamily)});
  throw new CapabilityInputError('UNKNOWN_PROCEDURAL_CAPABILITY');
 }
