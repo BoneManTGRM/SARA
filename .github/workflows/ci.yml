@@ -26,6 +26,7 @@ jobs:
           name: owner-software-runtime-evidence
           path: |
             artifacts/owner-software-runtime-qualification.json
+            artifacts/owner-isolated-repair-qualification.json
             artifacts/owner-software-runtime-*.png
           if-no-files-found: ignore
       - run: npm run verify

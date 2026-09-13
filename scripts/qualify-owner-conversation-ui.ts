@@ -230,7 +230,7 @@ try{
  const knowledgeBeforeRepair=await ProceduralKnowledgeStore.inspectExisting(legacy.directory);
  const repairFixture=nicosSeededMovementFixture();
  const repairGoal='Prepare an isolated repair for this seeded movement defect.';
- const repairMaterial='Expected: Forward, Right, Forward reaches scanner readiness.\nObserved: a deliberately seeded comparator rejects the correct first command.\nEnvironment: SYNTHETIC isolated adapted TypeScript reducer.\nSteps: run the frozen movement regression.\nRevision: '+repairFixture.source.revision+'\n'+repairFixture.candidate.files.map(file=>'```ts '+file.path+'\n'+file.content+'\n```').join('\n');
+ const repairMaterial='Expected: Forward, Right, Forward reaches scanner readiness.\nObserved: a deliberately seeded comparator rejects the correct first command.\nEnvironment: SYNTHETIC isolated adapted TypeScript reducer.\nSteps: run the frozen movement regression.\nRevision: '+repairFixture.source.revision+'\n'+repairFixture.candidate.files.map(file=>'```ts '+file.path+'\n'+file.content+'```').join('\n');
  assert.ok(repairMaterial.length<=8192);
  await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(repairGoal)};document.querySelector('#owner-work-material').value=${JSON.stringify(repairMaterial)};document.querySelector('#owner-work-submit').click()`);
  await until("!document.querySelector('#owner-work-submit').disabled && document.querySelector('#owner-work-results').textContent.includes('isolated-defect-repairer')",120000);
