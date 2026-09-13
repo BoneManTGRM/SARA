@@ -12,6 +12,7 @@ import type {
   PublicRepositoryEvidenceCollector,
   PublicRepositoryEvidenceSnapshot,
 } from "../src/public-repository-evidence.ts";
+import { persistRevenueNicoRun } from "../src/revenue-nico-artifacts.ts";
 import { persistRevenuePilotArtifact } from "../src/revenue-pilot-artifacts.ts";
 import { readRepositoryReadinessReportArtifact } from "../src/repository-readiness-report-artifacts.ts";
 import {
@@ -196,7 +197,7 @@ async function runUntilSettled(operator: RevenuePilotOperator): Promise<RevenueP
 }
 
 describe("bounded persistent Luna revenue operator", () => {
-  it("accepts a verified fixed-price job and authorizes exact-report delivery under a standing mandate", async () => {
+  it("fulfills the bounded core snapshot and blocks unpriced remote delegation without losing the paid obligation", async () => {
     const directory = await stateDirectory();
     const kernel = await SaraKernel.boot({ stateDirectory: directory, ownerTokenSha256: OWNER_DIGEST });
     const owner = kernel.authenticateOwnerToken(OWNER_TOKEN);
@@ -277,13 +278,26 @@ describe("bounded persistent Luna revenue operator", () => {
       repositoryEvidenceCollector: fakeEvidence(),
       stateDirectory: directory,
       now: () => new Date("2026-09-03T12:01:00.000Z"),
-      nicoOperator: fakeNico(nicoCalls),
     });
 
     assert.equal((await operator.tick()).outcome, "authorized_job");
     for (let index = 0; index < 4; index += 1) assert.equal((await operator.tick()).outcome, "completed_role");
-    assert.equal((await operator.tick()).outcome, "nico_run_created");
-    assert.equal((await operator.tick()).outcome, "nico_package_authorized");
+    const remote = new RevenuePilotOperator({kernel,stateDirectory:directory,modelClient:fakeLuna([],[]),repositoryEvidenceCollector:fakeEvidence(),nicoOperator:fakeNico(nicoCalls),now:()=>new Date("2026-09-03T12:01:00.000Z")});
+    const beforeRemote=await kernel.getStatus();
+    assert.deepEqual(await remote.tick(),{outcome:"idle",reason:"provider_cash_allowance_unknown"});
+    assert.deepEqual(nicoCalls,[],'An unknown incremental provider charge must block before createRun.');
+    const blocked=await kernel.getStatus();assert.deepEqual(blocked.revenuePilotJobs,beforeRemote.revenuePilotJobs);assert.deepEqual(blocked.revenuePaymentIntents,beforeRemote.revenuePaymentIntents);assert.deepEqual(blocked.realizedProfit,beforeRemote.realizedProfit);
+    const firstDenialAudit=await kernel.inspectAudit();await remote.tick();assert.deepEqual(await kernel.inspectAudit(),firstDenialAudit,'The same cash boundary reuses its durable denial.');
+    const runId=`comprun_${sha256(`sara-nico:${job.id}`).slice(0,32)}`;
+    await persistRevenueNicoRun({stateDirectory:directory,jobId:job.id,runId,repository:'example/project',commitSha:'a'.repeat(40),updatedAt:new Date().toISOString()});
+    assert.deepEqual(await remote.tick(),{outcome:"idle",reason:"provider_cash_allowance_unknown"});
+    assert.deepEqual(nicoCalls,[],'An existing run must not call get/continue/package without a supported cash bound.');
+    const cashBrief=await kernel.executeOwnerMessage(owner,{requestId:'synthetic-remote-cash-boundary',text:ordinaryGoal});
+    assert.match(cashBrief.serviceReview?.obligations[0]?.reason??'',/incremental cash allowance.*unknown/i);
+    assert.equal((cashBrief.receipts.find(r=>r.capability.id==='profitability-accountant')!.output as any).fullProfitabilityProven,false);
+    // Independent core-snapshot fixture has no external NICO adapter. Its already
+    // authorized local protected-delivery path remains usable; unknown shared
+    // allocations do not authorize the remote adapter or manufacture full profit.
     const deliveryTick = await operator.tick();
     assert.equal(deliveryTick.outcome, "authorized_delivery");
     const status = await kernel.getStatus();
@@ -304,8 +318,8 @@ describe("bounded persistent Luna revenue operator", () => {
     assert.equal(accounted.fullProfitabilityProven,false,'Isolated ledger totals do not attest unknown all-in costs');
     assert.equal((await kernel.executeOwnerMessage(owner,{requestId:'synthetic-paid-service-review',text:ordinaryGoal})).verification,'HISTORICAL_ANALYSIS');
 
-    assert.deepEqual(nicoCalls.map((call) => call.split(":")[0]), ["create", "get", "package"]);
-    assert.equal(status.autonomyDecisions.filter((decision) => decision.requestId.startsWith("nico-automated-fulfillment:")).length, 1);
+    assert.deepEqual(nicoCalls, []);
+    assert.equal(status.autonomyDecisions.filter((decision) => decision.code === "PROVIDER_CASH_ALLOWANCE_UNKNOWN" && decision.outcome === "deny").length, 1);
     // The supported download path must not count an unavailable artifact as delivered.
     const server=createSaraServer(kernel,{stateDirectory:join(directory,'synthetic-missing-artifact'),ownerTokenSha256:OWNER_DIGEST});
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
