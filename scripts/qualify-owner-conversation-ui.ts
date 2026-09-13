@@ -49,6 +49,7 @@ try{
  await send('Page.navigate',{url:origin});await until("Boolean(document.querySelector('#owner-work-text'))");
  assert.equal(await evaluate("document.querySelector('#owner-work-fields').disabled"),true);
  assert.equal(await evaluate("Boolean(document.querySelector('#owner-work-results').closest('.owner-job-activity'))"),true,'Qualify the actual production activity transform');
+ assert.equal(await evaluate("['owner-job-current','owner-job-ledger','owner-work-panel'].every(id => !document.getElementById(id).open)"),true,'Activity sections start collapsed');
  assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received').length,0);
  await evaluate("document.querySelector('#connect').click()");
  await until("document.querySelector('#owner-dialog').open");
@@ -127,6 +128,8 @@ try{
  }
  await evaluate("document.querySelector('#owner-work-text').value='Review my earning path and prepare a supported offer with recorded costs.';document.querySelector('#owner-work-submit').click()");
  await until("document.querySelector('#owner-work-status').textContent==='BLOCKED · VERIFIED_ANALYSIS'");
+ await evaluate("document.querySelector('a[href=\"#owner-work-results\"]').click()");
+ await until("document.querySelector('#owner-work-panel').open");
  assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('recorded net contribution $-0.250000')"),true);
  assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('full profit remains unverified')"),true);
  assert.equal((await kernel.getStatus()).revenuePaymentIntents[0]!.status,'awaiting_payment');
