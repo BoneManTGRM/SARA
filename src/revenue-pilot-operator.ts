@@ -1,4 +1,4 @@
-import type { RevenueRepositoryCollection } from './revenue-repository-collection.ts';
+import { repositoryCollectionRetryDue, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import { SaraKernel, SARA_PRINCIPAL } from "./kernel.ts";
 import { canonicalJson, sha256 } from "./canonical.ts";
 import { assertNicoRunTarget, extractNicoArtifactIdentity, type NicoOperator } from "./nico-operator.ts";
@@ -365,8 +365,28 @@ export class RevenuePilotOperator {
       }
     }
     const workOrder=await this.#kernel.orderRevenuePilotWork(SARA_PRINCIPAL);
-    const job = status.revenuePilotJobs.find(candidate=>candidate.id===workOrder[0]);
-    if (!job || !job.nextRole) return this.#record({ outcome: "idle", reason: "no_authorized_job" });
+    let job: RevenuePilotJob | undefined;
+    let collectionBlocked = false;
+    for (const id of workOrder) {
+      const candidate = status.revenuePilotJobs.find(value => value.id === id);
+      if (!candidate) continue;
+      const collection = candidate.repositoryCollection;
+      if (!candidate.activeLease && collection && !repositoryCollectionRetryDue(collection,now)) {
+        // A priority forecast is not collection readiness. A bounded local read
+        // can reconcile a completed artifact without repeating a blocked GET.
+        const saved = await readPublicRepositoryEvidence({stateDirectory:this.#stateDirectory,jobId:candidate.id}).catch(()=>null);
+        // Pending artifacts must reach exact validation below, including a
+        // durable failure receipt for a mismatched artifact. Settled blocked
+        // candidates without valid evidence cannot starve another obligation.
+        if (!saved || (collection.state !== 'PENDING' && (saved.snapshot.repository !== candidate.plan.repository || (collection.state === 'COLLECTED' && collection.snapshotDigest !== saved.snapshotDigest)))) {
+          collectionBlocked = true;
+          continue;
+        }
+      }
+      job = candidate;
+      break;
+    }
+    if (!job || !job.nextRole) return this.#record({ outcome: "idle", reason: collectionBlocked ? "repository_evidence_unavailable" : "no_authorized_job" });
     if (job.activeLease) {
       const profile = ROLE_PROFILES[job.activeLease.role];
       const pending = job.activeLease.workerId === profile.workerId

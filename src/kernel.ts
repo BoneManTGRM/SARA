@@ -1,4 +1,4 @@
-import { MAX_REPOSITORY_COLLECTION_ATTEMPTS, repositoryCollectionFailure, repositoryCollectionRetryAt, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
+import { repositoryCollectionRetryDue, repositoryCollectionFailure, repositoryCollectionRetryAt, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import {unresolvedRevenueAllowance} from './revenue-pilot.ts';
 import {revenueStepBlocker,mandateContinuationBlocker} from './revenue-step-eligibility.ts';
 import { reauthorizeSoftwareWork, sourceQuotaRetryDeadline, maximumOwnerSourceRetries, isPreservableBrowserStartupFailure, type OwnerSourceRetry, type SoftwareWorkReauthorization } from './owner-software-recovery.ts';
@@ -1639,7 +1639,7 @@ export class SaraKernel {
       const blocker = revenueStepBlocker(state, job, now);
       if (blocker) throw new Error(blocker);
       const previous = job.repositoryCollection;
-      if (previous && (previous.state !== 'FAILED' || previous.attempts >= MAX_REPOSITORY_COLLECTION_ATTEMPTS || !previous.retryAt || Date.parse(previous.retryAt) > now.getTime())) return null;
+      if (previous && !repositoryCollectionRetryDue(previous,now)) return null;
       const collection: RevenueRepositoryCollection = {
         attemptId: randomUUID(), attempts: (previous?.attempts ?? 0) + 1,
         repository: job.plan.repository, state: 'PENDING', startedAt: now.toISOString(),

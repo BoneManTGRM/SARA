@@ -18,6 +18,12 @@ export type RevenueRepositoryCollection = {
 };
 export const MAX_REPOSITORY_COLLECTION_ATTEMPTS = 3;
 
+export function repositoryCollectionRetryDue(collection: RevenueRepositoryCollection, now: Date): boolean {
+  return collection.state === 'FAILED' && collection.attempts < MAX_REPOSITORY_COLLECTION_ATTEMPTS
+    && collection.retryAt !== null && Number.isFinite(Date.parse(collection.retryAt))
+    && Date.parse(collection.retryAt) <= now.getTime();
+}
+
 export function repositoryCollectionFailure(error: unknown): RepositoryCollectionFailure {
   // Reconstruct from validated scalars; never persist Error.message, stack,
   // provider body, arbitrary headers or customer-controlled instructions.

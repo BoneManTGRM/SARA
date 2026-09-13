@@ -159,3 +159,20 @@ Final focused command: `node --import tsx --test tests/public-repository-evidenc
 | `/tmp/sara-service-retry-final-typecheck.log` | `7248f3642ce6e14eb1ffd990507efe7d8b6be8134a31197d089a18b1076a173c` |
 
 No genuine eligible customer/payment was established. Exact fulfillment and reviewed-artifact delivery approval still depend on the actual job. The core snapshot's bounded model path remains distinct from the correctly blocked unpriced SARA-to-NICO remote adapter. Real revenue and realized profit remain unverified; authority delta is none. Next eligible economic action remains evaluating the first genuine authorized inbound snapshot request through existing intake, with supported current model headroom and exact job approval before dispatch.
+
+
+## Eligible paid-work selection correction
+
+The parent's combined frozen gate returned1501/1502 tests, exit1 (log SHA256 `c57b4b3b9f2477fa4fd0a475b73984481af7d7d0bf94a06bf8e9b44a208cb3be`). The economic-scheduling fixture expected a forecast to remain current after a material collection-failure snapshot changed its exact job subject. Focused reproduction confirmed the intended identity gate rejected that stale forecast. The fixture now explicitly checks this invalidation, records a new forecast bound to the preserved failure, then verifies unchanged restart persistence. No economic digest or forecast acceptance rule was weakened.
+
+A separate focused RED established a real product gap: a fresh high-value forecast could leave a collection-blocked job first and starve another eligible paid obligation. The existing operator now scans its ordered queue and skips collection-blocked candidates unless a bounded local artifact read permits exact reconciliation. Pending cached artifacts still pass through repository/digest validation, including preserved wrong-artifact failure receipts. Running commitments retain existing priority/reconciliation; payment, authority, model costs and worker gates remain in place. The selection and kernel use one shared quota retry-due predicate; no new retry or authority is introduced.
+
+The first affected run passed43/44 and exposed an implementation mistake: skipping a wrong-repository pending artifact prevented its required failure receipt. The selector was corrected to retain that exact validation path; the regression was unchanged. Final command `node --import tsx --test tests/autonomous-economic-scheduling.test.ts tests/revenue-pilot-operator.test.ts tests/revenue-step-rechecks.test.ts` passed **44/44**. `npm run typecheck` and `git diff --check` passed. All customer/provider identities and monetary values remain ISOLATED / SYNTHETIC. Parent must run the changed combined candidate through required gates and production acceptance.
+
+| Evidence | SHA256 |
+| --- | --- |
+| `/tmp/sara-service-retry-economic-red.log` | `bb25ed00d2ab3c95df0492d28717fcad1c84b8fbb1339d863affa0ad33be7a01` |
+| `/tmp/sara-service-starvation-red.log` | `a45d53ac376ef2ce04fddff5a5b39b7abd8796bf05d378deab45a35416f101d7` |
+| `/tmp/sara-service-starvation-green.log` | `e5a93a359a3eb141908eb9460ebf5f6036d8b44353bd977deadf9dbc6ab5d8fd` |
+| `/tmp/sara-service-starvation-final-green.log` | `9fb4478e3a69e7953c0230dd79d860df07bb855f8917f940d3ea127e730a6297` |
+| `/tmp/sara-service-starvation-final-typecheck.log` | `7248f3642ce6e14eb1ffd990507efe7d8b6be8134a31197d089a18b1076a173c` |
