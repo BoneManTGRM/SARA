@@ -61,6 +61,7 @@ try{
  await send('Page.navigate',{url:origin});await until("Boolean(document.querySelector('#owner-work-text'))");
  assert.equal(await evaluate("document.querySelector('#owner-work-fields').disabled"),true);
  assert.equal(await evaluate("Boolean(document.querySelector('#owner-work-results').closest('.owner-job-activity'))"),true,'Qualify the actual production activity transform');
+ assert.equal(await evaluate("['owner-job-current','owner-job-ledger','owner-work-panel'].every(id => !document.getElementById(id).open)"),true,'Activity sections start collapsed');
  assert.equal((await kernel.inspectAudit()).filter(e=>e.type==='owner_work_received').length,0);
  await evaluate("document.querySelector('#connect').click()");
  await until("document.querySelector('#owner-dialog').open");
@@ -69,6 +70,15 @@ try{
  const screenshots:string[]=[];
  for(const width of [1280,390]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+  for (const id of ['owner-job-current','owner-job-ledger','owner-work-panel']) {
+   await evaluate(`document.querySelector('#${id}').open=false`);
+   assert.equal(await evaluate(`document.querySelector('#${id}').open`),false);
+   await evaluate(`document.querySelector('#${id} > summary').click()`);
+   assert.equal(await evaluate(`document.querySelector('#${id}').open`),true,'Activity sections expand through their disclosure heading');
+  }
+  assert.equal(await evaluate("Array.from(document.querySelectorAll('#owner-job-list > details > summary')).every(node => node.textContent.length <= 114)"),true,'Collapsed job headings stay concise');
+  await evaluate("document.querySelector('#owner-work-panel').open=false;document.querySelector('a[href=\"#owner-work-results\"]').click()");
+  await until("document.querySelector('#owner-work-panel').open");
   const goal=width===1280?'Review unfinished work, identify blockers, prioritize obligations, complete the authorized steps, and give me a brief.':'Inspect outstanding tasks and summarize what is stuck';
   await evaluate(`document.querySelector('#owner-work-text').value=${JSON.stringify(goal)};document.querySelector('#owner-work-submit').click()`);
   await until("document.querySelector('#owner-work-status').textContent==='BLOCKED · VERIFIED_ANALYSIS'");
@@ -130,6 +140,8 @@ try{
  }
  await evaluate("document.querySelector('#owner-work-text').value='Review my earning path and prepare a supported offer with recorded costs.';document.querySelector('#owner-work-submit').click()");
  await until("document.querySelector('#owner-work-status').textContent==='BLOCKED · VERIFIED_ANALYSIS'");
+ await evaluate("document.querySelector('a[href=\"#owner-work-results\"]').click()");
+ await until("document.querySelector('#owner-work-panel').open");
  assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('recorded net contribution $-0.250000')"),true);
  assert.equal(await evaluate("document.querySelector('#owner-work-results').innerText.includes('full profit remains unverified')"),true);
  assert.equal((await kernel.getStatus()).revenuePaymentIntents[0]!.status,'awaiting_payment');
