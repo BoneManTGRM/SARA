@@ -1437,6 +1437,7 @@ export class SaraKernel {
     requestedAt = new Date().toISOString(),
   ): Promise<AutonomyDecision> {
     return this.serializeMutation(async () => {
+      if(principal.kind!=="sara"||!principal.authenticated)throw new Error("Only authenticated SARA may request automatic remote fulfillment.");
       const state = await this.state();
       const job = state.revenuePilotJobs.find((candidate) => candidate.id === jobId);
       if (!job || job.status !== "owner_review" || !job.revenueEvidenceId) {
@@ -1446,17 +1447,14 @@ export class SaraKernel {
         throw new Error("Automated NICO fulfillment is restricted to the fixed readiness service.");
       }
       if (!/^comprun_[0-9a-f]{32}$/u.test(runId)) throw new Error("Automated NICO run ID is invalid.");
-      return this.authorizeAutonomousRoutine(principal, state, {
-        id: `nico-automated-fulfillment:${job.id}:${runId}`,
-        kind: "fixed_service_fulfillment",
-        targetId: `nico:${runId}:automated-delivery-package`,
-        channel: "approved_api",
-        serviceId: job.plan.serviceId,
-        estimatedCostUsd: 0,
-        external: true,
-        requestedAt,
-        platform: "owner_site",
-      });
+      // This adapter has no supported incremental provider cash bound or
+      // cost-reconciliation contract. Existing model/shared caps do not price
+      // another service. Preserve one durable refusal, never invent USD0.
+      const requestId=`nico-cash-allowance:${job.id}:${runId}`;
+      const existing=state.autonomyDecisions.find(decision=>decision.requestId===requestId&&decision.code==="PROVIDER_CASH_ALLOWANCE_UNKNOWN");
+      const decision:AutonomyDecision=existing??{requestId,mandateId:state.standingMandate?.id??null,outcome:"deny",code:"PROVIDER_CASH_ALLOWANCE_UNKNOWN",reason:"The SARA remote NICO adapter incremental cash allowance is unknown; no supported provider cost bound and cost-reconciliation contract is configured. Remote dispatch is blocked while the paid obligation is preserved. Shared infrastructure allocations remain unknown separately.",decidedAt:requestedAt};
+      if(!existing)await this.#store.append("autonomy_decision",principal,decision);
+      throw new Error(`${decision.code}: ${decision.reason}`);
     });
   }
 

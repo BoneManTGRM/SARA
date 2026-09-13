@@ -31,7 +31,7 @@ export type RevenuePilotOperatorTick =
   | { outcome: "nico_run_created" | "nico_run_advanced" | "nico_package_authorized"; jobId: string; runId: string }
   | {
     outcome: "idle";
-    reason: "no_authorized_job" | "active_lease" | "emergency_stop" | "monthly_budget" | "repository_evidence_unavailable" | "eligibility_changed" | "unresolved_provider_effect";
+    reason: "no_authorized_job" | "active_lease" | "emergency_stop" | "monthly_budget" | "repository_evidence_unavailable" | "eligibility_changed" | "unresolved_provider_effect" | "provider_cash_allowance_unknown";
   };
 
 export type RevenuePilotOperatorStatus = {
@@ -480,7 +480,12 @@ export class RevenuePilotOperator {
     const repositoryUrl = new URL(evidence.snapshot.repository);
     const repository = repositoryUrl.pathname.split("/").filter(Boolean).join("/");
     const runId = `comprun_${sha256(`sara-nico:${job.id}`).slice(0, 32)}`;
-    await this.#kernel.authorizeAutomatedNicoFulfillmentUnderMandate(SARA_PRINCIPAL, job.id, runId, now.toISOString());
+    try {
+      await this.#kernel.authorizeAutomatedNicoFulfillmentUnderMandate(SARA_PRINCIPAL, job.id, runId, now.toISOString());
+    } catch(error) {
+      if(error instanceof Error&&error.message.startsWith("PROVIDER_CASH_ALLOWANCE_UNKNOWN:"))return {outcome:"idle",reason:"provider_cash_allowance_unknown"};
+      throw error;
+    }
     if (!artifact) {
       const created = await this.#nicoOperator.createRun({
         runId,
