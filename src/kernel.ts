@@ -45,7 +45,8 @@ import { KernelVerificationPool } from "./kernel-verification-pool.ts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import {abandonedExclusiveVolumeSelfPid} from './state-lock-owner.ts';
 import { setTimeout as delay } from "node:timers/promises";
 import { compileWorkCard } from "./capabilities.ts";
 import {
@@ -163,6 +164,8 @@ const GENESIS_HASH = "0".repeat(64);
 const KERNEL_CONSTRUCTION_TOKEN = Symbol("SARA_KERNEL_CONSTRUCTION");
 const SHA256_HEX = /^[a-f0-9]{64}$/i;
 const OWNER_PRINCIPAL_TOKEN_DIGESTS = new WeakMap<object, string>();
+const ACTIVE_STATE_LOCKS = new Set<string>();
+const PROCESS_STARTED_AT = Date.now() - process.uptime() * 1000;
 
 export function authenticateOwnerPrincipal(token: string, ownerIdentity = "OWNER"): Principal {
   if (!token) throw new Error("Owner token is required.");
@@ -260,8 +263,9 @@ class KernelEventStore {
     try {
       const owner = JSON.parse(await readFile(join(this.lockDirectory, "owner.json"), "utf8")) as {
         pid?: unknown;
+        acquiredAt?: unknown;
       };
-      abandoned = typeof owner.pid === "number" && Number.isInteger(owner.pid) && !this.processIsAlive(owner.pid);
+      abandoned = typeof owner.pid === "number" && Number.isInteger(owner.pid) && (!this.processIsAlive(owner.pid) || abandonedExclusiveVolumeSelfPid({owner,selfPid:process.pid,processStartedAt:PROCESS_STARTED_AT,stateDirectory:this.stateDirectory,volumeMount:process.env.RAILWAY_VOLUME_MOUNT_PATH,deploymentId:process.env.RAILWAY_DEPLOYMENT_ID,heldInThisProcess:ACTIVE_STATE_LOCKS.has(resolve(this.lockDirectory))}));
     } catch {
       try {
         const lockStat = await stat(this.lockDirectory);
@@ -293,6 +297,7 @@ class KernelEventStore {
         await delay(10);
         continue;
       }
+      ACTIVE_STATE_LOCKS.add(resolve(this.lockDirectory));
       try {
         await writeFile(
           join(this.lockDirectory, "owner.json"),
@@ -302,6 +307,7 @@ class KernelEventStore {
         return await operation();
       } finally {
         await rm(this.lockDirectory, { recursive: true, force: true });
+        ACTIVE_STATE_LOCKS.delete(resolve(this.lockDirectory));
       }
     }
   }
