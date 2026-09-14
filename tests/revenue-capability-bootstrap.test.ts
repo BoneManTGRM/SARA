@@ -21,6 +21,23 @@ async function directory(): Promise<string> {
 }
 
 describe("versioned production revenue capability migration", () => {
+  it('preserves frozen serving v8 inventory evidence and prior audit through the source-readiness upgrade and restart', async () => {
+    const stateDirectory=await directory();
+    const options={stateDirectory,ownerTokenSha256:sha256('synthetic-v8-owner')};
+    const old=await SaraKernel.boot(options);
+    const candidate=(await verifiedRevenueCapabilities())[0]!;
+    await old.registerCapability(SARA_PRINCIPAL,{...candidate,evidence:['implementation-sha256:009f3917714c4045f95e24a6d34acc18de2368f657527654130e32a86d6bda50'],registration:{...candidate.registration!,evidenceVersion:8,implementationDigest:'009f3917714c4045f95e24a6d34acc18de2368f657527654130e32a86d6bda50',evidenceDigest:'e1ea08239cb20f297658352965ef37b9cd9a8e04041b7136f0737c61f99dbf3c'}});
+    const prefix=await old.inspectAudit();
+    const upgraded=await SaraKernel.boot({...options,bootstrapRevenueCapabilities:true});
+    assert.deepEqual((await upgraded.inspectAudit()).slice(0,prefix.length),prefix);
+    assert.equal((await upgraded.getStatus()).capabilities.find(c=>c.id===candidate.id)?.registration?.evidenceVersion,9);
+    const events=await upgraded.inspectAudit();
+    const restarted=await SaraKernel.boot({...options,bootstrapRevenueCapabilities:true});
+    const after=await restarted.inspectAudit();
+    assert.deepEqual(after.slice(0,events.length),events);
+    assert.deepEqual(after.slice(events.length).map(e=>e.type),['system_booted']);
+    assert.deepEqual((await restarted.getStatus()).capabilities,(await upgraded.getStatus()).capabilities);
+  });
   it("registers exact implementation-bound capabilities once and survives restart", async () => {
     const stateDirectory = await directory();
     const options = {

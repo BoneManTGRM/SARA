@@ -4,13 +4,14 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {test} from 'node:test';
 import {sha256} from '../src/canonical.ts';
+import {createHash} from 'node:crypto';
 import {SaraKernel,SARA_PRINCIPAL} from '../src/kernel.ts';
 import type {SoftwareRuntime} from '../src/digital-capabilities/software-work.ts';
 
 const token='synthetic-runtime-recovery-owner';
 const body={requestId:'synthetic-config-recovery',text:'Inspect the source and tests in repository BoneManTGRM/Nicos-Adventures.'};
 function runtime(calls:{source:number},source='connected-v1'):SoftwareRuntime&{configurationIdentity:{sourceDigest:string;journeyDigest:string}}{
- return {configurationIdentity:{sourceDigest:sha256(source),journeyDigest:sha256('synthetic-browser-unused')},inspectSource:async repository=>{calls.source++;return {schemaVersion:1,actor:'SARA_RUNTIME',evidenceLabel:'EXTERNAL_READ_ONLY',collectionMode:'anonymous_read_only',repository:`https://github.com/${repository}`,immutableCommitSha:'a'.repeat(40),treeSha:'b'.repeat(40),defaultBranch:'main',collectedAt:'2026-09-13T00:00:00Z',inventoryTruncated:false,files:[{path:'package.json',role:'manifest',gitBlobSha:'d'.repeat(40),contentSha256:sha256('{}'),byteLength:2,permalink:`https://github.com/${repository}/blob/${'a'.repeat(40)}/package.json`,sourceText:'{}',sourceTruncated:false,trust:'UNTRUSTED_SOURCE'}],requestsUsed:1,limitations:['SYNTHETIC adapter result; no real customer/application evidence.']};},testJourney:async()=>{throw new Error('Inspection must not run a browser.');}};
+ return {configurationIdentity:{sourceDigest:sha256(source),journeyDigest:sha256('synthetic-browser-unused')},inspectSource:async repository=>{calls.source++;return {schemaVersion:1,actor:'SARA_RUNTIME',evidenceLabel:'EXTERNAL_READ_ONLY',collectionMode:'anonymous_read_only',repository:`https://github.com/${repository}`,immutableCommitSha:'a'.repeat(40),treeSha:'b'.repeat(40),defaultBranch:'main',collectedAt:'2026-09-13T00:00:00Z',inventoryTruncated:false,files:[{path:'package.json',role:'manifest',gitBlobSha:createHash('sha1').update('blob 2\0{}').digest('hex'),contentSha256:sha256('{}'),byteLength:2,permalink:`https://github.com/${repository}/blob/${'a'.repeat(40)}/package.json`,sourceText:'{}',sourceTruncated:false,trust:'UNTRUSTED_SOURCE'}],requestsUsed:1,limitations:['SYNTHETIC adapter result; no real customer/application evidence.']};},testJourney:async()=>{throw new Error('Inspection must not run a browser.');}};
 }
 async function fixture(run:(directory:string)=>Promise<void>){const directory=await mkdtemp(join(tmpdir(),'sara-config-recovery-'));try{await run(directory);}finally{await rm(directory,{recursive:true,force:true});}}
 const boot=(stateDirectory:string,softwareRuntime?:SoftwareRuntime)=>SaraKernel.boot({stateDirectory,ownerTokenSha256:sha256(token),...(softwareRuntime?{softwareRuntime}:{})});

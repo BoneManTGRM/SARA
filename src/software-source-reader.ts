@@ -139,14 +139,15 @@ function selectFiles(entries: Entry[], journey: string, repository: string): Arr
   add("lockfile", 2, path => /(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|uv\.lock)$/u.test(path));
   add("runtime_configuration", 3, path => /(?:^|\/)(?:(?:playwright|vite|vitest)\.[^/]*config\.[cm]?[jt]s|(?:playwright|vite|vitest)\.config\.[cm]?[jt]s|tsconfig\.json|Dockerfile)$/u.test(path), true);
   add("ci_configuration", 2, path => /^\.github\/workflows\/[^/]+\.ya?ml$/u.test(path));
-  add("journey_test", 3, path => isTest(path) && relevance(path) > 0, true);
-  add("journey_source", 4, path => !isTest(path) && /(?:^|\/)src\/.*\.[cm]?[jt]sx?$/u.test(path) && relevance(path) > 0, true);
+  add("journey_test", 3, path => isTest(path) && (journey === 'release readiness' || relevance(path) > 0), true);
+  add("journey_source", 4, path => !isTest(path) && /(?:^|\/)src\/.*\.[cm]?[jt]sx?$/u.test(path) && (journey === 'release readiness' || relevance(path) > 0), true);
   return output.slice(0, MAX_FILES);
 }
 
 /** Read-only evidence adapter. Callers retain authority/budget/stop and durable receipt gates. */
-export async function collectSoftwareSource(repository: string, journey: string, options: { fetchImpl?: typeof fetch } = {}): Promise<SoftwareSourceEvidence> {
+export async function collectSoftwareSource(repository: string, journey: string, options: { fetchImpl?: typeof fetch; revision?: string } = {}): Promise<SoftwareSourceEvidence> {
   const canonical = canonicalRepository(repository);
+  if (options.revision !== undefined && !/^[a-f0-9]{40}$/u.test(options.revision)) reject('INVALID_TARGET', 'An explicit revision must be an exact full commit SHA.');
   if (typeof journey !== "string" || !journey.trim() || journey.length > 4_000) reject("INVALID_JOURNEY", "A bounded user journey is required.");
   const fetchImpl = options.fetchImpl ?? fetch;
   const base = `https://api.github.com/repos${new URL(canonical).pathname}`;
@@ -187,9 +188,10 @@ export async function collectSoftwareSource(repository: string, journey: string,
     const metadata = await get(base, 256 * 1024);
     if (metadata.private !== false) reject("UNSUPPORTED_ACCESS", "Anonymous source collection requires an explicitly public repository.");
     if (typeof metadata.default_branch !== "string" || !metadata.default_branch || metadata.default_branch.length > 256) reject("MALFORMED_EVIDENCE", "GitHub omitted a valid default branch.");
-    const commit = await get(`${base}/commits/${encodeURIComponent(metadata.default_branch)}`, 256 * 1024);
+    const commit = await get(`${base}/commits/${encodeURIComponent(options.revision ?? metadata.default_branch)}`, 256 * 1024);
     const treeSha = (commit.commit as { tree?: { sha?: unknown } } | undefined)?.tree?.sha;
     if (typeof commit.sha !== "string" || !SHA.test(commit.sha) || typeof treeSha !== "string" || !SHA.test(treeSha)) reject("MALFORMED_EVIDENCE", "GitHub omitted immutable commit/tree identities.");
+    if (options.revision && commit.sha !== options.revision) reject('SOURCE_IDENTITY_MISMATCH', 'Provider returned a different commit from the exact requested revision.');
     const inventory = await get(`${base}/git/trees/${treeSha}?recursive=1`, 2 * 1024 * 1024);
     if (inventory.sha !== treeSha || !Array.isArray(inventory.tree) || typeof inventory.truncated !== "boolean") reject("SOURCE_IDENTITY_MISMATCH", "GitHub inventory did not match the frozen tree identity.");
     const candidates = selectFiles(inventory.tree.filter(safeEntry), journey, canonical);
