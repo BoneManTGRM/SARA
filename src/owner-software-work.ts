@@ -1,10 +1,11 @@
 import type {Json} from './digital-capabilities/schema.ts';
 
-export type SoftwareTarget={website:string;repository:string;journey:string;scope:'INSPECTION'|'JOURNEY_TEST'};
+export type SoftwareTarget={website:string;repository:string;journey:string;scope:'INSPECTION'|'JOURNEY_TEST';revision?:string};
 export type SoftwareContext={target:SoftwareTarget;requestId:string;receivedAt:string};
 const nicoWebsite='https://nicos-world.com/';
 const nicoRepository='BoneManTGRM/Nicos-Adventures';
 export function requestsSoftwareInspection(text:string):boolean{
+ if(/\b(?:review|inspect|check)\b/iu.test(text)&&/\brelease readiness\b/iu.test(text)&&/\b[A-Za-z0-9-]+\/[A-Za-z0-9_.-]+\b/u.test(text))return true;
  const action=/\b(?:test|check|verify|exercise|inspect|walk through)\b/iu.test(text);
  const target=/https?:\/\/|\b(?:repository|website|site|Nico[’']?s World|same project|this project|that project)\b/iu.test(text);
  const journey=/\b(?:journey|path|flow|movement|scanner)\b/iu.test(text);
@@ -43,9 +44,12 @@ export function resolveSoftwareTarget(text:string,prior?:SoftwareContext):{targe
   const reverseOrder=/\bscanner\b\s*(?:[-→]+\s*)?(?:to|before|then|through)\s*[-→]*\s*(?:the\s+)?movement\b|\bmovement\b\s+(?:test\s+)?after\s+(?:the\s+)?scanner\b/iu.test(text);
   if(reverseOrder||scannerIndex<movementIndex&&!scannerAfterMovement)missing.push('The requested journey order does not establish movement before scanner. The reviewed movement-to-scanner profile was not substituted.');
  }
- const journey=specifiedMovement?'movement-to-scanner':usePrior?prior.target.journey:'';
+ const journey=specifiedMovement?'movement-to-scanner':/\brelease readiness\b/iu.test(text)?'release readiness':usePrior?prior.target.journey:'';
+ const revisions=[...text.matchAll(/\b(?:revision|commit|sha)\s+([A-Za-z0-9._-]+)/giu)].map(m=>m[1]!);
+ if(revisions.some(value=>!(/^[a-f0-9]{40}$/iu.test(value)))||new Set(revisions.map(value=>value.toLowerCase())).size>1)missing.push('Use one exact full 40-character commit revision; conflicting or abbreviated revisions were not substituted with the latest branch.');
+ const revision=revisions[0]?.toLowerCase();
  if(scope==='JOURNEY_TEST'&&(website!==nicoWebsite||repository!==nicoRepository||journey!=='movement-to-scanner'))missing.push('The currently reviewed browser journey is Nico’s World movement-to-scanner. This target or journey needs its own bounded execution profile; no different test was substituted.');
  if(missing.length)return {target:null,missing,contextSource:null};
- return {target:{website,repository,journey,scope},missing:[],contextSource:usePrior?prior.requestId:null};
+ return {target:{website,repository,journey,scope,...(revision?{revision}:{})},missing:[],contextSource:usePrior?prior.requestId:null};
 }
 export function softwareTargetInput(target:SoftwareTarget):Json{return {...target};}

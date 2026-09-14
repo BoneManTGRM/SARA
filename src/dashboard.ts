@@ -1229,6 +1229,25 @@ export const DASHBOARD_HTML = `<!doctype html>
         article.appendChild(summary);
         const observed = document.createElement('p'); observed.textContent = 'Source observed: ' + result.observedAt; article.appendChild(observed);
         const progress = document.createElement('p'); progress.textContent = 'Workflow: ' + (result.workflow || 'No supported match') + ' · ' + (result.currentStep ? 'Next step: ' + result.currentStep + ' · ' : '') + result.nextAction; article.appendChild(progress);
+        const reportReceipt = result.receipts.find(r => r.capability.id === 'software-source-inspector');
+        const report = reportReceipt && reportReceipt.output && reportReceipt.output.evidence && reportReceipt.output.evidence.report;
+        const reportReview = result.receipts.find(r => r.capability.id === 'software-evidence-reviewer');
+        if (result.status === 'COMPLETE' && report && reportReview && reportReview.output.qualified && reportReview.output.evidence.reportSha256 === report.artifact.sha256 && reportReview.output.evidence.sourceReceipt === reportReceipt.resultDigest) {
+          const identity = document.createElement('p'); identity.textContent = 'Source report: ' + result.requestId + ' · SHA-256 ' + report.artifact.sha256 + ' · ' + report.artifact.byteLength + ' bytes'; article.appendChild(identity);
+          const reportDetails = document.createElement('details'), reportLabel = document.createElement('summary'), reportText = document.createElement('pre');
+          reportLabel.textContent = 'Read verified source report'; reportText.textContent = report.artifact.markdown; reportText.style.whiteSpace = 'pre-wrap'; reportText.style.overflowWrap = 'anywhere'; reportDetails.append(reportLabel, reportText); article.appendChild(reportDetails);
+          const download = document.createElement('button'); download.type = 'button'; download.textContent = 'Download verified source report';
+          download.addEventListener('click', async () => {
+            if (body.dataset.owner !== 'connected') return;
+            const epoch = ownerWorkEpoch;
+            const bytes = new TextEncoder().encode(report.artifact.markdown);
+            const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map(b => b.toString(16).padStart(2, '0')).join('');
+            if (body.dataset.owner !== 'connected' || epoch !== ownerWorkEpoch) return;
+            if (digest !== report.artifact.sha256 || bytes.byteLength !== report.artifact.byteLength) { document.querySelector('#owner-work-status').textContent = 'Report integrity check failed. No download was created.'; return; }
+            const url = URL.createObjectURL(new Blob([bytes], {type:'text/markdown;charset=utf-8'}));
+            const link = document.createElement('a'); link.href = url; link.download = 'sara-source-review-' + result.requestId + '.md'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+          }); article.appendChild(download);
+        }
         for (const receipt of result.receipts) {
           const output = receipt.output || {};
           const lines = [...(output.commitments || []).map(item => item.statement), ...(output.followUps || []).map(item => item.reason), ...(output.ambiguities || []), ...(output.responseDraft ? [output.responseDraft] : []), ...(output.sections || []).flatMap(section => section.items.map(item => item.summary)), ...(output.basis === 'AUTHORITATIVE_JOB_STATE' ? output.jobs.map(job => job.jobId + ': linked realized revenue $' + (job.realizedRevenueMicroUsd / 1000000).toFixed(6) + '; recorded model and direct costs $' + ((job.modelApiMicroUsd + job.directExternalMicroUsd) / 1000000).toFixed(6) + '; refunds $' + (job.refundsMicroUsd / 1000000).toFixed(6) + '; allocated costs $' + (job.allocatedMicroUsd / 1000000).toFixed(6) + '; recorded net contribution $' + (job.recordedNetContributionMicroUsd === null ? 'unknown' : (job.recordedNetContributionMicroUsd / 1000000).toFixed(6)) + '; full profit remains unverified') : []), ...(output.accountingUnknowns || [])];

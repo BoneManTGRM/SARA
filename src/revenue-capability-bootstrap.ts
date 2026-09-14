@@ -3,9 +3,9 @@ import { canonicalJson, sha256 } from "./canonical.ts";
 import type { Capability } from "./types.ts";
 
 export const REVENUE_CAPABILITY_MIGRATION_ID = "revenue-pilot-capabilities" as const;
-// Version 8 binds bounded provider collection recovery and its helper dependencies.
-// Append-only migration preserves frozen version-5/6/7 evidence and same-version guards.
-export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 8 as const;
+// Version 9 binds explicit-revision source collection. Preserve the serving v8
+// registration and all earlier evidence through the existing append-only migration.
+export const REVENUE_CAPABILITY_EVIDENCE_VERSION = 9 as const;
 
 type Definition = {
   id: string;

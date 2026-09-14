@@ -57,6 +57,18 @@ test("self-gathers immutable nested source, lockfile, tests and config with veri
   assert.match(result.files.find(file => file.path.endsWith("RobotHome.tsx"))!.sourceText, /UNTRUSTED/);
 });
 
+test('explicit revision fetches that commit and rejects a different returned revision',async()=>{
+ const seam=api();
+ const fetchImpl=(async(input,init)=>seam.fetchImpl(String(input).replace(`/commits/${commit}`,'/commits/main'),init)) as typeof fetch;
+ const result=await collectSoftwareSource('BoneManTGRM/Nicos-Adventures','release readiness',{fetchImpl,revision:commit});
+ assert.equal(result.immutableCommitSha,commit);
+ let called=false;
+ await assert.rejects(collectSoftwareSource('BoneManTGRM/Nicos-Adventures','release readiness',{revision:'main',fetchImpl:async()=>{called=true;return Response.json({});}}),/exact full commit/);
+ assert.equal(called,false);
+ const mismatch=(async(input,init)=>seam.fetchImpl(String(input).replace(`/commits/${'c'.repeat(40)}`,'/commits/main'),init)) as typeof fetch;
+ await assert.rejects(collectSoftwareSource('BoneManTGRM/Nicos-Adventures','release readiness',{fetchImpl:mismatch,revision:'c'.repeat(40)}),/different commit/);
+});
+
 test("rejects credential, private-network, port and malformed targets without requests", async () => {
   const seam = api();
   for (const repository of ["https://user:secret@github.com/a/b", "https://127.0.0.1/a/b", "https://github.com:444/a/b", "a/../b", "https://github.com/a/b?token=x", "https://github.com/a/b/../c"]) {
