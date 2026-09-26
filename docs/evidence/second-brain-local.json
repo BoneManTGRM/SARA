@@ -87,6 +87,18 @@
     "artifacts/second-brain/ci-initial.log": {
       "sha256": "c7922bd25d49dfeb78676bdb8286e43d672ab5558e55216044921a1ff667e895",
       "bytes": 17746
+    },
+    "artifacts/second-brain/ci-keyboard-red.log": {
+      "sha256": "1b04aba11ef10011cc7a04600ed6454f5b01eff45c677b39ef8ebc9205e70c78",
+      "bytes": 16593
+    },
+    "artifacts/second-brain/auth-focus-focused.log": {
+      "sha256": "e149c7b4d8ada44dda2df1f7fdb2393c68462c03b89c90ed4944e458aacc7a31",
+      "bytes": 1728
+    },
+    "artifacts/second-brain/auth-focus-verify.log": {
+      "sha256": "6da345f54a4ffb0ed20e4aa1847ed6d13c6958cda01c120c91a94d74c1e1ef62",
+      "bytes": 269965
     }
   }
 }

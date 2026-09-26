@@ -68,7 +68,7 @@ try{
  await evaluate(`document.querySelector('#token').value=${JSON.stringify(credential)};document.querySelector('#owner-form button[type=submit]').click()`);
  await until("document.body.dataset.owner==='connected' && !document.querySelector('#owner-work-fields').disabled");
  // The new primary workspace is qualified before opening preserved legacy workflows.
- await until("!document.getElementById('brain-fields').disabled");
+ await until("!document.getElementById('brain-fields').disabled && !document.getElementById('owner-dialog').open");
  const secondBrainScreenshots:{width:number;path:string;sha256:string}[]=[];
  for(const width of [1280,390]) {
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
@@ -85,9 +85,10 @@ try{
   await evaluate("document.getElementById('brain-question').focus()");
   await send('Input.insertText',{text:'continuity'});
   assert.equal(await evaluate("document.activeElement.id"),'brain-question','Phone search accepts keyboard focus');
+  const previousHandoff=await evaluate("document.getElementById('brain-handoff').value");
   await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
   await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
-  await until("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')");
+  await until(`document.getElementById('brain-handoff').value!==${JSON.stringify(previousHandoff)} && document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')`);
   await evaluate("document.getElementById('brain-copy').click()");
   await until("/Handoff copied|Select and copy/.test(document.getElementById('brain-status').textContent)");
   await evaluate("document.getElementById('brain-title').scrollIntoView()");
