@@ -99,6 +99,26 @@
     "artifacts/second-brain/auth-focus-verify.log": {
       "sha256": "6da345f54a4ffb0ed20e4aa1847ed6d13c6958cda01c120c91a94d74c1e1ef62",
       "bytes": 269965
+    },
+    "artifacts/second-brain/ci-enter-driver-red.log": {
+      "sha256": "66024079df9a73cc5581967ed98301e088119bb2d31d93b2be81d7678104acd3",
+      "bytes": 16623
+    },
+    "artifacts/second-brain/ci-entry-label-red.log": {
+      "sha256": "b13f7b1cedd7e191fe53e9769ee36ccb629fe52b34512ca6385c2c2a52a9960e",
+      "bytes": 17758
+    },
+    "artifacts/second-brain/keyboard-driver-typecheck.log": {
+      "sha256": "7248f3642ce6e14eb1ffd990507efe7d8b6be8134a31197d089a18b1076a173c",
+      "bytes": 139
+    },
+    "artifacts/second-brain/observed-entry-focused.log": {
+      "sha256": "d6ba4d5ee49e32ee00c955990e177be248d55fac402521499160fbd6bafeb4a6",
+      "bytes": 3285
+    },
+    "artifacts/second-brain/observed-entry-verify.log": {
+      "sha256": "2205feffb9ff1e67f5f0ac1b26bd6c94f269aa7ad1f5d394179ef97e870c1a46",
+      "bytes": 269994
     }
   }
 }

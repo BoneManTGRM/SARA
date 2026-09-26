@@ -94,7 +94,7 @@ test('crash after source receipt resumes the existing plan without recollecting 
 }));
 
 test('v2 qualification requires its complete current route and rejects a v1 receipt relabeled as v2',()=>withKernel(async({runtime})=>{
- const current=[['Observe World Map','World Map'],['Begin the adventure','Robo Lab'],['Continue to the test chamber','Movement test'],['Forward','1'],['Right','2'],['Forward','3'],['Pass movement test','Scanner test']];
+ const current=[['Observe World Map','World Map'],['Start my adventure','Robo Lab'],['Continue to the test chamber','Movement test'],['Forward','1'],['Right','2'],['Forward','3'],['Pass movement test','Scanner test']];
  for(const mixed of [false,true]) {
   const directory=await mkdtemp(join(tmpdir(),'sara-v2-route-'));
   try{

@@ -24,7 +24,7 @@ export function assertNicosJourneyQualification(value: unknown, requirePackaged 
   assert.equal(result.servingRevision, null, 'No serving git attestation is implemented by this profile.');
   assert.ok(Number.isSafeInteger(result.deniedRequestCount) && result.deniedRequestCount >= 0);
   const expected = result.profile==='nicos-movement-to-scanner-v2' ? [
-    ['Observe World Map','World Map'],['Begin the adventure','Robo Lab'],['Continue to the test chamber','Movement test'],
+    ['Observe World Map','World Map'],['Start my adventure','Robo Lab'],['Continue to the test chamber','Movement test'],
     ['Forward','1'],['Right','2'],['Forward','3'],['Pass movement test','Scanner test'],
   ] : [
     ['Observe World Map', 'World Map'], ['Continue adventure', 'Robot Home'], ['Continue adventure', 'Robo Lab'],

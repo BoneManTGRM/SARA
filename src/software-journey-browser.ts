@@ -70,7 +70,7 @@ export const NICOS_JOURNEY_PROFILE: readonly JourneyProfileStep[] = Object.freez
 // starts directly in Robo Lab. Preserve v1 as a distinct historical contract.
 export const NICOS_CURRENT_JOURNEY_PROFILE: readonly JourneyProfileStep[] = Object.freeze([
   NICOS_JOURNEY_PROFILE[0]!,
-  Object.freeze({action:'Begin the adventure',selector:'[data-testid="continue-world"]',expectedSelector:'#page-title',expected:'Robo Lab'}),
+  Object.freeze({action:'Start my adventure',selector:'[data-testid="continue-world"]',expectedSelector:'#page-title',expected:'Robo Lab'}),
   ...NICOS_JOURNEY_PROFILE.slice(3),
 ]);
 

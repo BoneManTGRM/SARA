@@ -47,3 +47,8 @@ Keyboard CI36248311227/job108421515665 on425873f caught the authenticated modal 
 
 
 The next CI36248638881/job108422399616 passed the focus assertion, then timed out waiting for Enter submission. The raw protocol test event omitted Enter's generated carriage-return text (Puppeteer's official USKeyboardLayout maps Enter to text `\\r`). The qualification now sends both key identity and generated text, retaining the assertion that the handoff must actually refresh. This is a test-driver correction, not a weaker assertion or a browser product success claim. Application sources are unchanged from the last locally passing1,559-test gate; final exact-candidate CI must still pass.
+
+
+CI36248798918/job108422828776 passed primary workspace keyboard/copy and retained390/1280 screenshots (artifact10908531906), but v2 still failed its entry control. Direct read-only DOM inspection identified the exact mismatch: `[data-testid="continue-world"]` says Start my adventure; Begin the adventure is a different button. Pinned upstream `web/src/world/journey.ts` at860dd09f confirms that label and the same begin action. The v2 contract now uses the observed selector/label together; no labels are ignored, assertions removed, or alternate controls clicked. Actual serving git identity remains unknown; asset hashes are not equated to repository SHA.
+
+Observed-entry correction: focused 29/29 and full `npm run verify` 1,559/1,559 plus all proofs passed, exit0. Publish and qualify this exact tree; prior failed CI must not substitute for the final result.

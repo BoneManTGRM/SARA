@@ -138,7 +138,7 @@ test('release fatal with omitted check retains only a bounded allowlisted public
 test('current published journey has an explicit v2 entry while v1 evidence remains unchanged',async()=>{
  const {NICOS_CURRENT_JOURNEY_PROFILE}=await import('../src/software-journey-browser.ts');
  assert.deepEqual(NICOS_CURRENT_JOURNEY_PROFILE.map(s=>[s.action,s.expected]),[
-  ['Observe World Map','World Map'],['Begin the adventure','Robo Lab'],['Continue to the test chamber','Movement test'],
+  ['Observe World Map','World Map'],['Start my adventure','Robo Lab'],['Continue to the test chamber','Movement test'],
   ['Forward','1'],['Right','2'],['Forward','3'],['Pass movement test','Scanner test'],
  ]);
  assert.equal(NICOS_CURRENT_JOURNEY_PROFILE[1]?.selector,'[data-testid="continue-world"]');
