@@ -11,6 +11,43 @@ async function boot(dir:string){return SaraKernel.boot({stateDirectory:dir,owner
 async function configure(k:SaraKernel,monthlyLimitUsd=.01,openingChargeUsd=0){const o=k.authenticateOwnerToken(token),input={monthlyLimitUsd,openingChargeUsd,inputUsdPerMillionTokens:100,outputUsdPerMillionTokens:100};await k.configureModelBudget(o,input,{approvalId:'test-only',ownerId:o.id,action:'owner_funded_ceiling_change',targetId:'model-budget:'+sha256(canonicalJson(input)),approvedAt:new Date().toISOString()});}
 async function transfer(k:SaraKernel){const o=k.authenticateOwnerToken(token),review=await k.reviewJevReallocation(o);await k.reallocateModelBudgetToJev(o,review.targetId,{approvalId:'test-transfer',ownerId:o.id,action:'owner_funded_ceiling_change',targetId:review.targetId,approvedAt:new Date().toISOString()});return o;}
 const input=(principalId:string)=>({purpose:'second_brain_rerank' as const,principalId,project:'nico',model:JEV_MODEL,questionVersion:JEV_QUESTION_VERSION,requestDigest:'a'.repeat(64),maximumMicrousd:JEV_RESERVATION_MICROUSD,maximumInputTokens:JEV_MAX_INPUT_TOKENS});
+test('persisted earlier question approval stays held but cannot fund the new contract after restart',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jev-old-contract-'));
+ try{
+  const k=await boot(dir);await configure(k);
+  // Synthetic historical producer: use the actual append-only funding API with
+  // the prior review shape, then restart with the current, unmodified reader.
+  const currentReview=k.reviewJevReallocation.bind(k);
+  k.reviewJevReallocation=async principal=>{
+   const {targetId,...review}=await currentReview(principal);
+   const prior={...review,questionVersion:'sara-relevance-v1'};
+   return {...prior,targetId:'jev-reallocation:'+sha256(canonicalJson(prior))};
+  };
+  await transfer(k);
+  const restarted=await boot(dir),owner=restarted.authenticateOwnerToken(token);
+  assert.equal(await restarted.jevBudget(owner).reserve(input(owner.id)),null);
+  assert.equal((await restarted.jevBudgetStatus()).reauthorizationRequired,true);
+  assert.equal((await restarted.jevBudgetStatus()).allocatedUsd,.01);
+  assert.equal((await restarted.modelBudgetStatus()).remainingUsd,0);
+  assert.equal((await restarted.jevBudgetStatus()).dispatchReservations,0);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('dispatch claim rejects an incompatible reservation without releasing its hold',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jev-reservation-contract-'));
+ try{
+  const k=await boot(dir);await configure(k);const owner=await transfer(k),facade=k.jevBudget(owner);
+  const reservation=await facade.reserve(input(owner.id));assert.ok(reservation);
+  const readable=k as unknown as {state:()=>Promise<{events:{type:string;data:Record<string,unknown>}[]}>};
+  const original=readable.state.bind(k);
+  for(const incompatible of [{questionVersion:'sara-relevance-v1'},{model:'jev-latest'},{purpose:'unrelated_task'}]){
+   // Read-only synthetic history view; canonical events and holds are untouched.
+   readable.state=async()=>{const state=await original();return {...state,events:state.events.map(e=>e.type==='model_budget_jev_reserved'?{...e,data:{...e.data,...incompatible}}:e)};};
+   assert.equal(await facade.stillAuthorized(reservation.id),false);
+   assert.equal((await k.jevBudgetStatus()).reservedUsd,JEV_RESERVATION_MICROUSD/1e6);
+  }
+  readable.state=original;assert.equal(await facade.stillAuthorized(reservation.id),true);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
 test('Jev reallocation requires real existing allowance and exact authenticated approval',async()=>{const dir=await mkdtemp(join(tmpdir(),'jev-budget-'));try{const k=await boot(dir);const o=k.authenticateOwnerToken(token);assert.equal((await k.reviewJevReallocation(o)).transferableUsd,0);await assert.rejects(()=>k.reviewJevReallocation(SARA_PRINCIPAL));await configure(k);const review=await k.reviewJevReallocation(o);assert.equal(review.transferableUsd,.01);await assert.rejects(()=>k.reallocateModelBudgetToJev(o,review.targetId));await assert.rejects(()=>k.reallocateModelBudgetToJev(o,'wrong'));await transfer(k);assert.equal((await k.modelBudgetStatus()).remainingUsd,0);assert.equal((await k.jevBudgetStatus()).remainingUsd,.01);}finally{await rm(dir,{recursive:true,force:true});}});
 test('Jev transfer excludes existing spent/opening amounts and preserves Luna holds',async()=>{const dir=await mkdtemp(join(tmpdir(),'jev-held-'));try{const k=await boot(dir);await configure(k,.03,.01);let calls=0;await assert.rejects(()=>k.guardPaidModelClient({routeKey:'openai:gpt-5.6-luna:paid',maximumWallTimeMs:1000,countInputTokens:async()=>50,execute:async()=>{calls++;throw Error('uncertain charge');}}).execute({prompt:'synthetic',reasoningLevel:'low',maximumOutputTokens:50}));assert.equal(calls,1);const o=k.authenticateOwnerToken(token);assert.equal((await k.reviewJevReallocation(o)).transferableUsd,.01);await transfer(k);assert.equal((await k.modelBudgetStatus()).reservedUsd,.03);assert.equal((await k.jevBudgetStatus()).allocatedUsd,.01);}finally{await rm(dir,{recursive:true,force:true});}});
 test('parallel kernels/retries share atomic Jev suballocation and unknown costs remain held',async()=>{const dir=await mkdtemp(join(tmpdir(),'jev-race-'));try{const a=await boot(dir);await configure(a);const ao=await transfer(a),b=await boot(dir),bo=b.authenticateOwnerToken(token);const ab=a.jevBudget(ao),bb=b.jevBudget(bo);const results=await Promise.all(Array.from({length:10},(_,i)=>(i%2?bb:ab).reserve(input(ao.id))));assert.equal(results.filter(Boolean).length,3);for(const r of results.filter(Boolean))await ab.record({reservationId:r!.id,outcome:'timeout',costMicrousd:null,inputTokens:null,outputTokens:null});const status=await(await boot(dir)).jevBudgetStatus();assert.equal(status.reservedUsd,3*JEV_RESERVATION_MICROUSD/1e6);assert.equal(status.remainingUsd,(10000-3*JEV_RESERVATION_MICROUSD)/1e6);assert.equal((await a.modelBudgetStatus()).reservedUsd,.01);}finally{await rm(dir,{recursive:true,force:true});}});

@@ -39,3 +39,16 @@ Live evaluation has NOT RUN: accuracy unknown, abstentions unknown, latency unkn
 
 
 Offline paired diagnostic: `node --import tsx scripts/evaluate-second-brain-offline.ts` on frozen fixture digest 60766784532964f8e6fa69e2e22f41a049209740640f0499b46915cbaccd6f3a. Both project search and ordinary search returned an expected top result for 10/12 answerable queries (83.3%). Across 20 queries, 2 returned no records; 7/8 unsupported questions still had lexical matches. A lexical match is not an answered assertion: all release stages remain unknown, and source instructions grant no authority. Offline p95 projection latency 1.20 ms in this one local run; not provider latency or production performance. Calls 0; provider usage null; Jev accuracy/abstention/latency unknown; no assisted behavior promoted. This diagnostic reveals synonym and irrelevant-word-match limits rather than claiming those are solved.
+
+
+## Relevance v2 — abstention and excerpt integrity
+
+Current question version is `sara-relevance-v2`; the model stays pinned to `jev-1.13.0`. The original v1 fixture and diagnostic remain historical evidence. V2 reuses the same 20 frozen inputs, expected source IDs and acceptance thresholds (fixture SHA-256 `60766784532964f8e6fa69e2e22f41a049209740640f0499b46915cbaccd6f3a`) with this new question contract; it has not been evaluated live.
+
+The question explicitly distinguishes relevance from truth, permission and completion, treats both query and records as data, admits relevant contradictory evidence, and discloses when the submitted excerpt was truncated. It never infers missing excerpt content. Canonical access, conflict, revision and freshness decisions remain outside the model.
+
+A shadow top suggestion requires score >=0.8 and a gap of at least0.1 over the runner-up. Otherwise selectedId is null and reason is uncertain_shadow or ambiguous_shadow. These are conservative proposed heuristics, explicitly calibrated:false, not empirically calibrated thresholds. Multiple genuinely relevant records can therefore cause an abstention; all authorized ordinary-search results remain accessible and retain their order. Per-record scores remain visible as unqualified shadow diagnostics.
+
+Cache hits retain the original uncertainty/ambiguity reason and a copied judgment. A caller cannot change cached suggestions by mutating a returned object. Question version and request digest invalidate earlier cache entries; the kernel reservation and owner allocation review both bind the v2 contract. V1 evidence or approval targets do not silently qualify v2.
+
+Rationale: the owner-supplied preprint https://arxiv.org/html/2609.29429v1 evaluates this same model for alignment detection, not SARA retrieval. It reports dataset-dependent threshold behavior. Its reported AUROC and pooled cost ratio are not SARA acceptance evidence or a spending allowance. No new inference operation or paid call was added.

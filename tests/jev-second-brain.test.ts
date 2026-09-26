@@ -22,3 +22,33 @@ test('caller cancellation stops before dispatch and streamed-body deadlines are 
 test('query itself requires explicit external-data authorization',async()=>{let calls=0;const adapter=createJevSecondBrain({enabled:true,apiKey:'synthetic',budget:budget(),transport:async()=>{calls++;return response();}});assert.equal((await adapter.rerank({...request,queryApprovedForExternal:false})).reason,'query_not_approved');assert.equal(calls,0);});
 
 test('shadow relevance threshold abstains below 0.8 and includes exact boundary',async()=>{for(const score of [0.79,0.8]){const adapter=createJevSecondBrain({enabled:true,apiKey:'synthetic',budget:budget(),transport:async()=>new Response(JSON.stringify({model:JEV_MODEL,answers:{r0:{type:'noul',noul:score}},usage:{input_tokens:100,output_tokens:20}}))});assert.equal((await adapter.rerank(request)).reason,score<0.8?'uncertain_shadow':'unqualified_shadow');assert.equal('authorizedNewSpendingUsd' in adapter.status(),false);}});
+
+test('cached uncertainty retains the same abstention and never becomes a selection',async()=>{
+  let calls=0;
+  const adapter=createJevSecondBrain({enabled:true,apiKey:'synthetic',budget:budget(),transport:async()=>{
+    calls++;return new Response(JSON.stringify({model:JEV_MODEL,answers:{r0:{type:'noul',noul:.5}},usage:{input_tokens:100,output_tokens:0}}));
+  }});
+  const first=await adapter.rerank(request),cached=await adapter.rerank(request);
+  assert.equal(cached.reason,'uncertain_shadow');assert.equal(cached.cached,true);
+  assert.equal(first.judgment?.selectedId,null);assert.deepEqual(cached.judgment,first.judgment);assert.equal(calls,1);
+});
+
+test('near-tied relevance abstains without changing ordinary order or selecting by identifier',async()=>{
+  for(const scores of [[.91,.90],[.9,.9],[.9,.79]]){
+    const adapter=createJevSecondBrain({enabled:true,apiKey:'synthetic',budget:budget(),transport:async()=>new Response(JSON.stringify({model:JEV_MODEL,answers:{r0:{type:'noul',noul:scores[0]},r1:{type:'noul',noul:scores[1]}},usage:{input_tokens:100,output_tokens:0}}))});
+    const result=await adapter.rerank({...request,candidates:[record,{...record,id:'a2',digest:'b'.repeat(64)}]});
+    assert.deepEqual(result.ids,['r1','a2']);assert.equal(result.promoted,false);
+    assert.equal(result.judgment?.selectedId,scores[1]===.79?'r1':null);
+    assert.equal(result.reason,scores[1]===.79?'unqualified_shadow':'ambiguous_shadow');
+    assert.equal(result.judgment?.calibrated,false);
+  }
+});
+
+test('external rubric states relevance is not truth and discloses bounded excerpts',async()=>{
+  let body='';const adapter=createJevSecondBrain({enabled:true,apiKey:'synthetic',budget:budget(),transport:async(_u,init)=>{body=String(init?.body);return response();}});
+  await adapter.rerank({...request,candidates:[{...record,text:'x'.repeat(1600)}]});
+  const parsed=JSON.parse(body);assert.equal(parsed.state.records[0].excerptTruncated,true);
+  assert.equal(parsed.state.records[0].text.length,1500);
+  assert.match(parsed.questions.r0.instructions,/does not establish truth/i);
+  assert.match(parsed.questions.r0.instructions,/query.*data/i);
+});
