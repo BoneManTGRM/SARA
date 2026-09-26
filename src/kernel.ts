@@ -1,3 +1,4 @@
+import {jevContract,type JevProvider} from './jev-contract.ts';
 import { importGitHubEvidence, githubContextPredecessors, type GitHubImportInput } from "./second-brain-github.ts";
 import { noteInput, evidenceId, projectId, projectView, type EvidenceMemory } from "./second-brain.ts";
 import { repositoryCollectionRetryDue, repositoryCollectionFailure, repositoryCollectionRetryAt, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
@@ -3921,7 +3922,8 @@ export class SaraKernel {
   }
 
   /** Review unused current allowance; no mutation, increase, cancellation or guessed cash balance. */
-  async reviewJevReallocation(principal: Principal) {
+  async reviewJevReallocation(principal: Principal, provider:JevProvider="typesafe") {
+    const contract=jevContract(provider);
     if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required for Jev funding review.");
     const state=await this.state(),shared=await this.modelBudgetStatus();
     const existing=state.events.filter(e=>e.type==="model_budget_reserved"&&(e.data as {purpose?:string}).purpose==="second_brain_allocation"&&e.occurredAt.slice(0,7)===shared.month);
@@ -3950,51 +3952,53 @@ export class SaraKernel {
     const amountMicrousd=blockers.length?0:Math.round(shared.remainingUsd*1_000_000);
     const sourceDigest=sha256(canonicalJson({month:shared.month,shared,paidObligations,fundedJobs,
       financialEvents:state.events.filter(e=>e.type.startsWith("model_budget_")).map(e=>e.hash)}));
-    const review={schemaVersion:1,purpose:"second_brain_rerank",model:"jev-1.13.0",questionVersion:"sara-relevance-v3",
+    const review={schemaVersion:1,purpose:"second_brain_rerank",model:contract.model,questionVersion:String(contract.questionVersion),
       month:shared.month,projects:["nico","sara","nicos-world"],amountMicrousd,transferableUsd:amountMicrousd/1_000_000,
       sourceDigest,shared,paidObligations,fundedJobs,blockers,expiresAt:new Date(Date.UTC(Number(shared.month.slice(0,4)),Number(shared.month.slice(5,7)),1)).toISOString()};
     return {...review,targetId:`jev-reallocation:${sha256(canonicalJson(review))}`};
   }
 
-  reallocateModelBudgetToJev(principal: Principal, expectedTargetId:string, approval?:OwnerApproval) {
+  reallocateModelBudgetToJev(principal: Principal, expectedTargetId:string, approval?:OwnerApproval, provider:JevProvider="typesafe") {
     return this.serializeMutation(async()=>{
-      const review=await this.reviewJevReallocation(principal);
+      const review=await this.reviewJevReallocation(principal,provider);
       if(review.targetId!==expectedTargetId)throw new Error("Jev funding review changed; inspect the current exact target.");
       if(review.blockers.length||review.amountMicrousd<=0)throw new Error(`Jev funding blocked: ${review.blockers.join(", ")}`);
       await this.authorize(principal,{action:"owner_funded_ceiling_change",targetId:review.targetId,external:false,...(approval?{approval}:{})});
       const id=randomUUID();
       // Existing event type deliberately preserves the full hold for rollback readers.
       // Per-request subholds use a new type so old runtimes never double count them.
-      await this.#store.append("model_budget_reserved",principal,{...review,id,purpose:"second_brain_allocation",routeKey:"typesafe:jev-1.13.0:allocation",ownerId:principal.id,approvalId:approval!.approvalId});
-      return this.jevBudgetStatus();
+      await this.#store.append("model_budget_reserved",principal,{...review,id,purpose:"second_brain_allocation",routeKey:jevContract(provider).routeKey+":allocation",ownerId:principal.id,approvalId:approval!.approvalId});
+      return this.jevBudgetStatus(provider);
     });
   }
 
-  async jevBudgetStatus() {
+  async jevBudgetStatus(provider:JevProvider="typesafe") {
+    const contract=jevContract(provider);
     const state=await this.state(),month=new Date().toISOString().slice(0,7);
     const allocation=state.events.filter(e=>e.type==="model_budget_reserved"&&(e.data as {purpose?:string}).purpose==="second_brain_allocation"&&e.occurredAt.slice(0,7)===month).at(-1)?.data as
       {id:string;amountMicrousd:number;expiresAt:string;ownerId:string;model?:string;questionVersion?:string;purpose?:string}|undefined;
-    const contractCompatible=!!allocation&&allocation.model==="jev-1.13.0"&&
-      allocation.questionVersion==="sara-relevance-v3"&&allocation.purpose==="second_brain_allocation";
+    const contractCompatible=!!allocation&&allocation.model===contract.model&&
+      allocation.questionVersion===contract.questionVersion&&allocation.purpose==="second_brain_allocation";
     const reservations=state.events.filter(e=>e.type==="model_budget_jev_reserved"&&(e.data as {allocationId?:string}).allocationId===allocation?.id && !!allocation);
     const reservedMicrousd=reservations.reduce((sum,e)=>sum+(e.data as {amountMicrousd:number}).amountMicrousd,0);
     const receipts=state.events.filter(e=>e.type==="model_budget_jev_usage_observed"&&reservations.some(r=>(r.data as {id:string}).id===(e.data as {reservationId:string}).reservationId));
     const measuredMicrousd=receipts.reduce((sum,e)=>sum+((e.data as {costMicrousd:number|null}).costMicrousd??0),0);
     const known=new Set(receipts.filter(e=>(e.data as {costMicrousd:number|null}).costMicrousd!==null).map(e=>(e.data as {reservationId:string}).reservationId));
     return {month,configured:!!allocation,contractCompatible,reauthorizationRequired:!!allocation&&!contractCompatible,
-      allocationModel:allocation?.model??null,questionVersion:allocation?.questionVersion??null,currentQuestionVersion:"sara-relevance-v3",
+      allocationModel:allocation?.model??null,questionVersion:allocation?.questionVersion??null,currentQuestionVersion:contract.questionVersion,provider,
       allocationId:allocation?.id??null,expiresAt:allocation?.expiresAt??null,
       allocatedUsd:(allocation?.amountMicrousd??0)/1_000_000,reservedUsd:reservedMicrousd/1_000_000,
       remainingUsd:Math.max(0,(allocation?.amountMicrousd??0)-reservedMicrousd)/1_000_000,
       measuredKnownUsageUsd:measuredMicrousd/1_000_000,unknownChargeCount:reservations.filter(r=>!known.has((r.data as {id:string}).id)).length,
-      dispatchReservations:reservations.length,model:"jev-1.13.0",purpose:"second_brain_rerank",autoReload:false};
+      dispatchReservations:reservations.length,model:contract.model,purpose:"second_brain_rerank",autoReload:false};
   }
 
   /** Purpose-bound facade over the SAME kernel-private financial audit authority. No provider dispatch here. */
-  jevBudget(principal: Principal): import("./jev-second-brain.ts").JevBudget {
+  jevBudget(principal: Principal, provider:JevProvider="typesafe"): import("./jev-second-brain.ts").JevBudget {
+    const contract=jevContract(provider);
     const eligible=async()=>{
       if(!this.isVerifiedOwner(principal))return false;
-      const state=await this.state(),shared=await this.modelBudgetStatus(),jev=await this.jevBudgetStatus();
+      const state=await this.state(),shared=await this.modelBudgetStatus(),jev=await this.jevBudgetStatus(provider);
       return !state.emergencyStopped&&!state.events.some(e=>e.type==="model_budget_bound_violation")&&
         jev.configured&&jev.contractCompatible&&!!jev.expiresAt&&Date.parse(jev.expiresAt)>Date.now()&&shared.reservedUsd<=shared.monthlyLimitUsd;
     };
@@ -4002,12 +4006,12 @@ export class SaraKernel {
       reserve:input=>this.serializeMutation(async()=>{
         if(!await eligible())return null;
         if(input.purpose!=="second_brain_rerank"||input.principalId!==principal.id||!["nico","sara","nicos-world"].includes(input.project)||
-          input.model!=="jev-1.13.0"||input.questionVersion!=="sara-relevance-v3"||input.maximumInputTokens!==65536||
-          input.maximumMicrousd!==Math.ceil(65536*0.042)||!/^[a-f0-9]{64}$/.test(input.requestDigest))return null;
-        const status=await this.jevBudgetStatus();
+          input.model!==contract.model||input.questionVersion!==contract.questionVersion||input.maximumInputTokens!==contract.maximumInputTokens||
+          input.maximumMicrousd!==contract.reservationMicrousd||!/^[a-f0-9]{64}$/.test(input.requestDigest))return null;
+        const status=await this.jevBudgetStatus(provider);
         if(input.maximumMicrousd>Math.round(status.remainingUsd*1_000_000))return null;
         const id=randomUUID();
-        await this.#store.append("model_budget_jev_reserved",principal,{id,allocationId:status.allocationId,routeKey:"typesafe:jev-1.13.0:paid",
+        await this.#store.append("model_budget_jev_reserved",principal,{id,allocationId:status.allocationId,routeKey:contract.routeKey+":paid",
           amountMicrousd:input.maximumMicrousd,inputTokens:input.maximumInputTokens,maximumOutputTokens:16384,
           purpose:input.purpose,principalId:input.principalId,project:input.project,model:input.model,questionVersion:input.questionVersion,
           promptDigest:input.requestDigest,month:status.month});
@@ -4015,13 +4019,13 @@ export class SaraKernel {
       }),
       stillAuthorized:reservationId=>this.serializeMutation(async()=>{
         if(!await eligible())return false;
-        const status=await this.jevBudgetStatus(),state=await this.state();
+        const status=await this.jevBudgetStatus(provider),state=await this.state();
         const owned=state.events.some(e=>e.type==="model_budget_jev_reserved"&&
           (e.data as {id:string;allocationId?:string;principalId?:string}).id===reservationId&&
           (e.data as {allocationId?:string}).allocationId===status.allocationId&&
           (e.data as {principalId?:string}).principalId===principal.id&&
-          (e.data as {model?:string}).model==="jev-1.13.0"&&
-          (e.data as {questionVersion?:string}).questionVersion==="sara-relevance-v3"&&
+          (e.data as {model?:string}).model===contract.model&&
+          (e.data as {questionVersion?:string}).questionVersion===contract.questionVersion&&
           (e.data as {purpose?:string}).purpose==="second_brain_rerank");
         if(!owned||state.events.some(e=>["model_budget_jev_dispatch_claimed","model_budget_jev_usage_observed"].includes(e.type)&&
           (e.data as {reservationId:string}).reservationId===reservationId))return false;
@@ -4032,15 +4036,29 @@ export class SaraKernel {
         if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required for Jev usage receipt.");
         const state=await this.state();
         const reservation=state.events.find(e=>e.type==="model_budget_jev_reserved"&&(e.data as {id:string}).id===receipt.reservationId)?.data as
-          {allocationId?:string;principalId?:string;amountMicrousd:number;inputTokens:number;maximumOutputTokens:number}|undefined;
-        if(!reservation?.allocationId||reservation.principalId!==principal.id)throw new Error("Unknown Jev reservation.");
-        const outcomes=["usage_observed","timeout","cancelled","rate_limited","malformed","unavailable","access_denied","budget_denied","input_too_large"];
+          {allocationId?:string;principalId?:string;amountMicrousd:number;inputTokens:number;maximumOutputTokens:number;model?:string;questionVersion?:string}|undefined;
+        if(!reservation?.allocationId||reservation.principalId!==principal.id||reservation.model!==contract.model||reservation.questionVersion!==contract.questionVersion)throw new Error("Unknown Jev reservation.");
+        const outcomes=["usage_observed","timeout","cancelled","rate_limited","malformed","unavailable","access_denied","budget_denied","input_too_large","bound_exceeded"];
         if(!outcomes.includes(receipt.outcome))throw new Error("Invalid Jev receipt outcome.");
         if(receipt.costMicrousd===null) {
-          if(receipt.inputTokens!==null||receipt.outputTokens!==null||receipt.outcome==="usage_observed")throw new Error("Unknown usage must remain explicitly unknown.");
-        }else if(receipt.outcome!=="usage_observed"||!Number.isSafeInteger(receipt.inputTokens)||receipt.inputTokens===null||receipt.inputTokens<0||receipt.inputTokens>reservation.inputTokens||
-          !Number.isSafeInteger(receipt.outputTokens)||receipt.outputTokens===null||receipt.outputTokens<0||receipt.outputTokens>reservation.maximumOutputTokens||
-          !Number.isSafeInteger(receipt.costMicrousd)||receipt.costMicrousd!==Math.ceil(receipt.inputTokens*0.042)||receipt.costMicrousd>reservation.amountMicrousd)throw new Error("Jev usage does not match reviewed prices and reservation bounds.");
+          if(receipt.inputTokens!==null||receipt.outputTokens!==null||receipt.outcome==="usage_observed"||receipt.outcome==="bound_exceeded"||
+            receipt.billedCostUsd!==undefined||receipt.providerRequestId!==undefined||receipt.responseModel!==undefined)throw new Error("Unknown usage must remain explicitly unknown.");
+        }else {
+          const validCount=(n:number|null)=>n===null||(Number.isSafeInteger(n)&&n>=0);
+          if(!["usage_observed","bound_exceeded"].includes(receipt.outcome)||!validCount(receipt.inputTokens)||!validCount(receipt.outputTokens)||
+            !Number.isSafeInteger(receipt.costMicrousd)||receipt.costMicrousd<0)throw new Error("Invalid Jev usage receipt.");
+          if(receipt.outcome==="usage_observed"&&(receipt.inputTokens===null||receipt.outputTokens===null||receipt.inputTokens>reservation.inputTokens||receipt.outputTokens>reservation.maximumOutputTokens))throw new Error("Invalid bounded token receipt.");
+          if(provider==="typesafe"&&(receipt.outcome!=="usage_observed"||receipt.costMicrousd!==Math.ceil((receipt.inputTokens??NaN)*.042)||receipt.costMicrousd>reservation.amountMicrousd))throw new Error("Jev usage does not match reviewed prices and reservation bounds.");
+          if(provider==="openrouter"&&(typeof receipt.billedCostUsd!=="number"||!Number.isFinite(receipt.billedCostUsd)||receipt.billedCostUsd<0||
+            Math.ceil(receipt.billedCostUsd*1_000_000)!==receipt.costMicrousd||receipt.responseModel!==contract.responseModel||
+            typeof receipt.providerRequestId!=="string"||!/^gen-[a-zA-Z0-9-]{1,160}$/.test(receipt.providerRequestId)||
+            (receipt.outcome==="bound_exceeded")!==(receipt.costMicrousd>reservation.amountMicrousd||(receipt.inputTokens!==null&&receipt.inputTokens>reservation.inputTokens)||(receipt.outputTokens!==null&&receipt.outputTokens>reservation.maximumOutputTokens))))throw new Error("Invalid OpenRouter billed receipt.");
+        }
+        if(receipt.outcome==="bound_exceeded") {
+          // Write the freeze first: even a crash before the usage receipt prevents another dispatch.
+          if(!state.events.some(e=>e.type==="model_budget_bound_violation"&&(e.data as {reservationId?:string}).reservationId===receipt.reservationId))
+            await this.#store.append("model_budget_bound_violation",principal,{routeKey:contract.routeKey,...receipt});
+        }
         const prior=state.events.find(e=>e.type==="model_budget_jev_usage_observed"&&(e.data as {reservationId:string}).reservationId===receipt.reservationId);
         if(prior){if(canonicalJson(prior.data)!==canonicalJson(receipt))throw new Error("Conflicting Jev usage receipt requires reconciliation.");return;}
         await this.#store.append("model_budget_jev_usage_observed",principal,receipt);

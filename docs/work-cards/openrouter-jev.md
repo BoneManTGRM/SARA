@@ -1,0 +1,13 @@
+# OpenRouter Jev — isolated follow-up candidate
+
+Baseline main 29bf0a8908f95580d045c345aec8e7be2f462c46; branch codex/sara-openrouter-20260926. Owner requested connecting Jev through OpenRouter after TypeSafe signup was unavailable. No new allowance, private inference, provider fallback, or constitutional change.
+
+Plan: freeze official Decisions API contract; write failing route/accounting tests; add explicit server-side provider selection and canonical route-bound funding; run focused/full gates, independent review and publish a PR. CANARY and exact-target owner promotion remain required. Live use requires secure replacement of the pictured credential and current purpose-bound allowance; neither is presumed.
+
+Acceptance: one bounded request to official endpoint; fixed request/response model identities; no key crossing routes; separate allocation contracts; actual USD receipt validated or cost remains unknown; concurrency/retries remain bounded; local search always available; owner sees selected route; old direct TypeSafe behavior preserved. Synthetic tests are not live qualification. Freeze existing retrieval fixtures and thresholds unchanged.
+
+Rollback: application revision only to baseline, preserve /data, all existing memories/audit/financial holds. Old readers continue counting allocation holds. Never cancel obligations or restore older history over newer writes.
+
+Implementation checkpoint: initial route regression failed (expected simulated_shadow, received local_search). Focused adapter/budget/HTTP/owner tests then passed43/43; strict typecheck passed. Independent reviewer found an accidental extra generic-budget argument and missing durable freeze on observed overcharges. Both repaired; overcharge regression first failed Invalid Jev receipt outcome, then passed including restart and subsequent-dispatch denial. Initial full gate ran while source edits were still occurring: 1559/1584 passed, 25 capability qualification failures; this run does not qualify any frozen revision. Repeating affected tests against frozen sources and final full gate is required. No deployment, key access, paid calls or funds reallocation occurred.
+
+Second critique caught combined malformed answers plus a valid over-bound bill. Regression first failed (malformed instead of budget_denied); billing now precedes decision validation, preserving valid known cost independently and freezing excessive token counts as well. A superseded frozen full gate was interrupted (exit130) to make this correction. The earlier affected capability tests passed33/33 once source edits stopped; this supports moving source fingerprints as the initial failure cause, not a waived assertion. Final full gate follows on frozen code.

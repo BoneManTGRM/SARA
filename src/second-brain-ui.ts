@@ -46,8 +46,8 @@ export function secondBrainWorkspace(html:string):string {
  <details><summary>Jev connection and existing allowance</summary>
  <p>Jev uses only public source records and a query you approve. Suggestions remain in shadow until qualified; ordinary search stays available.</p>
  <button id="brain-budget-review" type="button">Review unused job allowance</button><pre id="brain-budget"></pre><button id="brain-budget-approve" type="button" disabled>Reallocate reviewed unused allowance</button>
- <p>Provider setup: an existing TypeSafe key must be saved as TYPESAFE_API_KEY in SARA’s server environment. Never paste it into a note.</p>
- <label><input id="brain-query-public" type="checkbox">I approve sending this search query and matching public project evidence to TypeSafe.</label>
+ <p>Provider setup: OpenRouter uses OPENROUTER_API_KEY with SARA_JEV_PROVIDER=openrouter in SARA’s server environment. Direct TypeSafe uses TYPESAFE_API_KEY with SARA_JEV_PROVIDER=typesafe. A key alone does not authorize spending. Never paste it into a note.</p>
+ <label><input id="brain-query-public" type="checkbox">I approve sending this search query and matching public project evidence to the selected provider route shown above (OpenRouter forwards it to TypeSafe).</label>
  <button id="brain-jev" type="button">Evaluate with Jev</button><pre id="brain-jev-result" role="status" aria-live="polite"></pre>
  <details><summary>Experimental match details</summary><p>Scores are uncalibrated suggestions, not verified facts. Match record IDs to Sources below.</p><pre id="brain-jev-details"></pre></details></details>
  <h2>Current brief</h2><textarea id="brain-handoff" readonly rows="14" aria-label="Continuation brief"></textarea>

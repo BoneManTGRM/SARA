@@ -80,3 +80,53 @@ test('rollback baseline budget reader retains full transfer once and ignores Jev
  assert.equal(await legacyReserved(k),.03);assert.equal((await k.modelBudgetStatus()).reservedUsd,.03);const restarted=await boot(dir);assert.equal(await legacyReserved(restarted),.03);assert.equal((await restarted.modelBudgetStatus()).remainingUsd,0);assert.equal((await restarted.jevBudgetStatus()).reservedUsd,2*JEV_RESERVATION_MICROUSD/1e6);
  const audit=await restarted.inspectAudit();assert.equal(audit.filter(e=>e.type==='model_budget_reserved'&&(e.data as {purpose?:string}).purpose==='second_brain_allocation').length,1);assert.equal(audit.filter(e=>e.type==='model_budget_jev_reserved').length,2);
  }finally{await rm(dir,{recursive:true,force:true});}});
+
+test('OpenRouter allocation is route-bound, survives restart and concurrent reservations cannot exceed it',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jev-openrouter-budget-'));
+ try{
+  const k=await boot(dir);await configure(k);const o=k.authenticateOwnerToken(token);
+  const review=await k.reviewJevReallocation(o,'openrouter'),direct=await k.reviewJevReallocation(o);
+  assert.notEqual(review.targetId,direct.targetId);
+  const approval={approvalId:'synthetic-router-transfer',ownerId:o.id,action:'owner_funded_ceiling_change' as const,targetId:review.targetId,approvedAt:new Date().toISOString()};
+  await assert.rejects(()=>k.reallocateModelBudgetToJev(o,review.targetId,approval));
+  await k.reallocateModelBudgetToJev(o,review.targetId,approval,'openrouter');
+  const restart=await boot(dir),owner=restart.authenticateOwnerToken(token);
+  assert.equal((await restart.jevBudgetStatus()).contractCompatible,false);
+  assert.equal(await restart.jevBudget(owner).reserve(input(owner.id)),null);
+  const {jevContract}=await import('../src/jev-contract.ts'),c=jevContract('openrouter');
+  const i={...input(owner.id),model:c.model,questionVersion:c.questionVersion,maximumInputTokens:c.maximumInputTokens,maximumMicrousd:c.reservationMicrousd};
+  const facade=restart.jevBudget(owner,'openrouter');
+  const held=await Promise.all(Array.from({length:20},()=>facade.reserve(i)));
+  assert.equal(held.filter(Boolean).length,Math.floor(10000/c.reservationMicrousd));
+  assert.ok((await restart.jevBudgetStatus('openrouter')).reservedUsd<=.01);
+  const id=held.find(Boolean)!.id;
+  assert.equal(await restart.jevBudget(owner).stillAuthorized(id),false);
+  assert.equal(await facade.stillAuthorized(id),true);assert.equal(await facade.stillAuthorized(id),false);
+  await facade.record({reservationId:id,outcome:'usage_observed',costMicrousd:20,inputTokens:476,outputTokens:70,billedCostUsd:.000019992,providerRequestId:'gen-dec-synthetic',responseModel:c.responseModel});
+  assert.equal((await restart.jevBudgetStatus('openrouter')).measuredKnownUsageUsd,.00002);
+  assert.equal((await restart.modelBudgetStatus()).remainingUsd,0);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('direct TypeSafe allocation cannot authorize OpenRouter request',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jev-direct-route-'));
+ try{const k=await boot(dir);await configure(k);const owner=await transfer(k);
+ assert.equal((await k.jevBudgetStatus('openrouter')).contractCompatible,false);
+ assert.equal(await k.jevBudget(owner,'openrouter').reserve(input(owner.id)),null);
+ assert.equal((await k.modelBudgetStatus()).remainingUsd,0);
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
+test('observed OpenRouter overcharge freezes all further dispatches and remains durable',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'jev-overcharge-'));
+ try{
+ const k=await boot(dir);await configure(k);const owner=k.authenticateOwnerToken(token),review=await k.reviewJevReallocation(owner,'openrouter');
+ await k.reallocateModelBudgetToJev(owner,review.targetId,{approvalId:'synthetic',ownerId:owner.id,action:'owner_funded_ceiling_change',targetId:review.targetId,approvedAt:new Date().toISOString()},'openrouter');
+ const {jevContract}=await import('../src/jev-contract.ts'),c=jevContract('openrouter'),f=k.jevBudget(owner,'openrouter');
+ const i={...input(owner.id),model:c.model,questionVersion:c.questionVersion,maximumInputTokens:c.maximumInputTokens,maximumMicrousd:c.reservationMicrousd};
+ const hold=await f.reserve(i);assert.ok(hold);assert.equal(await f.stillAuthorized(hold.id),true);
+ await f.record({reservationId:hold.id,outcome:'bound_exceeded',costMicrousd:1_000_000,inputTokens:476,outputTokens:70,providerRequestId:'gen-dec-synthetic',responseModel:c.responseModel,billedCostUsd:1});
+ assert.equal(await f.reserve(i),null);
+ const restarted=await boot(dir);assert.equal(await restarted.jevBudget(restarted.authenticateOwnerToken(token),'openrouter').reserve(i),null);
+ assert.equal((await restarted.jevBudgetStatus('openrouter')).measuredKnownUsageUsd,1);
+ assert.ok((await restarted.reviewJevReallocation(restarted.authenticateOwnerToken(token),'openrouter')).blockers.includes('MODEL_USAGE_RECONCILIATION_REQUIRED'));
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
