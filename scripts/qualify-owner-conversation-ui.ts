@@ -87,11 +87,23 @@ try{
   await evaluate(`document.getElementById('brain-note').value='Synthetic linked decision ${width}';document.getElementById('brain-kind').value='decision';document.querySelector('#brain-capture button').click()`);
   await until(`document.getElementById('brain-tracking').textContent.includes('Synthetic linked decision ${width}')`);
   assert.equal(await evaluate("document.documentElement.scrollWidth<=window.innerWidth+1"),true,'Expanded tracking fits phone');
+  await evaluate("document.querySelector('[data-brain-question=\"What was decided?\"]').click()");
+  await until(`document.getElementById('brain-answer').textContent.includes('Synthetic linked decision ${width}')`);
+  assert.equal(await evaluate("document.getElementById('brain-answer').textContent.includes('Synthetic continuity blocker')"),false,'Decision answer excludes blocker category');
+  assert.equal(await evaluate("document.getElementById('brain-answer').textContent.includes('reported')"),true);
+  await evaluate("document.querySelector('[data-brain-question=\"What is blocked?\"]').click()");
+  await until(`document.getElementById('brain-answer').textContent.includes('Synthetic continuity blocker ${width}')`);
+  await evaluate("document.querySelector('[data-brain-question=\"What is next?\"]').click()");
+  await until("document.getElementById('brain-answer').textContent.includes('Unknown — no current records')");
+  assert.equal(await evaluate("document.getElementById('brain-answer').textContent.includes('grants no permission')"),true);
+  assert.equal(await evaluate("document.documentElement.scrollWidth<=window.innerWidth+1"),true,'Question answers fit the phone');
   await evaluate("document.getElementById('brain-note').value='PRIVATE UNSAVED DRAFT';document.getElementById('brain-question').value='PRIVATE QUERY';document.getElementById('brain-import-id').value='PRIVATE TARGET';document.getElementById('brain-attempt').value='2'");
 
   await evaluate("document.getElementById('brain-project').value='sara';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
   await until("document.getElementById('brain-handoff').value.includes('SARA / SARA')");
   assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')"),false);
+  await until("document.getElementById('brain-obligations').textContent.includes('obligations')");
+  assert.equal(await evaluate("document.getElementById('brain-answer').textContent.includes('Synthetic')"),false,'Project switch clears answer');
   assert.equal(await evaluate("document.getElementById('brain-tracking').textContent.includes('Synthetic linked decision')"),false);
   assert.equal(await evaluate("document.getElementById('brain-changes').textContent.includes('Synthetic continuity blocker')"),false);
   assert.equal(await evaluate("document.getElementById('brain-related').value"),'');
@@ -352,6 +364,7 @@ try{
  await until("document.body.dataset.owner!=='connected' && document.getElementById('brain-fields').disabled");
  for(const field of ['brain-note','brain-question','brain-import-id','brain-attempt','brain-related','brain-since','brain-handoff'])assert.equal(await evaluate(`document.getElementById('${field}').value`),'','Logout clears '+field);
  assert.equal(await evaluate("document.getElementById('brain-tracking').textContent"),'','Logout clears tracking');
+ assert.equal(await evaluate("document.getElementById('brain-answer').textContent"),'','Logout clears answer');
  console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:15,executedReceipts:qualifiedCount+5+repairReceipts.length,isolatedRepairQualification:repairReport,repairReportPath,preservedBaseline:{ordinaryRequests:13,executedReceipts:qualifiedCount},softwareRuntimeQualification:softwareReport,softwareReportPath,defectNoFailure:true,isolatedReproduction:true,defectReplay:true,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,secondBrainScreenshots,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
