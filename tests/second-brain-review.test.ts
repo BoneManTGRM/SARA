@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {SaraKernel,SARA_PRINCIPAL} from '../src/kernel.ts';
 import {sha256} from '../src/canonical.ts';
-import {noteInput,projectView,acceptsEvidence,type EvidenceMemory} from '../src/second-brain.ts';
+import {noteInput,evidenceId,projectView,acceptsEvidence,type EvidenceMemory} from '../src/second-brain.ts';
 import type {MemoryRecord} from '../src/types.ts';
 const token='synthetic-review-token';
 const revision='a'.repeat(40);
@@ -61,4 +61,16 @@ test('review: exact SHA cannot satisfy acceptance without canonical current, con
  assert.equal(check(superseded,target,new Date(now),[superseded]),false);
  const fabricated={...memory,projectEvidence:{...memory.projectEvidence,revision:'b'.repeat(40)}};
  assert.equal(check(fabricated,{...target,revision:'b'.repeat(40)},new Date(now),[memory]),false);
+});
+
+test('review: a handoff includes both sides of a conflict even when only one matches the query',()=>{
+ const at='2026-09-26T12:00:00.000Z';
+ const first=noteInput({project:'nico',text:'Compiler qualification passed, according to a summary.',observedAt:at},at);
+ const a={...first,id:evidenceId(first)};
+ const second=noteInput({project:'nico',text:'The same qualification failed with a timeout.',observedAt:at,conflictsWith:[a.id]},at);
+ const b={...second,id:evidenceId(second)};
+ const view=projectView([a,b],'nico','Compiler',new Date(at));
+ assert.equal(view.conflicts.length,2);
+ assert.ok(view.handoff.includes(a.id));assert.ok(view.handoff.includes(b.id));
+ assert.match(view.handoff,/CONFLICT/);
 });

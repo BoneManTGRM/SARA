@@ -39,6 +39,54 @@
     "artifacts/second-brain/real-nico-handoff.txt": {
       "sha256": "5949c4f7d82c1beb9d04a2e9a4420bc8e38b0f6426d797e2b6981bf523956b77",
       "bytes": 4213
+    },
+    "artifacts/second-brain/conflict-handoff-red.log": {
+      "sha256": "3516ec31442026461da97e13852bb0dc5d08b847de7dfdebbb1437a4e249d2aa",
+      "bytes": 1393
+    },
+    "artifacts/second-brain/conflict-handoff-red-assertion.log": {
+      "sha256": "c85e4c15ce02f5221278234ca65d10d28838c48fee501c9117b67cc36920e3c6",
+      "bytes": 1614
+    },
+    "artifacts/second-brain/conflict-focused.log": {
+      "sha256": "093c6badb5b2955567ac3bdf06fdf69c46087077b53fe4f384e0e92b11af94b1",
+      "bytes": 5305
+    },
+    "artifacts/second-brain/conflict-verify.log": {
+      "sha256": "eb61024fa5f14c0fd4438086aeea0869bba9560848dff451d6b30a0f31d0c87d",
+      "bytes": 269616
+    },
+    "artifacts/second-brain/nontermination-recheck.log": {
+      "sha256": "5d8a6e08c2a6408acbbf958d3377bc8c4c0cf014444b7ad3a425b7ab4aea0c03",
+      "bytes": 230
+    },
+    "artifacts/second-brain/frozen-eval20.json": {
+      "sha256": "aab8e9a1cfdc8320c8663dbf8171df8716177216e45f8b7044044011a75c7ac5",
+      "bytes": 10672
+    },
+    "artifacts/second-brain/current-journey-red.log": {
+      "sha256": "66e874800f27c88cc64795e09a3ed1e0c6c39b989c107ac84f2c7ee58176a8ae",
+      "bytes": 2718
+    },
+    "artifacts/second-brain/current-journey-green.log": {
+      "sha256": "d5205012fe62e20d53ecaa43584f61616c135273fa95d18e361e6e3072940b74",
+      "bytes": 8355
+    },
+    "artifacts/second-brain/current-journey-receipts.log": {
+      "sha256": "1a574892f06ba270d380604832a627fe410a187b62b8a7073f2a06b11b294669",
+      "bytes": 1201
+    },
+    "artifacts/second-brain/release-verify.log": {
+      "sha256": "07d6e52d8d38688c1dbda54d4c705541b592e2ba5ab1d30e9a4fe2d4a203c455",
+      "bytes": 270019
+    },
+    "artifacts/second-brain/release-typecheck.log": {
+      "sha256": "7248f3642ce6e14eb1ffd990507efe7d8b6be8134a31197d089a18b1076a173c",
+      "bytes": 139
+    },
+    "artifacts/second-brain/ci-initial.log": {
+      "sha256": "c7922bd25d49dfeb78676bdb8286e43d672ab5558e55216044921a1ff667e895",
+      "bytes": 17746
     }
   }
 }

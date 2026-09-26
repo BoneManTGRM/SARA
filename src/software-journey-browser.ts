@@ -66,6 +66,14 @@ export const NICOS_JOURNEY_PROFILE: readonly JourneyProfileStep[] = Object.freez
   { action: 'Pass movement test', selector: 'button[aria-label="Pass movement test"]', expectedSelector: '#boltbot-mission-title', expected: 'Scanner test' },
 ].map(step => Object.freeze(step)));
 
+// Current public UI (Nicos-Adventures 860dd09f93a9892c1a7ed8bda98a3bb2f09aa36e)
+// starts directly in Robo Lab. Preserve v1 as a distinct historical contract.
+export const NICOS_CURRENT_JOURNEY_PROFILE: readonly JourneyProfileStep[] = Object.freeze([
+  NICOS_JOURNEY_PROFILE[0]!,
+  Object.freeze({action:'Begin the adventure',selector:'[data-testid="continue-world"]',expectedSelector:'#page-title',expected:'Robo Lab'}),
+  ...NICOS_JOURNEY_PROFILE.slice(3),
+]);
+
 export type JourneyBrowserStartupDiagnostic = {
   classification: 'SANDBOX_CREDENTIALS_FAILURE' | 'NAMESPACE_SANDBOX_FAILURE' | 'LINUX_SANDBOX_FAILURE' | 'SANDBOX_HELPER_FAILURE' | 'ZYGOTE_STARTUP_FAILURE' | 'PROFILE_INITIALIZATION_FAILURE' | 'UNKNOWN_FATAL' | 'SANDBOX_UNAVAILABLE' | 'SANDBOX_HELPER_CONFIGURATION' | 'NAMESPACE_UNAVAILABLE' | 'MISSING_LIBRARY' | 'CRASHPAD_FAILURE' | 'ACCESS_DENIED' | 'EXECUTABLE_UNAVAILABLE' | 'RESOURCE_UNAVAILABLE' | 'PROCESS_CRASH' | 'UNKNOWN';
   classificationBasis: 'FIRST_FATAL_LINE' | 'NONFATAL_STDERR_SYMPTOM' | 'SPAWN_ERROR' | 'PROCESS_SIGNAL' | 'UNKNOWN';
@@ -171,7 +179,7 @@ export type SoftwareJourneyResult = {
   schemaVersion: 1;
   actor: 'SARA_RUNTIME';
   target: 'https://nicos-world.com/';
-  profile: 'nicos-movement-to-scanner-v1';
+  profile: 'nicos-movement-to-scanner-v1' | 'nicos-movement-to-scanner-v2';
   provenance: 'ISOLATED';
   assetProvenance: 'EXTERNAL_READ_ONLY';
   status: 'PASSED' | 'INCOMPLETE_EVIDENCE';
@@ -371,7 +379,7 @@ type PendingCommand = { resolve(value: any): void; reject(error: Error): void; t
 export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> {
   const started = performance.now();
   const result: SoftwareJourneyResult = {
-    schemaVersion: 1, actor: 'SARA_RUNTIME', target: 'https://nicos-world.com/', profile: 'nicos-movement-to-scanner-v1', provenance: 'ISOLATED', assetProvenance: 'EXTERNAL_READ_ONLY', status: 'INCOMPLETE_EVIDENCE', steps: [], assets: [], assetSetDigest: null, screenshotDigest: null, servingRevision: null, runtimeExceptionCount: 0, deniedRequestCount: 0, resourceFailureCount: 0, fetchedBytes: 0, elapsedMilliseconds: 0, failureCode: null,
+    schemaVersion: 1, actor: 'SARA_RUNTIME', target: 'https://nicos-world.com/', profile: 'nicos-movement-to-scanner-v2', provenance: 'ISOLATED', assetProvenance: 'EXTERNAL_READ_ONLY', status: 'INCOMPLETE_EVIDENCE', steps: [], assets: [], assetSetDigest: null, screenshotDigest: null, servingRevision: null, runtimeExceptionCount: 0, deniedRequestCount: 0, resourceFailureCount: 0, fetchedBytes: 0, elapsedMilliseconds: 0, failureCode: null,
     startupDiagnostics: null, environment: emptyJourneyEnvironment(),
     limitations: ['Public static assets run in a new isolated browser profile with external effects blocked; this is not a full live-site integration test.', 'Serving git revision is unknown; static asset hashes must not be equated to a separately observed repository SHA.', 'Only desktop movement-to-scanner transition is tested. Mobile, persisted restart, scanner completion, full mission and other destinations remain untested.', 'Runtime or harness failure is incomplete evidence and does not by itself establish an application defect.', 'Recorded invocation cash does not establish allocated infrastructure expense.'],
   };
@@ -512,7 +520,7 @@ export async function runNicosMovementJourney(): Promise<SoftwareJourneyResult> 
     await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
     await send('Page.navigate', { url: `${ORIGIN}/` });
-    for (const step of NICOS_JOURNEY_PROFILE) {
+    for (const step of NICOS_CURRENT_JOURNEY_PROFILE) {
       if (controller.signal.aborted) throw new Error('JOURNEY_LIFETIME_LIMIT');
       if (step.selector) {
         const controlDeadline = Math.min(started + LIFETIME_MS - 5000, performance.now() + 5000);
