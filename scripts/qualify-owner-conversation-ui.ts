@@ -91,6 +91,19 @@ try{
   await until(`document.getElementById('brain-handoff').value!==${JSON.stringify(previousHandoff)} && document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')`);
   await evaluate("document.getElementById('brain-copy').click()");
   await until("/Handoff copied|Select and copy/.test(document.getElementById('brain-status').textContent)");
+  // Private synthetic notes cannot become provider candidates; no key is wired into this server.
+  await evaluate("document.getElementById('brain-jev').closest('details').open=true;document.getElementById('brain-query-public').checked=true;document.getElementById('brain-jev').click()");
+  await until("document.getElementById('brain-jev-result').textContent.includes('No current public records are eligible for Jev.')");
+  assert.equal(await evaluate("document.getElementById('brain-jev-result').textContent.includes('Local search')"),true);
+  assert.equal(await evaluate("document.getElementById('brain-jev-details').closest('details').open"),false,'Experimental details start collapsed');
+  await evaluate("document.getElementById('brain-jev-details').closest('details').querySelector('summary').click()");
+  assert.equal(await evaluate("JSON.parse(document.getElementById('brain-jev-details').textContent).mode"),'local_search');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Expanded Jev details fit the phone');
+  await evaluate("document.getElementById('brain-project').value='sara';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
+  await until("document.getElementById('brain-handoff').value.includes('SARA / SARA')");
+  assert.equal(await evaluate("document.getElementById('brain-jev-details').textContent"),'','Project change clears experimental details');
+  await evaluate("document.getElementById('brain-project').value='nico';document.getElementById('brain-project').dispatchEvent(new Event('change'));document.getElementById('brain-jev-details').closest('details').open=false");
+  await until("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')");
   await evaluate("document.getElementById('brain-title').scrollIntoView()");
   const brainShot=Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64');
   const brainShotPath=`artifacts/owner-software-runtime-second-brain-${width}.png`;

@@ -1,3 +1,30 @@
+/** Plain owner-facing copy. Never reflects arbitrary provider fields or claims an error was free. */
+export function jevOwnerMessage(value:unknown):string {
+ const result=value&&typeof value==='object'?value as Record<string,unknown>:{};
+ const local='Local search and source access remain available.';
+ if(result.mode==='local_search') {
+  const reasons:Record<string,string>={
+   disabled:'Jev is switched off.',missing_key:'Jev needs its secure server-side key.',
+   budget_denied:'No usable approved allowance is available for this Jev request.',
+   query_not_approved:'Approve sharing this public query before using Jev.',
+   no_authorized_candidates:'No current public records are eligible for Jev.',
+   busy:'Another Jev request is already running.',cancelled:'The Jev request was cancelled.',
+   timeout:'Jev did not return a result before the deadline.',rate_limited:'The provider is temporarily limiting requests.',
+   malformed:'The provider response could not be validated.',access_denied:'Access changed; the Jev result was withheld.',
+  };
+  const reason=typeof result.reason==='string'?result.reason:'';
+  return (Object.hasOwn(reasons,reason)?reasons[reason]:'A usable Jev result is unavailable.')+' '+local;
+ }
+ if(result.mode!=='live_shadow'&&result.mode!=='simulated_shadow')return 'Jev result unavailable. '+local;
+ if(result.mode==='live_shadow'&&result.live!==true)return 'Jev result unavailable. '+local;
+ const origin=result.mode==='simulated_shadow'?'Simulated test result.':result.cached===true?
+  'Reused an earlier live result; no new provider call.':'A live Jev call returned a result.';
+ const decision=result.reason==='uncertain_shadow'?'Jev could not choose a sufficiently relevant record.':
+  result.reason==='ambiguous_shadow'?'The leading relevance scores are too close to choose one record.':
+  'Jev produced suggestions for review.';
+ return origin+' '+decision+' These suggestions are not yet qualified for use. Your search order is unchanged; source evidence remains the basis for project status.';
+}
+
 /** Composes into the existing owner dashboard; keeps its authentication and legacy controls. */
 export function secondBrainWorkspace(html:string):string {
  const panel=String.raw`<section id="second-brain" aria-labelledby="brain-title">
@@ -21,7 +48,8 @@ export function secondBrainWorkspace(html:string):string {
  <button id="brain-budget-review" type="button">Review unused job allowance</button><pre id="brain-budget"></pre><button id="brain-budget-approve" type="button" disabled>Reallocate reviewed unused allowance</button>
  <p>Provider setup: an existing TypeSafe key must be saved as TYPESAFE_API_KEY in SARA’s server environment. Never paste it into a note.</p>
  <label><input id="brain-query-public" type="checkbox">I approve sending this search query and matching public project evidence to TypeSafe.</label>
- <button id="brain-jev" type="button">Evaluate with Jev</button><pre id="brain-jev-result"></pre></details>
+ <button id="brain-jev" type="button">Evaluate with Jev</button><pre id="brain-jev-result" role="status" aria-live="polite"></pre>
+ <details><summary>Experimental match details</summary><p>Scores are uncalibrated suggestions, not verified facts. Match record IDs to Sources below.</p><pre id="brain-jev-details"></pre></details></details>
  <h2>Current brief</h2><textarea id="brain-handoff" readonly rows="14" aria-label="Continuation brief"></textarea>
  <button id="brain-copy" type="button">Copy handoff</button> <button id="brain-export" type="button">Export handoff</button>
  <h2>Sources and freshness</h2><div id="brain-sources"></div>
@@ -38,9 +66,9 @@ export function secondBrainWorkspace(html:string):string {
  @media(max-width:600px){#second-brain{margin:12px 0;padding:14px}#second-brain form{padding:10px}#second-brain button{width:100%}}
  </style>`;
  const script=String.raw`<script>
- (()=>{const el=id=>document.getElementById(id);let epoch=0;let allocation=null;
+ (()=>{const jevMessage=${jevOwnerMessage.toString()};const el=id=>document.getElementById(id);let epoch=0;let allocation=null;
  const status=text=>{el('brain-status').textContent=text;};
- const clear=()=>{epoch++;el('brain-handoff').value='';el('brain-sources').replaceChildren();el('brain-history').textContent='';el('brain-obligations').textContent='';el('brain-jev-result').textContent='';el('brain-budget').textContent='';el('brain-query-public').checked=false;allocation=null;el('brain-budget-approve').disabled=true;};
+ const clear=()=>{epoch++;el('brain-handoff').value='';el('brain-sources').replaceChildren();el('brain-history').textContent='';el('brain-obligations').textContent='';el('brain-jev-result').textContent='';el('brain-jev-details').textContent='';el('brain-budget').textContent='';el('brain-query-public').checked=false;allocation=null;el('brain-budget-approve').disabled=true;};
  async function api(path,body){const headers={Authorization:'Bearer '+(sessionStorage.getItem('sara-owner-token')||'')};if(body)headers['content-type']='application/json';const r=await fetch(path,{method:body?'POST':'GET',headers,body:body?JSON.stringify(body):undefined,cache:'no-store'});if(!r.ok){if(r.status===401){clear();el('brain-fields').disabled=true;}throw new Error(r.status===401?'Owner authentication required.':'Request failed; no successful refresh is claimed.');}return r.json();}
  async function refresh(){const ticket=++epoch;const project=el('brain-project').value;const view=await api('/api/second-brain/brief?project='+encodeURIComponent(project)+'&q='+encodeURIComponent(el('brain-question').value));if(ticket!==epoch||project!==el('brain-project').value)return;
  el('brain-handoff').value=view.handoff;el('brain-sources').replaceChildren();for(const m of view.records){const d=document.createElement('details');const s=document.createElement('summary');s.textContent=m.projectEvidence.verification+' · '+m.statement.slice(0,95);d.append(s);const p=document.createElement('pre');p.textContent=JSON.stringify(m,null,2);d.append(p);if(m.source.startsWith('https://')){const a=document.createElement('a');a.href=m.source;a.target='_blank';a.rel='noopener noreferrer';a.textContent='Open source';d.append(a);}el('brain-sources').append(d);}
@@ -51,7 +79,7 @@ export function secondBrainWorkspace(html:string):string {
  el('brain-import').addEventListener('submit',run(async()=>{const kind=el('brain-import-kind').value;const v=await api('/api/second-brain/import',{project:el('brain-project').value,kind,id:el('brain-import-id').value,attempt:el('brain-attempt').value?Number(el('brain-attempt').value):undefined});await refresh();status(v.message||'Imported bounded source evidence. This does not prove full repository acceptance.');}));
  el('brain-budget-review').addEventListener('click',run(async()=>{const ticket=epoch;const reviewed=await api('/api/second-brain/jev/reallocation');if(ticket!==epoch)return;allocation=reviewed;el('brain-budget').textContent=JSON.stringify(reviewed,null,2);el('brain-budget-approve').disabled=Boolean(reviewed.blockers&&reviewed.blockers.length)||!(reviewed.transferableUsd>0);}));
  el('brain-budget-approve').addEventListener('click',run(async()=>{if(!allocation)return;const approved=allocation;el('brain-budget-approve').disabled=true;const result=await api('/api/second-brain/jev/reallocation',{targetId:approved.targetId,confirm:true});allocation=null;el('brain-budget').textContent=JSON.stringify(result,null,2);status('Reviewed allowance reassigned. Provider setup and live qualification are separate.');}));
- el('brain-jev').addEventListener('click',run(async()=>{if(!el('brain-query-public').checked){status('Approve disclosure of this public query before calling Jev.');return;}const ticket=epoch;const result=await api('/api/second-brain/jev/evaluate',{project:el('brain-project').value,query:el('brain-question').value,approvePublicQuery:true});if(ticket!==epoch)return;el('brain-jev-result').textContent=JSON.stringify(result,null,2);status('Jev mode: '+result.mode+' · '+result.reason+'. Suggestions do not change evidence or authorization.');}));
+ el('brain-jev').addEventListener('click',run(async()=>{if(!el('brain-query-public').checked){status('Approve disclosure of this public query before calling Jev.');return;}const ticket=epoch;const result=await api('/api/second-brain/jev/evaluate',{project:el('brain-project').value,query:el('brain-question').value,approvePublicQuery:true});if(ticket!==epoch)return;const message=jevMessage(result);el('brain-jev-result').textContent=message;el('brain-jev-details').textContent=JSON.stringify(result,null,2);status(message);}));
  el('brain-copy').addEventListener('click',run(async()=>{try{await navigator.clipboard.writeText(el('brain-handoff').value);status('Handoff copied.');}catch(_){el('brain-handoff').focus();el('brain-handoff').select();status('Select and copy the highlighted handoff using your phone’s copy menu.');}}));
  el('brain-export').addEventListener('click',()=>{const u=URL.createObjectURL(new Blob([el('brain-handoff').value],{type:'text/plain'}));const a=document.createElement('a');a.href=u;a.download='SARA-'+el('brain-project').value+'-handoff.txt';a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);});
  let connected=false;new MutationObserver(()=>{const next=document.body.dataset.owner==='connected';if(next===connected)return;connected=next;el('brain-fields').disabled=!next;if(!next){clear();status('Owner authentication required.');return;}run(async()=>{await refresh();const authEpoch=epoch;const data=await api('/api/second-brain/status');if(authEpoch!==epoch||document.body.dataset.owner!=='connected')return;el('brain-mode').textContent=data.providerMode;el('brain-obligations').textContent=JSON.stringify({obligations:data.obligations,recentImports:data.recentImports},null,2);})();}).observe(document.body,{attributes:true,attributeFilter:['data-owner']});

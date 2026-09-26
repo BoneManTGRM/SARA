@@ -120,5 +120,37 @@
       "sha256": "2205feffb9ff1e67f5f0ac1b26bd6c94f269aa7ad1f5d394179ef97e870c1a46",
       "bytes": 269994
     }
+  },
+  "phoneStatusFollowup": {
+    "parentRemote": "fc99dfb04d650c1b5cf673facae776864cee9923",
+    "candidate": "containing commit",
+    "focused": {
+      "command": "node --import tsx --test tests/jev-owner-message.test.ts tests/second-brain-http.test.ts tests/dashboard-capability-inventory.test.ts",
+      "exitCode": 0,
+      "passed": 5
+    },
+    "fullGate": {
+      "command": "npm run verify",
+      "exitCode": 0,
+      "passed": 1567,
+      "failed": 0,
+      "proofs": "all passed, HTTP14/14"
+    },
+    "actualIphoneTested": false,
+    "browserQualification": "pending exact-head CI",
+    "logs": {
+      "artifacts/second-brain/jev-owner-red.log": {
+        "sha256": "df1eefe03bd81a5408b2b4b5c40f4fb29d6a0dfd751f498eb52ee4dc02853628",
+        "bytes": 857
+      },
+      "artifacts/second-brain/jev-owner-green-final.log": {
+        "sha256": "0e7d5c4e2947940ccc525e8fe102273ab024d2d6f9bd8386a63c4851581ea461",
+        "bytes": 659
+      },
+      "artifacts/second-brain/jev-owner-verify-final.log": {
+        "sha256": "7cff4ef50489a07e8dae5749b08ab55d3796c73978fc1fabb4960b8a131de1d8",
+        "bytes": 270791
+      }
+    }
   }
 }
