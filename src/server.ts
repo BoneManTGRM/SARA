@@ -1217,6 +1217,15 @@ async function handleAuthenticatedRequest(
         json(response,200,{...result,budget:await kernel.jevBudgetStatus(options.jevProvider)});return;
       }
 
+      if(request.method==="GET" && url.pathname==="/api/second-brain/bounties") {
+        json(response,200,await kernel.readSoftwareBounties(owner,url.searchParams.get("project")));return;
+      }
+      if(request.method==="POST" && url.pathname==="/api/second-brain/bounties") {
+        const body=await readJson(request);
+        if(Object.keys(body).some(k=>!["project","url"].includes(k)))throw new Error("Unsupported bounty field.");
+        const receipt=await kernel.importSoftwareBounty(owner,body.project,body.url);
+        json(response,receipt.status==="complete"?200:502,{...receipt,message:receipt.status==="complete"?"Saved a bounded public issue observation. Reward, eligibility and execution remain unverified.":"Bounty refresh failed; prior evidence retained."});return;
+      }
       if (request.method === "GET" && url.pathname === "/api/second-brain/brief") {
         json(response,200,await kernel.readProjectBrief(owner,url.searchParams.get("project"),url.searchParams.get("q")??"",url.searchParams.get("since")));return;
       }

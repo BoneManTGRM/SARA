@@ -35,4 +35,8 @@ test('late brief/status replies cannot repopulate a changed project or logged-ou
  for(const id of ['brain-answer','brain-obligations','brain-tracking'])assert.equal(node(id).textContent,'');assert.equal(node('brain-handoff').value,'');assert.equal(node('brain-fields').disabled,true);
  // A failed runtime read must be visible without suppressing usable evidence.
  body.dataset.owner='connected';observe();reply(pending.splice(0),empty,503);await setImmediate();assert.match(node('brain-obligations').textContent,/refresh failed/);assert.match(node('brain-mode').textContent,/unavailable/);assert.match(node('brain-handoff').value,/SARA \/ SARA/);
+ // The bounty panel uses the same actual-script scope and logout boundary.
+ node('brain-project').value='sara';const loading=node('brain-bounty-load').handlers.get('click')();const bountyReply=pending.splice(0);
+ body.dataset.owner='';observe();for(const request of bountyReply)request.resolve(Response.json({notice:'PRIVATE BOUNTY',asOf:now.toISOString(),candidates:[],totalCurrent:0,history:[]}));await loading;
+ assert.equal(node('brain-bounties').textContent,'');assert.equal(node('brain-bounty-brief').value,'');assert.equal(node('brain-bounty-copy').disabled,true);
 });
