@@ -1,0 +1,44 @@
+{
+  "baseline": "47b97caadb39172ae537d660964d0a23782d5d1a",
+  "candidate": "containing git commit",
+  "newSpendUsd": 0,
+  "paidProviderCalls": 0,
+  "logs": {
+    "artifacts/second-brain/red.log": {
+      "sha256": "c015cc831ce0fd3efb234f01522f09fbc04f2fec5c14fa4c6a26840283c06090",
+      "bytes": 1564
+    },
+    "artifacts/second-brain/green-memory.log": {
+      "sha256": "8ae7b3b3684b2a32308f77ddcad8f5e0f6839a3382137d3848d3715c678be7f3",
+      "bytes": 310
+    },
+    "artifacts/second-brain/full-verify.log": {
+      "sha256": "34944608c18bffee1844a5c3d27c91fc0b0fec894d4d0598fd0903c957f7df40",
+      "bytes": 254853
+    },
+    "artifacts/second-brain/full-verify-2.log": {
+      "sha256": "554f68c877c728a3c86f34e1c598bec5f5fedeefa43b2f4f2974f0f4a0ea9707",
+      "bytes": 269299
+    },
+    "artifacts/second-brain/verify-final.log": {
+      "sha256": "e3792cfbb136ec16a612081ec1906c2d4d949aa1e388e51ead4e7cfd5c9c3f71",
+      "bytes": 219818
+    },
+    "artifacts/second-brain/frozen-focused.log": {
+      "sha256": "5cb9feea05d8b835ec15682c69dc8984bd32dc2a40f8b0344db4f2d8a270535a",
+      "bytes": 5199
+    },
+    "artifacts/second-brain/frozen-verify.log": {
+      "sha256": "856b71ae35b66a5dd955339b7863ecf10eaba0b96ac75131e9a9246a39f1861c",
+      "bytes": 269698
+    },
+    "artifacts/second-brain/real-nico-import.json": {
+      "sha256": "61c4bba1f173a1e715f71e415d0dcd6b6dcfc997731e1c76588334df9648c425",
+      "bytes": 646
+    },
+    "artifacts/second-brain/real-nico-handoff.txt": {
+      "sha256": "5949c4f7d82c1beb9d04a2e9a4420bc8e38b0f6426d797e2b6981bf523956b77",
+      "bytes": 4213
+    }
+  }
+}

@@ -45,6 +45,7 @@ export type PolicyDecision = {
 };
 
 export type MemoryRecord = {
+  projectEvidence?: import("./second-brain.ts").ProjectEvidence;
   id: string;
   category:
     | "working"

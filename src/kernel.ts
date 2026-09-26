@@ -1,3 +1,5 @@
+import { importGitHubEvidence, type GitHubImportInput } from "./second-brain-github.ts";
+import { noteInput, evidenceId, projectId, projectView, type EvidenceMemory } from "./second-brain.ts";
 import { repositoryCollectionRetryDue, repositoryCollectionFailure, repositoryCollectionRetryAt, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import {unresolvedRevenueAllowance} from './revenue-pilot.ts';
 import {revenueStepBlocker,mandateContinuationBlocker} from './revenue-step-eligibility.ts';
@@ -661,7 +663,14 @@ export class SaraKernel {
     let emergencyStopped = false;
 
     for (const event of events) {
-      if (event.type === "memory_recorded") memories.push(event.data as MemoryRecord);
+      if (event.type === "memory_recorded") memories.push(structuredClone(event.data as MemoryRecord));
+      if(event.type === "project_evidence_rechecked") {
+        const receipt=event.data as {id:string;scope:string;checkedAt:string;expiresAt:string};
+        const m=memories.find(m=>m.id===receipt.id&&m.scope===receipt.scope&&m.projectEvidence?.verification==="source_observed");
+        if(m?.projectEvidence && receipt.checkedAt>(m.projectEvidence.lastVerifiedAt??"")) {
+          m.projectEvidence.lastVerifiedAt=receipt.checkedAt;m.projectEvidence.expiresAt=receipt.expiresAt;
+        }
+      }
       if (event.type === "core_memory_seeded") {
         const data = event.data as { memories?: unknown };
         if (!Array.isArray(data.memories)) throw new EventStoreIntegrityError("Core memory seed event is malformed.");
@@ -848,6 +857,62 @@ export class SaraKernel {
     return result;
   }
 
+  captureProjectNote(principal: Principal, input: Record<string, unknown>): Promise<EvidenceMemory> {
+    return this.serializeMutation(async () => {
+      if (!this.isVerifiedOwner(principal)) throw new Error("Authenticated owner required.");
+      const memory = noteInput(input, new Date().toISOString());
+      await this.authorize(principal, {action:"record_memory",targetId:memory.scope,external:false});
+      const state = await this.state();
+      const id = evidenceId(memory);
+      const existing = state.memories.find(m => m.id === id);
+      if (existing) return structuredClone(existing as EvidenceMemory);
+      for (const related of [...memory.supersedes!, ...memory.projectEvidence.conflictsWith]) {
+        const other=state.memories.find(m=>m.id===related&&m.scope===memory.scope&&m.projectEvidence);
+        if (!other) throw new Error("Evidence relationship must stay in the same project.");
+        if(memory.supersedes!.includes(related) && (!memory.projectEvidence.observedAt || !other.projectEvidence!.observedAt || Date.parse(memory.projectEvidence.observedAt)<=Date.parse(other.projectEvidence!.observedAt))) throw new Error("Correction must have a newer known observation time.");
+      }
+      const record={...memory,id};
+      await this.#store.append("memory_recorded",principal,record);
+      return structuredClone(record);
+    });
+  }
+
+  async importProjectGitHub(principal: Principal, project: unknown, input: GitHubImportInput) {
+    const scope=projectId(project);
+    await this.serializeMutation(async()=>{
+      if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
+      await this.authorize(principal,{action:"external_read",targetId:`second-brain:${scope}:github`,external:true});
+    });
+    const result=await importGitHubEvidence(scope,input);
+    return this.serializeMutation(async()=>{
+      if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
+      await this.authorize(principal,{action:"record_memory",targetId:scope,external:false});
+      const state=await this.state();
+      const ids:string[]=[];
+      for(const memory of result.records){
+        const id=evidenceId(memory);ids.push(id);
+        if(!state.memories.some(m=>m.id===id))await this.#store.append("memory_recorded",principal,{...memory,id});
+        else await this.#store.append("project_evidence_rechecked",principal,{id,scope,checkedAt:result.checkedAt,expiresAt:memory.projectEvidence.expiresAt});
+      }
+      const receipt={project:scope,status:result.status,errors:result.errors,coverage:result.coverage,checkedAt:result.checkedAt,recordIds:ids};
+      await this.#store.append("project_import_receipt",principal,receipt);
+      return receipt;
+    });
+  }
+
+  authorizeOwnerProjectInference(principal: Principal, project: unknown): Promise<void> {
+    return this.serializeMutation(async()=>{
+      const scope=projectId(project);
+      if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
+      await this.authorize(principal,{action:"external_read",targetId:`second-brain:${scope}:jev`,external:true});
+    });
+  }
+
+  async readProjectBrief(principal: Principal, project: unknown, query = "") {
+    if (!this.isVerifiedOwner(principal)) throw new Error("Authenticated owner required.");
+    return projectView((await this.state()).memories,projectId(project),query);
+  }
+
   recordMemory(principal: Principal, input: Omit<MemoryRecord, "id">, external = false): Promise<MemoryRecord> {
     return this.serializeMutation(async () => {
       await this.authorize(principal, { action: "record_memory", targetId: input.scope, external });
@@ -857,6 +922,7 @@ export class SaraKernel {
       if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
         throw new RangeError("Memory confidence must be between 0 and 1.");
       }
+      if (input.projectEvidence !== undefined) throw new Error("Use owner project evidence methods.");
       validateMemoryMetadata(input);
       const memory: MemoryRecord = { ...input, id: randomUUID() };
       await this.#store.append("memory_recorded", principal, memory);
@@ -873,6 +939,7 @@ export class SaraKernel {
       if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1) {
         throw new RangeError("Memory confidence must be between 0 and 1.");
       }
+      if (input.projectEvidence !== undefined) throw new Error("Use owner project evidence methods.");
       validateMemoryMetadata(input);
       const id = `memory-${sha256(canonicalJson(input))}`;
       const existing = (await this.state()).memories.find((memory) => memory.id === id);
@@ -3849,6 +3916,128 @@ export class SaraKernel {
       .reduce((sum,event)=>sum+(event.data as {amountMicrousd:number}).amountMicrousd,0);
     const limit=config?.monthlyLimitUsd??0;
     return {configured:Boolean(config),month,monthlyLimitUsd:limit,reservedUsd:reserved/1_000_000,remainingUsd:Math.max(0,Math.round(limit*1_000_000)-reserved)/1_000_000};
+  }
+
+  /** Review unused current allowance; no mutation, increase, cancellation or guessed cash balance. */
+  async reviewJevReallocation(principal: Principal) {
+    if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required for Jev funding review.");
+    const state=await this.state(),shared=await this.modelBudgetStatus();
+    const existing=state.events.filter(e=>e.type==="model_budget_reserved"&&(e.data as {purpose?:string}).purpose==="second_brain_allocation"&&e.occurredAt.slice(0,7)===shared.month);
+    // Confirmed funds create a commitment before fulfillment attaches a ledger id.
+    // Orphaned/mismatched intents and disputed payments remain obligations, not free allowance.
+    const unresolvedPayments=state.revenuePaymentIntents.filter(intent=>{
+      if(!["confirmed","authorized","disputed"].includes(intent.status))return false;
+      const job=state.revenuePilotJobs.find(j=>j.id===intent.jobId);
+      const resolved=intent.status==="authorized"&&job?.status==="delivered"&&!!job.deliveredAt&&
+        !!intent.revenueEvidenceId&&intent.revenueEvidenceId===job.revenueEvidenceId&&intent.amountUsd===job.plan.priceUsd;
+      return !resolved;
+    });
+    const paidObligations=[...new Set([
+      ...state.revenuePilotJobs.filter(j=>(j.revenueEvidenceId || j.activeLease) && j.status!=="delivered").map(j=>j.id),
+      ...unresolvedPayments.map(intent=>`payment:${intent.id}`),
+    ])].sort();
+    // Blocked/failed work can still hold commitments; failure is not a refund or release.
+    const fundedJobs=state.jobs.filter(j=>j.status!=="verified"&&j.workCard.maximumBudgetUsd>0).map(j=>j.id).sort();
+    const blockers:string[]=[];
+    if(!shared.configured)blockers.push("MODEL_ALLOWANCE_NOT_CONFIGURED");
+    if(state.emergencyStopped)blockers.push("EMERGENCY_STOP");
+    if(state.events.some(e=>e.type==="model_budget_bound_violation"))blockers.push("MODEL_USAGE_RECONCILIATION_REQUIRED");
+    if(existing.length)blockers.push("JEV_ALREADY_ALLOCATED_THIS_MONTH");
+    if(paidObligations.length||fundedJobs.length)blockers.push("UNRECONCILED_EXISTING_JOB_OBLIGATIONS");
+    if(shared.remainingUsd<=0)blockers.push("NO_UNRESERVED_ALLOWANCE");
+    const amountMicrousd=blockers.length?0:Math.round(shared.remainingUsd*1_000_000);
+    const sourceDigest=sha256(canonicalJson({month:shared.month,shared,paidObligations,fundedJobs,
+      financialEvents:state.events.filter(e=>e.type.startsWith("model_budget_")).map(e=>e.hash)}));
+    const review={schemaVersion:1,purpose:"second_brain_rerank",model:"jev-1.13.0",questionVersion:"sara-relevance-v1",
+      month:shared.month,projects:["nico","sara","nicos-world"],amountMicrousd,transferableUsd:amountMicrousd/1_000_000,
+      sourceDigest,shared,paidObligations,fundedJobs,blockers,expiresAt:new Date(Date.UTC(Number(shared.month.slice(0,4)),Number(shared.month.slice(5,7)),1)).toISOString()};
+    return {...review,targetId:`jev-reallocation:${sha256(canonicalJson(review))}`};
+  }
+
+  reallocateModelBudgetToJev(principal: Principal, expectedTargetId:string, approval?:OwnerApproval) {
+    return this.serializeMutation(async()=>{
+      const review=await this.reviewJevReallocation(principal);
+      if(review.targetId!==expectedTargetId)throw new Error("Jev funding review changed; inspect the current exact target.");
+      if(review.blockers.length||review.amountMicrousd<=0)throw new Error(`Jev funding blocked: ${review.blockers.join(", ")}`);
+      await this.authorize(principal,{action:"owner_funded_ceiling_change",targetId:review.targetId,external:false,...(approval?{approval}:{})});
+      const id=randomUUID();
+      // Existing event type deliberately preserves the full hold for rollback readers.
+      // Per-request subholds use a new type so old runtimes never double count them.
+      await this.#store.append("model_budget_reserved",principal,{...review,id,purpose:"second_brain_allocation",routeKey:"typesafe:jev-1.13.0:allocation",ownerId:principal.id,approvalId:approval!.approvalId});
+      return this.jevBudgetStatus();
+    });
+  }
+
+  async jevBudgetStatus() {
+    const state=await this.state(),month=new Date().toISOString().slice(0,7);
+    const allocation=state.events.filter(e=>e.type==="model_budget_reserved"&&(e.data as {purpose?:string}).purpose==="second_brain_allocation"&&e.occurredAt.slice(0,7)===month).at(-1)?.data as
+      {id:string;amountMicrousd:number;expiresAt:string;ownerId:string}|undefined;
+    const reservations=state.events.filter(e=>e.type==="model_budget_jev_reserved"&&(e.data as {allocationId?:string}).allocationId===allocation?.id && !!allocation);
+    const reservedMicrousd=reservations.reduce((sum,e)=>sum+(e.data as {amountMicrousd:number}).amountMicrousd,0);
+    const receipts=state.events.filter(e=>e.type==="model_budget_jev_usage_observed"&&reservations.some(r=>(r.data as {id:string}).id===(e.data as {reservationId:string}).reservationId));
+    const measuredMicrousd=receipts.reduce((sum,e)=>sum+((e.data as {costMicrousd:number|null}).costMicrousd??0),0);
+    const known=new Set(receipts.filter(e=>(e.data as {costMicrousd:number|null}).costMicrousd!==null).map(e=>(e.data as {reservationId:string}).reservationId));
+    return {month,configured:!!allocation,allocationId:allocation?.id??null,expiresAt:allocation?.expiresAt??null,
+      allocatedUsd:(allocation?.amountMicrousd??0)/1_000_000,reservedUsd:reservedMicrousd/1_000_000,
+      remainingUsd:Math.max(0,(allocation?.amountMicrousd??0)-reservedMicrousd)/1_000_000,
+      measuredKnownUsageUsd:measuredMicrousd/1_000_000,unknownChargeCount:reservations.filter(r=>!known.has((r.data as {id:string}).id)).length,
+      dispatchReservations:reservations.length,model:"jev-1.13.0",purpose:"second_brain_rerank",autoReload:false};
+  }
+
+  /** Purpose-bound facade over the SAME kernel-private financial audit authority. No provider dispatch here. */
+  jevBudget(principal: Principal): import("./jev-second-brain.ts").JevBudget {
+    const eligible=async()=>{
+      if(!this.isVerifiedOwner(principal))return false;
+      const state=await this.state(),shared=await this.modelBudgetStatus(),jev=await this.jevBudgetStatus();
+      return !state.emergencyStopped&&!state.events.some(e=>e.type==="model_budget_bound_violation")&&
+        jev.configured&&!!jev.expiresAt&&Date.parse(jev.expiresAt)>Date.now()&&shared.reservedUsd<=shared.monthlyLimitUsd;
+    };
+    return {
+      reserve:input=>this.serializeMutation(async()=>{
+        if(!await eligible())return null;
+        if(input.purpose!=="second_brain_rerank"||input.principalId!==principal.id||!["nico","sara","nicos-world"].includes(input.project)||
+          input.model!=="jev-1.13.0"||input.questionVersion!=="sara-relevance-v1"||input.maximumInputTokens!==65536||
+          input.maximumMicrousd!==Math.ceil(65536*0.042)||!/^[a-f0-9]{64}$/.test(input.requestDigest))return null;
+        const status=await this.jevBudgetStatus();
+        if(input.maximumMicrousd>Math.round(status.remainingUsd*1_000_000))return null;
+        const id=randomUUID();
+        await this.#store.append("model_budget_jev_reserved",principal,{id,allocationId:status.allocationId,routeKey:"typesafe:jev-1.13.0:paid",
+          amountMicrousd:input.maximumMicrousd,inputTokens:input.maximumInputTokens,maximumOutputTokens:16384,
+          purpose:input.purpose,principalId:input.principalId,project:input.project,model:input.model,questionVersion:input.questionVersion,
+          promptDigest:input.requestDigest,month:status.month});
+        return {id};
+      }),
+      stillAuthorized:reservationId=>this.serializeMutation(async()=>{
+        if(!await eligible())return false;
+        const status=await this.jevBudgetStatus(),state=await this.state();
+        const owned=state.events.some(e=>e.type==="model_budget_jev_reserved"&&
+          (e.data as {id:string;allocationId?:string;principalId?:string}).id===reservationId&&
+          (e.data as {allocationId?:string}).allocationId===status.allocationId&&
+          (e.data as {principalId?:string}).principalId===principal.id);
+        if(!owned||state.events.some(e=>["model_budget_jev_dispatch_claimed","model_budget_jev_usage_observed"].includes(e.type)&&
+          (e.data as {reservationId:string}).reservationId===reservationId))return false;
+        await this.#store.append("model_budget_jev_dispatch_claimed",principal,{reservationId});
+        return true;
+      }),
+      record:receipt=>this.serializeMutation(async()=>{
+        if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required for Jev usage receipt.");
+        const state=await this.state();
+        const reservation=state.events.find(e=>e.type==="model_budget_jev_reserved"&&(e.data as {id:string}).id===receipt.reservationId)?.data as
+          {allocationId?:string;principalId?:string;amountMicrousd:number;inputTokens:number;maximumOutputTokens:number}|undefined;
+        if(!reservation?.allocationId||reservation.principalId!==principal.id)throw new Error("Unknown Jev reservation.");
+        const outcomes=["usage_observed","timeout","cancelled","rate_limited","malformed","unavailable","access_denied","budget_denied","input_too_large"];
+        if(!outcomes.includes(receipt.outcome))throw new Error("Invalid Jev receipt outcome.");
+        if(receipt.costMicrousd===null) {
+          if(receipt.inputTokens!==null||receipt.outputTokens!==null||receipt.outcome==="usage_observed")throw new Error("Unknown usage must remain explicitly unknown.");
+        }else if(receipt.outcome!=="usage_observed"||!Number.isSafeInteger(receipt.inputTokens)||receipt.inputTokens===null||receipt.inputTokens<0||receipt.inputTokens>reservation.inputTokens||
+          !Number.isSafeInteger(receipt.outputTokens)||receipt.outputTokens===null||receipt.outputTokens<0||receipt.outputTokens>reservation.maximumOutputTokens||
+          !Number.isSafeInteger(receipt.costMicrousd)||receipt.costMicrousd!==Math.ceil(receipt.inputTokens*0.042)||receipt.costMicrousd>reservation.amountMicrousd)throw new Error("Jev usage does not match reviewed prices and reservation bounds.");
+        const prior=state.events.find(e=>e.type==="model_budget_jev_usage_observed"&&(e.data as {reservationId:string}).reservationId===receipt.reservationId);
+        if(prior){if(canonicalJson(prior.data)!==canonicalJson(receipt))throw new Error("Conflicting Jev usage receipt requires reconciliation.");return;}
+        await this.#store.append("model_budget_jev_usage_observed",principal,receipt);
+        // Never refund a reservation here, including successful known usage. Holds survive crashes/retries.
+      }),
+    };
   }
 
   /** Wrap each runtime paid client. Existing per-task authorization still applies. */

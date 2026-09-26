@@ -8,6 +8,7 @@ import {createContext,Script} from 'node:vm';
 import {sha256} from '../src/canonical.ts';
 import {SaraKernel} from '../src/kernel.ts';
 import {createSaraServer} from '../src/server.ts';
+import {secondBrainWorkspace} from '../src/second-brain-ui.ts';
 import {DASHBOARD_HTML} from '../src/dashboard.ts';
 
 // Execute the served owner script and its real HTTP reads. The DOM stand-in only
@@ -21,7 +22,7 @@ test('owner dashboard renders the current digital registry independently of lega
  try {
   const base=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const html=await (await fetch(base)).text();
-  assert.equal(html,DASHBOARD_HTML,'The HTTP route must serve the exact reviewed dashboard source');
+  assert.equal(html,secondBrainWorkspace(DASHBOARD_HTML),'The HTTP route must serve the exact reviewed dashboard source');
   const nodes=new Map<string,any>();
   const node=(selector:string):any=>{if(!nodes.has(selector))nodes.set(selector,{textContent:'—',dataset:{},style:{},classList:{add(){},remove(){}},addEventListener(){},replaceChildren(){},querySelector:node});return nodes.get(selector);};
   const storage=new Map<string,string>();let contractReads=0,override:Response|undefined;

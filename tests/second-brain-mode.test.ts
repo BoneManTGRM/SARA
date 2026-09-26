@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {test} from 'node:test';
+import {readFile,mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {spawn} from 'node:child_process';
+import {startupPolicy} from '../src/second-brain-mode.ts';
+test('second brain defaults suppress unrelated startup effects even with legacy feature flags',()=>{const policy=startupPolicy({SARA_AUTONOMOUS_LEARNING_ENABLED:'true',SARA_LIVE_PROOF_ON_START:'true',SARA_RUN_CODING_SPEED_BENCHMARK:'true'});assert.equal(policy.mode,'second_brain');assert.equal(policy.bootstrapPaidMandate,false);assert.equal(policy.learning,false);assert.equal(policy.websiteMaintenance,false);assert.equal(policy.liveProof,false);assert.equal(policy.codingBenchmark,false);assert.equal(policy.legacyInteractions,false);assert.equal(policy.preserveAuthorizedCustomerFulfillment,true);});
+test('legacy mode is explicit server configuration and invalid values fail closed',()=>{assert.equal(startupPolicy({SARA_PRODUCT_MODE:'legacy',SARA_LIVE_PROOF_ON_START:'true'}).liveProof,true);assert.equal(startupPolicy({SARA_PRODUCT_MODE:'legacy'}).liveProof,false);assert.throws(()=>startupPolicy({SARA_PRODUCT_MODE:'typo'}));});
+test('revenue discovery schedule is manual only',async()=>{const source=await readFile(new URL('../.github/workflows/sara-revenue-scout.yml',import.meta.url),'utf8');assert.match(source,/workflow_dispatch:/);assert.doesNotMatch(source,/\bschedule:|\bcron:/);});
+test('actual default startup ignores paid proof, learning and coding flags and leaves owner server running',async()=>{const state=await mkdtemp(join(tmpdir(),'sara-product-mode-'));let output='';let child:ReturnType<typeof spawn>|undefined;
+ try{child=spawn(process.execPath,['--import','tsx','scripts/start-runtime.ts'],{cwd:new URL('..',import.meta.url),env:{PATH:process.env.PATH,NODE_PATH:process.env.NODE_PATH,SARA_STATE_DIRECTORY:state,SARA_OWNER_TOKEN_SHA256:'a'.repeat(64),SARA_HOST:'127.0.0.1',PORT:'0',SARA_PRODUCT_MODE:'second_brain',SARA_AUTONOMOUS_LEARNING_ENABLED:'true',SARA_LIVE_PROOF_ON_START:'true',SARA_RUN_CODING_SPEED_BENCHMARK:'true',SARA_REPARODYNAMIC_CODING_MODE:'canary',SARA_KERNEL_VERIFICATION_WORKERS:'2',SARA_MONTHLY_MODEL_BUDGET_USD:'0',OPENAI_API_KEY:'synthetic-nonsecret-test-key'},stdio:['ignore','pipe','pipe']});
+ await new Promise<void>((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Startup timeout: '+output)),15000);const consume=(value:Buffer)=>{output+=value.toString();if(output.includes('worker running.')){clearTimeout(timer);resolve();}};child!.stdout!.on('data',consume);child!.stderr!.on('data',consume);child!.once('exit',code=>{clearTimeout(timer);reject(new Error(`Premature exit ${code}: ${output}`));});});
+ assert.match(output,/SARA owner dashboard listening/);assert.match(output,/"mode":"second_brain"/);assert.match(output,/"learning":false/);assert.match(output,/"bootstrapPaidMandate":false/);assert.match(output,/"websiteMaintenance":false/);assert.match(output,/"reparodynamicCodingMode":"off"/);assert.match(output,/startup proof disabled; accounted cost \$0\.000000/);
+ }finally{if(child){child.kill('SIGTERM');await new Promise(resolve=>{if(child!.exitCode!==null)resolve(null);else child!.once('exit',resolve);});}await rm(state,{recursive:true,force:true});}
+});

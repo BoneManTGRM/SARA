@@ -1,3 +1,4 @@
+import {startupPolicy} from '../src/second-brain-mode.ts';
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { isAbsolute, relative, resolve, sep } from "node:path";
@@ -11,7 +12,8 @@ function pathContains(root: string, target: string): boolean {
   );
 }
 
-if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
+const productPolicy=startupPolicy(process.env);
+if (productPolicy.codingBenchmark) {
   const child = spawn(
     process.execPath,
     ["scripts/standalone-coding-speed-live.mjs"],
@@ -51,7 +53,8 @@ if (process.env.SARA_RUN_CODING_SPEED_BENCHMARK === "true") {
       stateDirectoryClass: persistentVolumeMountMatches ? "persistent_volume" : "configured_other",
       persistentVolumeMountMatches,
       workerConfiguration: {
-        autonomousLearningEnabled: process.env.SARA_AUTONOMOUS_LEARNING_ENABLED === "true",
+        productMode: productPolicy.mode,
+        autonomousLearningEnabled: productPolicy.learning,
         workersPlan: process.env.SARA_WORKERS_PLAN === "free"
           ? "free"
           : process.env.SARA_WORKERS_PLAN

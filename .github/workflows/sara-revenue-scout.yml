@@ -1,8 +1,7 @@
 name: SARA zero-cost revenue scout
 
 on:
-  schedule:
-    - cron: "17 */6 * * *"
+  # Owner direction: discovery is manual; previous opportunity records remain intact.
   workflow_dispatch:
 
 permissions:

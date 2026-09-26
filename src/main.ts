@@ -1,3 +1,4 @@
+import {startupPolicy} from './second-brain-mode.ts';
 import {collectSoftwareSource} from './software-source-reader.ts';
 import {runNicosMovementJourney,readSoftwareBrowserConfigurationIdentity} from './software-journey-browser.ts';
 import {sha256} from './canonical.ts';
@@ -23,6 +24,7 @@ import { NicoOperatorClient } from "./nico-operator.ts";
 import { activateApprovedAutonomousPaidMandate } from "./autonomous-paid-mandate-bootstrap.ts";
 import { parseReparodynamicCodingMode } from "./reparodynamic-candidate-generator.ts";
 
+export const productPolicy = startupPolicy(process.env);
 const stateDirectory = resolve(process.env.SARA_STATE_DIRECTORY ?? ".sara-state");
 const host = process.env.SARA_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 3000);
@@ -32,7 +34,7 @@ const telegramBridgeTokenSha256 = process.env.SARA_TELEGRAM_BRIDGE_TOKEN_SHA256?
 const apiKey = process.env.OPENAI_API_KEY?.trim();
 const monthlyBudgetUsd = Number(process.env.SARA_MONTHLY_MODEL_BUDGET_USD ?? 10);
 const telegramMonthlyBudgetUsd = Number(process.env.SARA_TELEGRAM_LUNA_BUDGET_USD ?? 0);
-const liveProofEnabled = process.env.SARA_LIVE_PROOF_ON_START === "true";
+const liveProofEnabled = productPolicy.liveProof;
 const paymentWalletAddress = process.env.SARA_PAYMENT_WALLET_ADDRESS?.trim();
 const termsBusinessName = process.env.SARA_TERMS_BUSINESS_NAME?.trim();
 const termsContactEmail = process.env.SARA_TERMS_CONTACT_EMAIL?.trim();
@@ -45,7 +47,7 @@ const nicoBaseUrl = process.env.SARA_NICO_BASE_URL?.trim();
 const nicoOperatorPassword = process.env.SARA_NICO_OPERATOR_PASSWORD?.trim();
 const ownerToken = process.env.SARA_OWNER_TOKEN?.trim();
 const approvedAutonomousPaidMandateDigest = process.env.SARA_AUTONOMOUS_PAID_MANDATE_APPROVED_SHA256?.trim();
-const reparodynamicCodingMode = parseReparodynamicCodingMode(process.env.SARA_REPARODYNAMIC_CODING_MODE);
+const reparodynamicCodingMode = productPolicy.legacyInteractions ? parseReparodynamicCodingMode(process.env.SARA_REPARODYNAMIC_CODING_MODE) : "off";
 if (!ownerTokenSha256 || !/^[a-f0-9]{64}$/i.test(ownerTokenSha256)) {
   throw new Error("Set SARA_OWNER_TOKEN_SHA256 to a SHA-256 digest before starting the owner dashboard.");
 }
@@ -108,7 +110,7 @@ if (
   throw new Error("SARA_TELEGRAM_LUNA_BUDGET_USD must be a whole-cent amount within the total monthly model budget.");
 }
 
-const kernelWorkerSetting = process.env.SARA_KERNEL_VERIFICATION_WORKERS ?? "0";
+const kernelWorkerSetting = productPolicy.legacyInteractions ? (process.env.SARA_KERNEL_VERIFICATION_WORKERS ?? "0") : "0";
 if (!["0", "1", "2"].includes(kernelWorkerSetting)) throw new Error("Invalid SARA_KERNEL_VERIFICATION_WORKERS");
 if (Boolean(nicoBaseUrl) !== Boolean(nicoOperatorPassword)) {
   throw new Error("SARA_NICO_BASE_URL and SARA_NICO_OPERATOR_PASSWORD must be configured together.");
@@ -120,17 +122,17 @@ export const kernel = await SaraKernel.boot({
   softwareRuntime:{configurationIdentity:{sourceDigest:sha256(JSON.stringify({adapter:'anonymous-public-github-source-v1',maxRequests:20,maxDurationMilliseconds:30000,maxResponseBytes:8*1024*1024,authentication:'anonymous',node:process.versions.node})),journeyDigest:await readSoftwareBrowserConfigurationIdentity()},inspectSource:collectSoftwareSource,testJourney:runNicosMovementJourney},
   stateDirectory,
   ownerTokenSha256,
-  bootstrapRevenueCapabilities: true,
+  bootstrapRevenueCapabilities: productPolicy.legacyInteractions,
   ...(nicoOperator?{nicoObserver:createNicoReadObserver(nicoOperator,{environment:'PRODUCTION'})}:{}),
   selfBuildVerificationWorkers: Number(kernelWorkerSetting) as 0 | 1 | 2,
 });
-await activateApprovedAutonomousPaidMandate({
+if (productPolicy.bootstrapPaidMandate) await activateApprovedAutonomousPaidMandate({
   kernel,
   ...(ownerToken ? { ownerToken } : {}),
   ...(approvedAutonomousPaidMandateDigest ? { approvedDigest: approvedAutonomousPaidMandateDigest } : {}),
 });
 const bootStatus = await kernel.getStatus();
-const learningWorker = process.env.SARA_AUTONOMOUS_LEARNING_ENABLED === "true"
+const learningWorker = productPolicy.learning
   ? new AutonomousLearningWorker(kernel, createCloudflareFreeCandidateGenerator({
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID ?? "",
     apiToken: process.env.CLOUDFLARE_API_TOKEN ?? "",
@@ -153,7 +155,7 @@ const client = apiKey ? kernel.guardPaidModelClient(new OpenAIResponsesClient({ 
 if (reparodynamicCodingMode !== "off" && !client) {
   throw new Error("Reparodynamic coding requires OPENAI_API_KEY when its mode is shadow or canary.");
 }
-const ownerAssistant = client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
+const ownerAssistant = productPolicy.legacyInteractions && client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
   ? new OwnerAssistant({ modelClient: client, stateDirectory, monthlyBudgetUsd: telegramMonthlyBudgetUsd })
   : null;
 const activeTelegramMonthlyBudgetUsd = ownerAssistant ? telegramMonthlyBudgetUsd : 0;
@@ -174,8 +176,12 @@ const nativeVerifier = reparodynamicCodingMode === "canary" ? await NativeCoding
 console.log(`SARA coding loop checker: ${nativeVerifier ? "native-7.0.2-with-legacy-final" : "legacy"}`);
 // No credentials or implicit publishing authority are inherited from ChatGPT connectors.
 // Host-bound publishing and notification adapters must be configured before CANARY activation.
-const websiteMaintenance=new WebsiteMaintenanceOperator(kernel,stateDirectory,null);
+const websiteMaintenance=productPolicy.websiteMaintenance ? new WebsiteMaintenanceOperator(kernel,stateDirectory,null) : null;
+console.log(`SARA product startup policy ${JSON.stringify({...productPolicy,customerFulfillment:"Existing confirmed payments and authorized jobs continue under existing mandate, budgets and review gates; this mode creates no new mandate or scout."})}`);
 export const server = createSaraServer(kernel, {
+  productMode: productPolicy.mode,
+  ...(process.env.TYPESAFE_API_KEY ? {jevApiKey:process.env.TYPESAFE_API_KEY} : {}),
+  jevDisabled: process.env.SARA_JEV_DISABLED === "true",
   learningRuntimeStatus: () => ({enabled: learningWorker !== null, providerConfigured: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.SARA_WORKERS_PLAN === "free")}),
   ownerTokenSha256,
   stateDirectory,
@@ -184,7 +190,7 @@ export const server = createSaraServer(kernel, {
   ...(telegramBridgeTokenSha256 ? { telegramBridgeTokenSha256 } : {}),
   ...(ownerAssistant ? { ownerAssistant } : {}),
   ...(commerce ? { commerce } : {}),
-  ...(nicoOperator ? { nicoOperator } : {}),
+  ...(nicoOperator && productPolicy.legacyInteractions ? { nicoOperator } : {}),
   ...(client && reparodynamicCodingMode !== "off" ? {
     reparodynamicCoding: {
       mode: reparodynamicCodingMode,
@@ -221,7 +227,7 @@ observeSelfBuildHttp(server, {
   onTelemetryFailure: () => console.error("SARA self-build timing telemetry unavailable; no acceptance decision changed."),
 });
 server.listen(port, host, () => {
-  websiteMaintenance.start();
+  websiteMaintenance?.start();
   learningWorker?.start();
   const address = server.address();
   const resolvedPort = typeof address === "object" && address ? address.port : port;
@@ -260,7 +266,7 @@ server.listen(port, host, () => {
 });
 
 function shutdown(): void {
-  websiteMaintenance.stop();
+  websiteMaintenance?.stop();
   learningWorker?.stop();
   operator?.stop();
   server.close(() => { void kernel.closeVerificationWorkers(); });

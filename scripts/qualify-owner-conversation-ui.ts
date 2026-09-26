@@ -67,6 +67,23 @@ try{
  await until("document.querySelector('#owner-dialog').open");
  await evaluate(`document.querySelector('#token').value=${JSON.stringify(credential)};document.querySelector('#owner-form button[type=submit]').click()`);
  await until("document.body.dataset.owner==='connected' && !document.querySelector('#owner-work-fields').disabled");
+ // The new primary workspace is qualified before opening preserved legacy workflows.
+ await until("!document.getElementById('brain-fields').disabled");
+ for(const width of [1280,390]) {
+  await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+  assert.equal(await evaluate("document.getElementById('brain-legacy').open"),false);
+  await evaluate(`document.getElementById('brain-note').value='Synthetic continuity blocker ${width}';document.getElementById('brain-kind').value='blocker';document.querySelector('#brain-capture button').click()`);
+  await until(`document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker ${width}')`);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Second brain fits phone viewport');
+  assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('reported')"),true);
+  await evaluate("document.getElementById('brain-project').value='sara';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
+  await until("document.getElementById('brain-handoff').value.includes('SARA / SARA')");
+  assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')"),false);
+  await evaluate("document.getElementById('brain-project').value='nico';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
+  await until("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')");
+ }
+ await evaluate("document.querySelector('#brain-legacy > summary').click()");
+ assert.equal(await evaluate("document.getElementById('brain-legacy').open"),true,'Legacy operations remain reachable through disclosure');
  const screenshots:string[]=[];
  for(const width of [1280,390]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
