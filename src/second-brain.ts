@@ -1,4 +1,5 @@
 import {projectTracking} from './second-brain-tracking.ts';
+import {questionKind,projectAnswer} from './second-brain-answers.ts';
 import {CORE_MEMORY_SEEDS} from "./memory-fabric.ts";
 import {canonicalJson,sha256} from './canonical.ts';
 import type {MemoryRecord} from './types.ts';
@@ -72,13 +73,16 @@ export function projectView(memories:readonly MemoryRecord[],project:Project,que
  if(x.conflictsWith.includes(b.id)||y.conflictsWith.includes(a.id)||(x.claimKey&&x.claimKey===y.claimKey&&x.outcome!==y.outcome&&x.observedAt===y.observedAt)){conflicts.add(a.id);conflicts.add(b.id);}}
  const tracking=projectTracking(all,current,conflicts,superseded,now,since);
  const words=query.toLowerCase().match(/[\p{L}\p{N}]+/gu)??[];
- const ranked=current.map(m=>({m,score:words.filter(w=>(m.statement+' '+m.projectEvidence.kind+' '+(m.projectEvidence.stage??'')).toLowerCase().includes(w)).length})).filter(x=>!words.length||x.score>0).sort((a,b)=>b.score-a.score||(b.m.projectEvidence.observedAt??'').localeCompare(a.m.projectEvidence.observedAt??'')||a.m.id.localeCompare(b.m.id));
+ const kind=questionKind(query);
+ const ranked=current.filter(m=>!kind||m.projectEvidence.kind===kind).map(m=>({m,score:kind?1:words.filter(w=>(m.statement+' '+m.projectEvidence.kind+' '+(m.projectEvidence.stage??'')).toLowerCase().includes(w)).length})).filter(x=>!words.length||x.score>0).sort((a,b)=>b.score-a.score||(b.m.projectEvidence.observedAt??'').localeCompare(a.m.projectEvidence.observedAt??'')||a.m.id.localeCompare(b.m.id));
+ const answer=projectAnswer(kind,ranked.map(x=>x.m),conflicts,now.toISOString());
  const records=ranked.slice(0,30).map(x=>structuredClone(x.m));
  const anchors=CORE_MEMORY_SEEDS.filter(m=>m.tags?.includes('anchor')&&['constitutional','economic','procedural'].includes(m.category));
  const clean=current.filter(m=>!conflicts.has(m.id));
  const lines=(kind:ProjectEvidence['kind'])=>clean.filter(m=>m.projectEvidence.kind===kind).slice(0,2).map(m=>`- [Reported; not authorization] ${m.statement.slice(0,240)}${m.statement.length>240?"… [excerpt]":""} (${m.id})`).join('\n')||'Unknown — no current evidence.';
  const stageSummary=clean.filter(m=>m.projectEvidence.verification==='source_observed'&&m.projectEvidence.stage&&m.projectEvidence.outcome==='success').slice(0,8).map(m=>`- ${m.projectEvidence.stage}: ${m.projectEvidence.repository} @ ${m.projectEvidence.revision}; record ${m.id}; observed ${m.projectEvidence.observedAt}; checked ${m.projectEvidence.lastVerifiedAt}`).join('\n')||'Unknown — no current source observation establishes a release stage.';
  let handoff=[`SARA / ${PROJECTS[project]} — deterministic continuation brief`,`As of: ${now.toISOString()}`,
+ ...(answer?['Question answer (deterministic; saved categories)',answer.title,answer.notice,`Sources: ${answer.sources.map(m=>m.id).join(', ')||'none'}; showing ${answer.sources.length}/${answer.total}. Open the question answer for full source links.`]:[]),
  'Mandatory policy anchors',...anchors.map(m=>`${m.statement} [${m.source}; ${m.id}]`),'Goal',lines('goal'),'Constraints','Owner authority and existing approvals remain mandatory. No spending or external execution is granted by this brief.',lines('constraint'),
  'Decisions (reported)',lines('decision'),'Verified state',stageSummary,'Unestablished stages remain Unknown. Prepared, committed, tests passed, merged, deployed and production verified are independent states.',
  'Blockers',lines('blocker'),'Pending approvals',lines('approval'),'Next authorized action','Unknown — confirm against current authority before acting.',lines('next_action'),
@@ -100,5 +104,5 @@ export function projectView(memories:readonly MemoryRecord[],project:Project,que
  if(since){handoff+=`\n\nRecords saved since ${since}: ${tracking.changes.total}. ${tracking.changes.notice}`;let changeCount=0;for(const m of tracking.changes.items.slice(0,3)){const entry=`\n${m.id}: ${m.kind}, ${m.state}; saved ${m.ingestedAt}; observed ${m.observedAt??'unknown'}; Source: ${m.source}`;if(handoff.length+entry.length>15300)break;handoff+=entry;changeCount++;}handoff+=`\nShowing ${changeCount}/${tracking.changes.total} change identifiers; open What changed for complete source details.`;}
  handoff+=`\n\nIncluded ${included}/${excerptCandidates.length} conflict and matching source excerpts. Open Sources and History in SARA for complete conflict groups and additional matches.`;
 
- return {project,tracking,asOf:now.toISOString(),mode:'local_search' as const,records,anchors:structuredClone(anchors),conflicts:all.filter(m=>conflicts.has(m.id)),history:all.filter(m=>superseded.has(m.id)||stale(m)).map(m=>({id:m.id,source:m.source,observedAt:m.projectEvidence.observedAt,stale:stale(m),superseded:superseded.has(m.id)})),totalMatching:ranked.length,totalRecords:all.length,handoff};
+ return {project,tracking,answer,asOf:now.toISOString(),mode:'local_search' as const,records,anchors:structuredClone(anchors),conflicts:all.filter(m=>conflicts.has(m.id)),history:all.filter(m=>superseded.has(m.id)||stale(m)).map(m=>({id:m.id,source:m.source,observedAt:m.projectEvidence.observedAt,stale:stale(m),superseded:superseded.has(m.id)})),totalMatching:ranked.length,totalRecords:all.length,handoff};
 }

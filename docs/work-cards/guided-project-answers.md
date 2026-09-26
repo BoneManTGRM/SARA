@@ -1,0 +1,23 @@
+# Guided project answers — bounded candidate
+
+Baseline: main df47bfb1d1f19be4671a79cfeed471a6a9e05fc0, tree 7fbe99a46b073445011dd34cbfe38cb2e81f6ebf. Branch codex/sara-guided-answers-20260926. Owner asks for a more capable second brain. Provider spending remains deferred; Jev stays disabled. Production is not a development workspace.
+
+Plan: freeze synthetic question cases and red tests; add conservative whole-question category routing and source-linked deterministic answers through the existing brief API; add phone quick questions and repair project-switch runtime refresh; run focused/full gates, independent review, publish and qualify the exact candidate. No database, provider, authority or history changes.
+
+Acceptance: decisions/blockers/proposed-next-steps/pending-approvals return their current saved category even when note wording differs. Unsupported or compound questions keep ordinary search, never fabricate an answer. Every answer is explicitly reported, dated and source-linked; next steps/approvals never grant authority. Conflicts remain visible; stale/superseded/foreign records stay excluded. Counts/omissions are honest, handoff <=16000characters, private UI clears on scope/logout. Obligations repopulate on project switch with stale-response suppression.
+
+Fixed conditions: question contract guided-project-v1; synthetic evaluation fixtures and UTC times frozen before implementation and included in this candidate. Threshold: 100% declared routing/category answers and unsupported abstentions; zero authority grants/leakage. Compare unchanged ordinary lexical search diagnostically, measure latency and abstentions; provider calls0, provider usage not measured. This is not a live Jev benchmark or a general performance claim.
+
+Minimal case: saved differently-worded decision -> What was decided? -> cited reported answer -> handoff. Critique: injection, conflict, late old observations, wrong scope, sparse data, unknown approvals, bounded export and async project changes. Reordering: canonical filtering before answers; exact tests before publication; canary before target-bound owner production approval.
+
+Rollback: deploy df47bfb1 application only; preserve current /data, memory, audits, financial holds and obligations. This feature is a read-only derived view. No new paid services, allowances or provider calls. Prior approval covers df47bfb1 only; a new exact candidate needs promotion approval under AGENTS.md.
+
+Evidence recorded on 2026-09-26: `node --import tsx --test tests/second-brain-answers.test.ts` initially exited1 for missing answer behavior (5 failures), then passed5/5 after implementation. One intervening harness failure was an empty query sent to ordinary recall; the unsupported-empty expectation was retained and the invalid comparison skipped. Frozen fixture SHA256 f1715e69a907a28fac1aca77e2c9fee7dfcf2e7b295d77f972618ed918d138c0:20/20,5 abstentions,15 category cases; ordinary search category top1 was0 on this deliberately differently-worded set. This is a routing test, not model-quality superiority.
+
+`node --import tsx --test tests/second-brain*.test.ts`:40/40 exit0. `npm run typecheck`:exit0. `npm run verify`:exit0,1599/1599 tests,HTTP14/14 and all integrated proofs. Initial full gate failed11 tests because the isolated checkout lacked its existing native-checker dependency; restoring that pinned dependency passed native17/17 and the full unchanged safety gate. No assertion was removed. Logs retained outside the public repository.
+
+`node --import tsx scripts/evaluate-second-brain-offline.ts`:exit0; existing20-case diagnostic unchanged,10/12 answerable top1 for both ordinary search and second brain,2 empty retrievals,7/8 unsupported queries still return lexical matches (not answers). Provider calls0; live quality/usage unmeasured.
+
+Independent read-only review by a separate agent found no material blockers; suggested delayed-response regression now passes. It executes the actual authored UI script with transport/DOM stand-ins, proves project/logout stale-response suppression and status-error truth. Actual phone/browser acceptance is separately required in CI/canary; this local VM test is not iPhone/WebKit qualification. Review does not grant promotion approval.
+
+CI36275017598 at8396d5a6 exposed a fresh-page logout mismatch: public help copy appeared inside the cleared answer result. Moved static help outside the private answer result container; retained the strict empty-result assertion. No source data was observed leaked. New exact candidate must pass fresh CI and CANARY; the earlier CI failure remains retained.
