@@ -5,6 +5,18 @@ const record:JevCandidate={id:'r1',project:'nico',digest:'a'.repeat(64),text:'Sy
 const request={project:'nico',principalId:'owner',query:'compiler',queryApprovedForExternal:true,candidates:[record],canRead:()=>true};
 const response=()=>new Response(JSON.stringify({model:JEV_MODEL,answers:{r0:{type:'noul',noul:0.9}},usage:{input_tokens:300,output_tokens:20}}));
 const budget=(receipts:unknown[]=[]):JevBudget=>({reserve:async()=>({id:'reservation'}),stillAuthorized:async()=>true,record:async r=>{receipts.push(r);}});
+test('query-focused excerpt preserves late source text, offsets and head-truncation disclosure',async()=>{
+ const source='Unrelated archive context. '.repeat(100)+'Compiler timeout remains unresolved; production is NOT verified.'+' More archive. '.repeat(200);
+ let body='';const adapter=createJevSecondBrain({enabled:true,apiKey:'synthetic',budget:budget(),transport:async(_u,init)=>{body=String(init?.body);return response();}});
+ const result=await adapter.rerank({...request,query:'compiler timeout',candidates:[{...record,text:source}]});
+ const passage=JSON.parse(body).state.records[0];
+ assert.match(passage.text,/Compiler timeout remains unresolved; production is NOT verified/);
+ assert.equal(passage.text,source.slice(passage.excerptStart,passage.excerptEnd));
+ assert.equal(passage.excerptTruncated,true);assert.ok(passage.text.length<=1500);assert.ok(passage.excerptStart>0);
+ assert.equal(passage.originalLength,source.length);
+ assert.equal(result.sourceExcerpts?.[0]?.text,passage.text);assert.equal(result.sourceExcerpts?.[0]?.sourceDigest,record.digest);
+ const denied=await adapter.rerank({...request,canRead:()=>false});assert.equal(denied.sourceExcerpts,undefined);
+});
 test('default and missing purpose allocation never dispatch',async()=>{let calls=0;const adapter=createJevSecondBrain({transport:async()=>{calls++;return response();}});assert.equal((await adapter.rerank(request)).reason,'disabled');const noBudget=createJevSecondBrain({enabled:true,apiKey:'synthetic',transport:async()=>{calls++;return response();}});assert.equal((await noBudget.rerank(request)).reason,'budget_denied');assert.equal(calls,0);});
 test('filters scope, data class, staleness and access before payload; mock is truthful shadow',async()=>{let body='';const adapter=createJevSecondBrain({enabled:true,apiKey:'synthetic',budget:budget(),transport:async(_url,init)=>{body=String(init?.body);return response();}});const result=await adapter.rerank({...request,candidates:[record,{...record,id:'foreign',project:'sara',text:'FOREIGN'},{...record,id:'private',dataClass:'private',text:'PRIVATE'},{...record,id:'stale',freshUntil:'2020-01-01T00:00:00Z',text:'STALE'},{...record,id:'denied',text:'DENIED'}],canRead:r=>r.id!=='denied'});assert.deepEqual(result.ids,['r1']);assert.equal(result.mode,'simulated_shadow');assert.equal(result.live,false);assert.ok(!/FOREIGN|PRIVATE|STALE|DENIED/.test(body));});
 test('cache rechecks access and content digest, never exposes revoked record',async()=>{let calls=0;const adapter=createJevSecondBrain({enabled:true,apiKey:'synthetic',budget:budget(),transport:async()=>{calls++;return response();}});await adapter.rerank(request);assert.equal((await adapter.rerank(request)).cached,true);assert.deepEqual((await adapter.rerank({...request,canRead:()=>false})).ids,[]);await adapter.rerank({...request,candidates:[{...record,digest:'b'.repeat(64)}]});assert.equal(calls,2);});

@@ -11,7 +11,7 @@ async function boot(dir:string){return SaraKernel.boot({stateDirectory:dir,owner
 async function configure(k:SaraKernel,monthlyLimitUsd=.01,openingChargeUsd=0){const o=k.authenticateOwnerToken(token),input={monthlyLimitUsd,openingChargeUsd,inputUsdPerMillionTokens:100,outputUsdPerMillionTokens:100};await k.configureModelBudget(o,input,{approvalId:'test-only',ownerId:o.id,action:'owner_funded_ceiling_change',targetId:'model-budget:'+sha256(canonicalJson(input)),approvedAt:new Date().toISOString()});}
 async function transfer(k:SaraKernel){const o=k.authenticateOwnerToken(token),review=await k.reviewJevReallocation(o);await k.reallocateModelBudgetToJev(o,review.targetId,{approvalId:'test-transfer',ownerId:o.id,action:'owner_funded_ceiling_change',targetId:review.targetId,approvedAt:new Date().toISOString()});return o;}
 const input=(principalId:string)=>({purpose:'second_brain_rerank' as const,principalId,project:'nico',model:JEV_MODEL,questionVersion:JEV_QUESTION_VERSION,requestDigest:'a'.repeat(64),maximumMicrousd:JEV_RESERVATION_MICROUSD,maximumInputTokens:JEV_MAX_INPUT_TOKENS});
-test('persisted earlier question approval stays held but cannot fund the new contract after restart',async()=>{
+for(const previousVersion of ['sara-relevance-v1','sara-relevance-v2']) test('persisted '+previousVersion+' approval stays held but cannot fund the new contract after restart',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'jev-old-contract-'));
  try{
   const k=await boot(dir);await configure(k);
@@ -20,7 +20,7 @@ test('persisted earlier question approval stays held but cannot fund the new con
   const currentReview=k.reviewJevReallocation.bind(k);
   k.reviewJevReallocation=async principal=>{
    const {targetId,...review}=await currentReview(principal);
-   const prior={...review,questionVersion:'sara-relevance-v1'};
+   const prior={...review,questionVersion:previousVersion};
    return {...prior,targetId:'jev-reallocation:'+sha256(canonicalJson(prior))};
   };
   await transfer(k);

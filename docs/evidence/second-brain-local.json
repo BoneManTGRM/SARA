@@ -152,5 +152,54 @@
         "bytes": 270791
       }
     }
+  },
+  "sourceContextFollowup": {
+    "parentRemote": "d0a2f5c2b70eb11dd32150de76a80b35c25779cc",
+    "candidate": "containing commit",
+    "model": "jev-1.13.0",
+    "questionVersion": "sara-relevance-v3",
+    "focused": {
+      "command": "node --import tsx --test tests/second-brain*.test.ts tests/jev*.test.ts",
+      "exitCode": 0,
+      "passed": 63
+    },
+    "fullGate": {
+      "command": "npm run verify",
+      "exitCode": 0,
+      "passed": 1577,
+      "failed": 0,
+      "proofs": "all passed, HTTP14/14"
+    },
+    "fixtureMetadataCorrection": "frozenAt corrected to observed file creation mtime after full gate; conditions unchanged; excerpt tests3/3 and evaluation rerun; exact final CI still required",
+    "logs": {
+      "artifacts/second-brain/context-red.log": {
+        "sha256": "052d26cebb47b1be82becf0ed775904badae554b1502cc8c82bde86e86034809",
+        "bytes": 9312
+      },
+      "artifacts/second-brain/context-upgrade-red.log": {
+        "sha256": "7978a3404e8ac26fa898bbfd07ed83a6f3dc73e042e8375de90d9b71fd1e993b",
+        "bytes": 1057
+      },
+      "artifacts/second-brain/context-focused-final.log": {
+        "sha256": "7465801a0d02a6c5d4041eb2ef1ae8c7b6327f27851a901606c20780ad285320",
+        "bytes": 6586
+      },
+      "artifacts/second-brain/context-verify-final.log": {
+        "sha256": "095678bb2e0d35483db136ae85d2eef8589bf5b0ea0b2ce1b479718cfd367069",
+        "bytes": 271713
+      },
+      "artifacts/second-brain/context-evaluation-final.json": {
+        "sha256": "134a257d9f8254d766f3b9b9f1c86b910170dca9cbf8d427d6295973a3f935b8",
+        "bytes": 36558
+      },
+      "artifacts/second-brain/context-search-differential.json": {
+        "sha256": "e1d356eb22ebe5a8b217d47a29a7551dd45a5d558877d0ec869c74a6ef8fae7c",
+        "bytes": 10676
+      },
+      "artifacts/second-brain/context-fixture-metadata-check.log": {
+        "sha256": "8448d811901f99dd3016113aebd280c78310c76898069a5a7266870306171b1e",
+        "bytes": 396
+      }
+    }
   }
 }

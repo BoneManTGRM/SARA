@@ -1,4 +1,4 @@
-import { importGitHubEvidence, type GitHubImportInput } from "./second-brain-github.ts";
+import { importGitHubEvidence, githubContextPredecessors, type GitHubImportInput } from "./second-brain-github.ts";
 import { noteInput, evidenceId, projectId, projectView, type EvidenceMemory } from "./second-brain.ts";
 import { repositoryCollectionRetryDue, repositoryCollectionFailure, repositoryCollectionRetryAt, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import {unresolvedRevenueAllowance} from './revenue-pilot.ts';
@@ -890,6 +890,8 @@ export class SaraKernel {
       const state=await this.state();
       const ids:string[]=[];
       for(const memory of result.records){
+        const enriched=githubContextPredecessors(state.memories,memory);
+        if(enriched.length){memory.supersedes=enriched;memory.tags=[...memory.tags??[],"github-context-enrichment"];}
         const id=evidenceId(memory);ids.push(id);
         if(!state.memories.some(m=>m.id===id))await this.#store.append("memory_recorded",principal,{...memory,id});
         else await this.#store.append("project_evidence_rechecked",principal,{id,scope,checkedAt:result.checkedAt,expiresAt:memory.projectEvidence.expiresAt});
@@ -3948,7 +3950,7 @@ export class SaraKernel {
     const amountMicrousd=blockers.length?0:Math.round(shared.remainingUsd*1_000_000);
     const sourceDigest=sha256(canonicalJson({month:shared.month,shared,paidObligations,fundedJobs,
       financialEvents:state.events.filter(e=>e.type.startsWith("model_budget_")).map(e=>e.hash)}));
-    const review={schemaVersion:1,purpose:"second_brain_rerank",model:"jev-1.13.0",questionVersion:"sara-relevance-v2",
+    const review={schemaVersion:1,purpose:"second_brain_rerank",model:"jev-1.13.0",questionVersion:"sara-relevance-v3",
       month:shared.month,projects:["nico","sara","nicos-world"],amountMicrousd,transferableUsd:amountMicrousd/1_000_000,
       sourceDigest,shared,paidObligations,fundedJobs,blockers,expiresAt:new Date(Date.UTC(Number(shared.month.slice(0,4)),Number(shared.month.slice(5,7)),1)).toISOString()};
     return {...review,targetId:`jev-reallocation:${sha256(canonicalJson(review))}`};
@@ -3973,14 +3975,14 @@ export class SaraKernel {
     const allocation=state.events.filter(e=>e.type==="model_budget_reserved"&&(e.data as {purpose?:string}).purpose==="second_brain_allocation"&&e.occurredAt.slice(0,7)===month).at(-1)?.data as
       {id:string;amountMicrousd:number;expiresAt:string;ownerId:string;model?:string;questionVersion?:string;purpose?:string}|undefined;
     const contractCompatible=!!allocation&&allocation.model==="jev-1.13.0"&&
-      allocation.questionVersion==="sara-relevance-v2"&&allocation.purpose==="second_brain_allocation";
+      allocation.questionVersion==="sara-relevance-v3"&&allocation.purpose==="second_brain_allocation";
     const reservations=state.events.filter(e=>e.type==="model_budget_jev_reserved"&&(e.data as {allocationId?:string}).allocationId===allocation?.id && !!allocation);
     const reservedMicrousd=reservations.reduce((sum,e)=>sum+(e.data as {amountMicrousd:number}).amountMicrousd,0);
     const receipts=state.events.filter(e=>e.type==="model_budget_jev_usage_observed"&&reservations.some(r=>(r.data as {id:string}).id===(e.data as {reservationId:string}).reservationId));
     const measuredMicrousd=receipts.reduce((sum,e)=>sum+((e.data as {costMicrousd:number|null}).costMicrousd??0),0);
     const known=new Set(receipts.filter(e=>(e.data as {costMicrousd:number|null}).costMicrousd!==null).map(e=>(e.data as {reservationId:string}).reservationId));
     return {month,configured:!!allocation,contractCompatible,reauthorizationRequired:!!allocation&&!contractCompatible,
-      allocationModel:allocation?.model??null,questionVersion:allocation?.questionVersion??null,currentQuestionVersion:"sara-relevance-v2",
+      allocationModel:allocation?.model??null,questionVersion:allocation?.questionVersion??null,currentQuestionVersion:"sara-relevance-v3",
       allocationId:allocation?.id??null,expiresAt:allocation?.expiresAt??null,
       allocatedUsd:(allocation?.amountMicrousd??0)/1_000_000,reservedUsd:reservedMicrousd/1_000_000,
       remainingUsd:Math.max(0,(allocation?.amountMicrousd??0)-reservedMicrousd)/1_000_000,
@@ -4000,7 +4002,7 @@ export class SaraKernel {
       reserve:input=>this.serializeMutation(async()=>{
         if(!await eligible())return null;
         if(input.purpose!=="second_brain_rerank"||input.principalId!==principal.id||!["nico","sara","nicos-world"].includes(input.project)||
-          input.model!=="jev-1.13.0"||input.questionVersion!=="sara-relevance-v2"||input.maximumInputTokens!==65536||
+          input.model!=="jev-1.13.0"||input.questionVersion!=="sara-relevance-v3"||input.maximumInputTokens!==65536||
           input.maximumMicrousd!==Math.ceil(65536*0.042)||!/^[a-f0-9]{64}$/.test(input.requestDigest))return null;
         const status=await this.jevBudgetStatus();
         if(input.maximumMicrousd>Math.round(status.remainingUsd*1_000_000))return null;
@@ -4019,7 +4021,7 @@ export class SaraKernel {
           (e.data as {allocationId?:string}).allocationId===status.allocationId&&
           (e.data as {principalId?:string}).principalId===principal.id&&
           (e.data as {model?:string}).model==="jev-1.13.0"&&
-          (e.data as {questionVersion?:string}).questionVersion==="sara-relevance-v2"&&
+          (e.data as {questionVersion?:string}).questionVersion==="sara-relevance-v3"&&
           (e.data as {purpose?:string}).purpose==="second_brain_rerank");
         if(!owned||state.events.some(e=>["model_budget_jev_dispatch_claimed","model_budget_jev_usage_observed"].includes(e.type)&&
           (e.data as {reservationId:string}).reservationId===reservationId))return false;
