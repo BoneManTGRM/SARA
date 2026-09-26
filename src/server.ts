@@ -1218,7 +1218,7 @@ async function handleAuthenticatedRequest(
       }
 
       if (request.method === "GET" && url.pathname === "/api/second-brain/brief") {
-        json(response,200,await kernel.readProjectBrief(owner,url.searchParams.get("project"),url.searchParams.get("q")??""));return;
+        json(response,200,await kernel.readProjectBrief(owner,url.searchParams.get("project"),url.searchParams.get("q")??"",url.searchParams.get("since")));return;
       }
       if (request.method === "POST" && url.pathname === "/api/second-brain/notes") {
         json(response,201,await kernel.captureProjectNote(owner,await readJson(request)));return;

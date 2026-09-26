@@ -867,7 +867,7 @@ export class SaraKernel {
       const id = evidenceId(memory);
       const existing = state.memories.find(m => m.id === id);
       if (existing) return structuredClone(existing as EvidenceMemory);
-      for (const related of [...memory.supersedes!, ...memory.projectEvidence.conflictsWith]) {
+      for (const related of [...memory.supersedes!, ...memory.projectEvidence.conflictsWith, ...memory.dependencies??[]]) {
         const other=state.memories.find(m=>m.id===related&&m.scope===memory.scope&&m.projectEvidence);
         if (!other) throw new Error("Evidence relationship must stay in the same project.");
         if(memory.supersedes!.includes(related) && (!memory.projectEvidence.observedAt || !other.projectEvidence!.observedAt || Date.parse(memory.projectEvidence.observedAt)<=Date.parse(other.projectEvidence!.observedAt))) throw new Error("Correction must have a newer known observation time.");
@@ -911,9 +911,9 @@ export class SaraKernel {
     });
   }
 
-  async readProjectBrief(principal: Principal, project: unknown, query = "") {
+  async readProjectBrief(principal: Principal, project: unknown, query = "", since:unknown=null) {
     if (!this.isVerifiedOwner(principal)) throw new Error("Authenticated owner required.");
-    return projectView((await this.state()).memories,projectId(project),query);
+    return projectView((await this.state()).memories,projectId(project),query,new Date(),since);
   }
 
   recordMemory(principal: Principal, input: Omit<MemoryRecord, "id">, external = false): Promise<MemoryRecord> {

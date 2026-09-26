@@ -45,3 +45,16 @@ test('OpenRouter owner configuration and exact funding route stay authenticated 
   assert.ok(!(await (await fetch(base)).text()).includes(key));
  }finally{await new Promise<void>((r,j)=>server.close(e=>e?j(e):r()));await rm(dir,{recursive:true,force:true});}
 });
+
+test('tracking changes and relationship capture use the same authenticated project boundary',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'tracking-http-')),token='synthetic-tracking-http';
+ const kernel=await SaraKernel.boot({stateDirectory:dir,ownerTokenSha256:sha256(token)}),server=createSaraServer(kernel,{ownerTokenSha256:sha256(token),productMode:'second_brain'});
+ await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+(server.address() as AddressInfo).port,headers={Authorization:'Bearer '+token,'content-type':'application/json'};
+ try{
+  const path='/api/second-brain/brief?project=nico&since=2026-01-01T00:00:00Z';assert.equal((await fetch(base+path)).status,401);
+  const saved=await fetch(base+'/api/second-brain/notes',{method:'POST',headers,body:JSON.stringify({project:'nico',kind:'decision',text:'Synthetic private decision'})});assert.equal(saved.status,201);
+  const response=await fetch(base+path,{headers});assert.equal(response.headers.get('cache-control'),'no-store');const v=await response.json() as any;assert.equal(v.tracking.decisions.total,1);assert.equal(v.tracking.changes.total,1);
+  const foreign=await (await fetch(base+path.replace('project=nico','project=sara'),{headers})).text();assert.ok(!foreign.includes('Synthetic private decision'));
+  assert.equal((await fetch(base+path.replace('2026-01-01T00:00:00Z','tomorrow'),{headers})).status,400);
+ }finally{await new Promise<void>((r,j)=>server.close(e=>e?j(e):r()));await rm(dir,{recursive:true,force:true});}
+});
