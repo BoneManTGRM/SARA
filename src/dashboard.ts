@@ -1360,6 +1360,9 @@ export const DASHBOARD_HTML = `<!doctype html>
       }
       const state = await response.json();
       setConnected(true);
+      // Authentication is established; secondary legacy inventory must not trap
+      // keyboard focus in the modal while the primary workspace is already ready.
+      if (dialog.open) dialog.close();
       const operating = document.querySelector('#operating');
       operating.classList.remove('operating', 'stopped');
       operating.classList.add(state.emergencyStopped ? 'stopped' : 'operating');

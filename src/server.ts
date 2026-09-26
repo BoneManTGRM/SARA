@@ -1,3 +1,6 @@
+import { createJevSecondBrain } from "./jev-second-brain.ts";
+const secondBrainProviders = new WeakMap<SaraKernel,ReturnType<typeof createJevSecondBrain>>();
+import { secondBrainWorkspace } from "./second-brain-ui.ts";
 import { compileLearningCampaign, type LearningCampaignInput } from "./learning-campaign.ts";
 import { maintenanceRequestDigest, type MaintenanceRequest } from "./website-maintenance.ts";
 import { handleTelegramNicoProductionRequest } from "./telegram-nico-production.ts";
@@ -47,6 +50,9 @@ export type SaraRuntimeStatus = {
 };
 
 export type ServerOptions = {
+  productMode?: "second_brain" | "legacy";
+  jevApiKey?: string;
+  jevDisabled?: boolean;
   learningRuntimeStatus?: () => { enabled: boolean; providerConfigured: boolean };
   ownerTokenSha256: string;
   readOnlyBridgeTokenSha256?: string;
@@ -447,7 +453,7 @@ async function handlePublicRequest(
       "x-frame-options": "DENY",
       "referrer-policy": "no-referrer",
     });
-    response.end(DASHBOARD_HTML);
+    response.end(secondBrainWorkspace(DASHBOARD_HTML));
     return true;
   }
   if (request.method === "GET" && url.pathname === "/health") {
@@ -1186,6 +1192,58 @@ async function handleAuthenticatedRequest(
   owner: OwnerSession,
   options: ServerOptions,
 ): Promise<void> {
+  if (url.pathname.startsWith("/api/second-brain/")) {
+    try {
+      let provider=secondBrainProviders.get(kernel);
+      if(!provider){provider=createJevSecondBrain({enabled:options.jevDisabled!==true,apiKey:options.jevApiKey,budget:kernel.jevBudget(owner)});secondBrainProviders.set(kernel,provider);}
+      if(request.method==="GET" && url.pathname==="/api/second-brain/jev/reallocation") {
+        json(response,200,await kernel.reviewJevReallocation(owner));return;
+      }
+      if(request.method==="POST" && url.pathname==="/api/second-brain/jev/reallocation") {
+        const body=await readJson(request);const targetId=String(body.targetId??"");
+        if(body.confirm!==true)throw new Error("Exact reviewed reallocation confirmation required.");
+        await kernel.reallocateModelBudgetToJev(owner,targetId,{approvalId:randomUUID(),action:"owner_funded_ceiling_change",targetId,approvedAt:new Date().toISOString(),ownerId:owner.id});
+        json(response,200,await kernel.jevBudgetStatus());return;
+      }
+      if(request.method==="POST" && url.pathname==="/api/second-brain/jev/evaluate") {
+        const body=await readJson(request);
+        if(body.approvePublicQuery!==true||typeof body.query!=="string")throw new Error("Approve public query disclosure before evaluation.");
+        const view=await kernel.readProjectBrief(owner,body.project,body.query);
+        await kernel.authorizeOwnerProjectInference(owner,view.project);
+        const candidates=view.records.filter(m=>m.projectEvidence.dataClass==="public"&&!view.conflicts.some(c=>c.id===m.id)).slice(0,8).map(m=>({id:m.id,project:view.project,digest:m.projectEvidence.contentDigest,text:m.statement,dataClass:"public" as const,freshUntil:m.projectEvidence.expiresAt??""}));
+        const result=await provider.rerank({principalId:owner.id,project:view.project,query:body.query,queryApprovedForExternal:true,candidates,canRead:r=>r.project===view.project&&candidates.some(c=>c.id===r.id&&c.digest===r.digest)});
+        json(response,200,{...result,budget:await kernel.jevBudgetStatus()});return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/second-brain/brief") {
+        json(response,200,await kernel.readProjectBrief(owner,url.searchParams.get("project"),url.searchParams.get("q")??""));return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/second-brain/notes") {
+        json(response,201,await kernel.captureProjectNote(owner,await readJson(request)));return;
+      }
+      if(request.method==="POST" && url.pathname==="/api/second-brain/import") {
+        const body=await readJson(request);
+        if(Object.keys(body).some(k=>!["project","kind","id","attempt"].includes(k)))throw new Error("Unsupported import field");
+        const input=body.kind==="commit"?{kind:"commit" as const,sha:String(body.id??"")}:
+          body.kind==="pull_request"?{kind:"pr" as const,number:Number(body.id)}:
+          body.kind==="workflow_run"?{kind:"workflow" as const,runId:Number(body.id),attempt:Number(body.attempt)}:null;
+        if(!input)throw new Error("Unsupported import kind");
+        const receipt=await kernel.importProjectGitHub(owner,body.project,input);
+        json(response,receipt.status==="complete"?200:502,{...receipt,message:receipt.status==="complete"?"Imported one source object. Jobs, artifacts, deployments and full acceptance are not checked.":"Refresh failed; existing evidence retained. Retry manually."});return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/second-brain/status") {
+        const status=await kernel.getStatus();
+        const receipts=(await kernel.inspectAudit()).filter(e=>e.type==="project_import_receipt").slice(-10).map(e=>e.data);
+        json(response,200,{productMode:options.productMode??"legacy",recentImports:receipts,providerMode:`Local search · Jev ${provider.status().reason} · model ${provider.status().model} · live qualification pending`,provider:provider.status(),jevBudget:await kernel.jevBudgetStatus(),
+          obligations:{jobs:status.jobs.map(j=>({id:j.id,objective:j.workCard.objective,status:j.status})),revenueJobs:status.revenuePilotJobs.map(j=>({id:j.id,status:j.status})),standingMandate:status.standingMandate,emergencyStopped:status.emergencyStopped,
+          note:"Legacy obligations are preserved. No new actions are started by capture, retrieval or handoff."}});return;
+      }
+      json(response,404,{error:"Unsupported second-brain operation."});return;
+    } catch (error) {
+      if(error instanceof PolicyDeniedError)throw error;
+      json(response,400,{error:"Second-brain request rejected. Check project, source, timestamps and supported fields; no completion is claimed."});return;
+    }
+  }
   if(url.pathname==="/api/website-maintenance/readiness" && request.method==="GET"){
     json(response,200,{mode:"CANARY_CANDIDATE",maximumNewRecurringCostUsd:0,commercialIntake:false,publishingConnected:false,notificationConnected:false,liveDemonstrationVerified:false,blockers:["PERSISTENT_PROJECT_PUBLISHER_REQUIRED","DELIVERY_ACCOUNT_REQUIRED","COMMERCIAL_SERVICE_AND_PAYMENT_BINDING_REQUIRED"]});return;
   }
@@ -1336,6 +1394,14 @@ async function routeSaraRequest(
   options: ServerOptions,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
+  if (options.productMode === "second_brain" && request.method === "POST") {
+    const allowed = url.pathname.startsWith("/api/second-brain/") || url.pathname === "/api/emergency-stop" || url.pathname === "/api/model-budget"
+      || /^\/api\/mutations\/[^/]+\/promote$/.test(url.pathname)
+      || /^\/api\/revenue-pilot\/(jobs|deliveries)\//.test(url.pathname)
+      || /^\/api\/public\/revenue-pilot\/intents\/[^/]+\/payment$/.test(url.pathname)
+      || url.pathname === "/api/autonomy/standing-mandate/revoke";
+    if(!allowed){json(response,423,{error:"This operation is inactive in second-brain mode. Existing obligations and protected recovery remain available."});return;}
+  }
   if (await handlePublicRequest(request, response, url, kernel, options)) return;
   if (await handlePublicDelivery(request, response, url, kernel, options)) return;
   if (await handleTelegramNicoProductionRequest({request, response, url, kernel, options})) return;

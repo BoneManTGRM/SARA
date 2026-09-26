@@ -134,3 +134,14 @@ test('fatal precedence is chronological, allows legacy source formatting and exc
 test('release fatal with omitted check retains only a bounded allowlisted public source line',()=>{
  for(const [source,expected] of [['sandbox/linux/services/credentials.cc:340',340],['credentials.cc(365)',365],['credentials.cc:10001',null],['/private/synthetic-secret.cc:340',null]] as const){const diagnostics=new JourneyBrowserStartupDiagnostics();diagnostics.append(Buffer.from('[100:100:FATAL:'+source+'] Check failed: . : Permission denied (13)'));const report=diagnostics.snapshot({exitCode:null,signal:'SIGABRT',spawnErrorCode:null});assert.equal(report.fatalSourceLine,expected);assert.equal(report.fatalOperation,null);assert.equal(report.fatalErrno,13);assert.equal(JSON.stringify(report).includes('synthetic-secret'),false);}
 });
+
+test('current published journey has an explicit v2 entry while v1 evidence remains unchanged',async()=>{
+ const {NICOS_CURRENT_JOURNEY_PROFILE}=await import('../src/software-journey-browser.ts');
+ assert.deepEqual(NICOS_CURRENT_JOURNEY_PROFILE.map(s=>[s.action,s.expected]),[
+  ['Observe World Map','World Map'],['Start my adventure','Robo Lab'],['Continue to the test chamber','Movement test'],
+  ['Forward','1'],['Right','2'],['Forward','3'],['Pass movement test','Scanner test'],
+ ]);
+ assert.equal(NICOS_CURRENT_JOURNEY_PROFILE[1]?.selector,'[data-testid="continue-world"]');
+ assert.equal(Object.isFrozen(NICOS_CURRENT_JOURNEY_PROFILE),true);
+ assert.equal(NICOS_JOURNEY_PROFILE[1]?.expected,'Robot Home');
+});

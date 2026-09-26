@@ -14,7 +14,7 @@ export function assertNicosJourneyQualification(value: unknown, requirePackaged 
   assert.equal(result.schemaVersion, 1);
   assert.equal(result.actor, 'SARA_RUNTIME');
   assert.equal(result.target, 'https://nicos-world.com/');
-  assert.equal(result.profile, 'nicos-movement-to-scanner-v1');
+  assert.ok(['nicos-movement-to-scanner-v1','nicos-movement-to-scanner-v2'].includes(result.profile));
   assert.equal(result.provenance, 'ISOLATED');
   assert.equal(result.assetProvenance, 'EXTERNAL_READ_ONLY');
   assert.equal(result.status, 'PASSED', `Actual browser qualification incomplete: ${result.failureCode}`);
@@ -23,7 +23,10 @@ export function assertNicosJourneyQualification(value: unknown, requirePackaged 
   assert.equal(result.resourceFailureCount, 0);
   assert.equal(result.servingRevision, null, 'No serving git attestation is implemented by this profile.');
   assert.ok(Number.isSafeInteger(result.deniedRequestCount) && result.deniedRequestCount >= 0);
-  const expected = [
+  const expected = result.profile==='nicos-movement-to-scanner-v2' ? [
+    ['Observe World Map','World Map'],['Start my adventure','Robo Lab'],['Continue to the test chamber','Movement test'],
+    ['Forward','1'],['Right','2'],['Forward','3'],['Pass movement test','Scanner test'],
+  ] : [
     ['Observe World Map', 'World Map'], ['Continue adventure', 'Robot Home'], ['Continue adventure', 'Robo Lab'],
     ['Continue to the test chamber', 'Movement test'], ['Forward', '1'], ['Right', '2'], ['Forward', '3'], ['Pass movement test', 'Scanner test'],
   ];

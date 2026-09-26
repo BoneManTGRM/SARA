@@ -1,0 +1,205 @@
+{
+  "baseline": "47b97caadb39172ae537d660964d0a23782d5d1a",
+  "candidate": "containing git commit",
+  "newSpendUsd": 0,
+  "paidProviderCalls": 0,
+  "logs": {
+    "artifacts/second-brain/red.log": {
+      "sha256": "c015cc831ce0fd3efb234f01522f09fbc04f2fec5c14fa4c6a26840283c06090",
+      "bytes": 1564
+    },
+    "artifacts/second-brain/green-memory.log": {
+      "sha256": "8ae7b3b3684b2a32308f77ddcad8f5e0f6839a3382137d3848d3715c678be7f3",
+      "bytes": 310
+    },
+    "artifacts/second-brain/full-verify.log": {
+      "sha256": "34944608c18bffee1844a5c3d27c91fc0b0fec894d4d0598fd0903c957f7df40",
+      "bytes": 254853
+    },
+    "artifacts/second-brain/full-verify-2.log": {
+      "sha256": "554f68c877c728a3c86f34e1c598bec5f5fedeefa43b2f4f2974f0f4a0ea9707",
+      "bytes": 269299
+    },
+    "artifacts/second-brain/verify-final.log": {
+      "sha256": "e3792cfbb136ec16a612081ec1906c2d4d949aa1e388e51ead4e7cfd5c9c3f71",
+      "bytes": 219818
+    },
+    "artifacts/second-brain/frozen-focused.log": {
+      "sha256": "5cb9feea05d8b835ec15682c69dc8984bd32dc2a40f8b0344db4f2d8a270535a",
+      "bytes": 5199
+    },
+    "artifacts/second-brain/frozen-verify.log": {
+      "sha256": "856b71ae35b66a5dd955339b7863ecf10eaba0b96ac75131e9a9246a39f1861c",
+      "bytes": 269698
+    },
+    "artifacts/second-brain/real-nico-import.json": {
+      "sha256": "61c4bba1f173a1e715f71e415d0dcd6b6dcfc997731e1c76588334df9648c425",
+      "bytes": 646
+    },
+    "artifacts/second-brain/real-nico-handoff.txt": {
+      "sha256": "5949c4f7d82c1beb9d04a2e9a4420bc8e38b0f6426d797e2b6981bf523956b77",
+      "bytes": 4213
+    },
+    "artifacts/second-brain/conflict-handoff-red.log": {
+      "sha256": "3516ec31442026461da97e13852bb0dc5d08b847de7dfdebbb1437a4e249d2aa",
+      "bytes": 1393
+    },
+    "artifacts/second-brain/conflict-handoff-red-assertion.log": {
+      "sha256": "c85e4c15ce02f5221278234ca65d10d28838c48fee501c9117b67cc36920e3c6",
+      "bytes": 1614
+    },
+    "artifacts/second-brain/conflict-focused.log": {
+      "sha256": "093c6badb5b2955567ac3bdf06fdf69c46087077b53fe4f384e0e92b11af94b1",
+      "bytes": 5305
+    },
+    "artifacts/second-brain/conflict-verify.log": {
+      "sha256": "eb61024fa5f14c0fd4438086aeea0869bba9560848dff451d6b30a0f31d0c87d",
+      "bytes": 269616
+    },
+    "artifacts/second-brain/nontermination-recheck.log": {
+      "sha256": "5d8a6e08c2a6408acbbf958d3377bc8c4c0cf014444b7ad3a425b7ab4aea0c03",
+      "bytes": 230
+    },
+    "artifacts/second-brain/frozen-eval20.json": {
+      "sha256": "aab8e9a1cfdc8320c8663dbf8171df8716177216e45f8b7044044011a75c7ac5",
+      "bytes": 10672
+    },
+    "artifacts/second-brain/current-journey-red.log": {
+      "sha256": "66e874800f27c88cc64795e09a3ed1e0c6c39b989c107ac84f2c7ee58176a8ae",
+      "bytes": 2718
+    },
+    "artifacts/second-brain/current-journey-green.log": {
+      "sha256": "d5205012fe62e20d53ecaa43584f61616c135273fa95d18e361e6e3072940b74",
+      "bytes": 8355
+    },
+    "artifacts/second-brain/current-journey-receipts.log": {
+      "sha256": "1a574892f06ba270d380604832a627fe410a187b62b8a7073f2a06b11b294669",
+      "bytes": 1201
+    },
+    "artifacts/second-brain/release-verify.log": {
+      "sha256": "07d6e52d8d38688c1dbda54d4c705541b592e2ba5ab1d30e9a4fe2d4a203c455",
+      "bytes": 270019
+    },
+    "artifacts/second-brain/release-typecheck.log": {
+      "sha256": "7248f3642ce6e14eb1ffd990507efe7d8b6be8134a31197d089a18b1076a173c",
+      "bytes": 139
+    },
+    "artifacts/second-brain/ci-initial.log": {
+      "sha256": "c7922bd25d49dfeb78676bdb8286e43d672ab5558e55216044921a1ff667e895",
+      "bytes": 17746
+    },
+    "artifacts/second-brain/ci-keyboard-red.log": {
+      "sha256": "1b04aba11ef10011cc7a04600ed6454f5b01eff45c677b39ef8ebc9205e70c78",
+      "bytes": 16593
+    },
+    "artifacts/second-brain/auth-focus-focused.log": {
+      "sha256": "e149c7b4d8ada44dda2df1f7fdb2393c68462c03b89c90ed4944e458aacc7a31",
+      "bytes": 1728
+    },
+    "artifacts/second-brain/auth-focus-verify.log": {
+      "sha256": "6da345f54a4ffb0ed20e4aa1847ed6d13c6958cda01c120c91a94d74c1e1ef62",
+      "bytes": 269965
+    },
+    "artifacts/second-brain/ci-enter-driver-red.log": {
+      "sha256": "66024079df9a73cc5581967ed98301e088119bb2d31d93b2be81d7678104acd3",
+      "bytes": 16623
+    },
+    "artifacts/second-brain/ci-entry-label-red.log": {
+      "sha256": "b13f7b1cedd7e191fe53e9769ee36ccb629fe52b34512ca6385c2c2a52a9960e",
+      "bytes": 17758
+    },
+    "artifacts/second-brain/keyboard-driver-typecheck.log": {
+      "sha256": "7248f3642ce6e14eb1ffd990507efe7d8b6be8134a31197d089a18b1076a173c",
+      "bytes": 139
+    },
+    "artifacts/second-brain/observed-entry-focused.log": {
+      "sha256": "d6ba4d5ee49e32ee00c955990e177be248d55fac402521499160fbd6bafeb4a6",
+      "bytes": 3285
+    },
+    "artifacts/second-brain/observed-entry-verify.log": {
+      "sha256": "2205feffb9ff1e67f5f0ac1b26bd6c94f269aa7ad1f5d394179ef97e870c1a46",
+      "bytes": 269994
+    }
+  },
+  "phoneStatusFollowup": {
+    "parentRemote": "fc99dfb04d650c1b5cf673facae776864cee9923",
+    "candidate": "containing commit",
+    "focused": {
+      "command": "node --import tsx --test tests/jev-owner-message.test.ts tests/second-brain-http.test.ts tests/dashboard-capability-inventory.test.ts",
+      "exitCode": 0,
+      "passed": 5
+    },
+    "fullGate": {
+      "command": "npm run verify",
+      "exitCode": 0,
+      "passed": 1567,
+      "failed": 0,
+      "proofs": "all passed, HTTP14/14"
+    },
+    "actualIphoneTested": false,
+    "browserQualification": "pending exact-head CI",
+    "logs": {
+      "artifacts/second-brain/jev-owner-red.log": {
+        "sha256": "df1eefe03bd81a5408b2b4b5c40f4fb29d6a0dfd751f498eb52ee4dc02853628",
+        "bytes": 857
+      },
+      "artifacts/second-brain/jev-owner-green-final.log": {
+        "sha256": "0e7d5c4e2947940ccc525e8fe102273ab024d2d6f9bd8386a63c4851581ea461",
+        "bytes": 659
+      },
+      "artifacts/second-brain/jev-owner-verify-final.log": {
+        "sha256": "7cff4ef50489a07e8dae5749b08ab55d3796c73978fc1fabb4960b8a131de1d8",
+        "bytes": 270791
+      }
+    }
+  },
+  "sourceContextFollowup": {
+    "parentRemote": "d0a2f5c2b70eb11dd32150de76a80b35c25779cc",
+    "candidate": "containing commit",
+    "model": "jev-1.13.0",
+    "questionVersion": "sara-relevance-v3",
+    "focused": {
+      "command": "node --import tsx --test tests/second-brain*.test.ts tests/jev*.test.ts",
+      "exitCode": 0,
+      "passed": 63
+    },
+    "fullGate": {
+      "command": "npm run verify",
+      "exitCode": 0,
+      "passed": 1577,
+      "failed": 0,
+      "proofs": "all passed, HTTP14/14"
+    },
+    "fixtureMetadataCorrection": "frozenAt corrected to observed file creation mtime after full gate; conditions unchanged; excerpt tests3/3 and evaluation rerun; exact final CI still required",
+    "logs": {
+      "artifacts/second-brain/context-red.log": {
+        "sha256": "052d26cebb47b1be82becf0ed775904badae554b1502cc8c82bde86e86034809",
+        "bytes": 9312
+      },
+      "artifacts/second-brain/context-upgrade-red.log": {
+        "sha256": "7978a3404e8ac26fa898bbfd07ed83a6f3dc73e042e8375de90d9b71fd1e993b",
+        "bytes": 1057
+      },
+      "artifacts/second-brain/context-focused-final.log": {
+        "sha256": "7465801a0d02a6c5d4041eb2ef1ae8c7b6327f27851a901606c20780ad285320",
+        "bytes": 6586
+      },
+      "artifacts/second-brain/context-verify-final.log": {
+        "sha256": "095678bb2e0d35483db136ae85d2eef8589bf5b0ea0b2ce1b479718cfd367069",
+        "bytes": 271713
+      },
+      "artifacts/second-brain/context-evaluation-final.json": {
+        "sha256": "134a257d9f8254d766f3b9b9f1c86b910170dca9cbf8d427d6295973a3f935b8",
+        "bytes": 36558
+      },
+      "artifacts/second-brain/context-search-differential.json": {
+        "sha256": "e1d356eb22ebe5a8b217d47a29a7551dd45a5d558877d0ec869c74a6ef8fae7c",
+        "bytes": 10676
+      },
+      "artifacts/second-brain/context-fixture-metadata-check.log": {
+        "sha256": "8448d811901f99dd3016113aebd280c78310c76898069a5a7266870306171b1e",
+        "bytes": 396
+      }
+    }
+  }
+}

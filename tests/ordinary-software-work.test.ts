@@ -92,3 +92,15 @@ test('crash after source receipt resumes the existing plan without recollecting 
  assert.equal(result.status,'COMPLETE');assert.deepEqual(calls,{source:1,browser:1});assert.equal(result.receipts.length,5);
  assert.equal((await restored.inspectAudit()).filter(e=>e.type==='owner_work_received').length,1);
 }));
+
+test('v2 qualification requires its complete current route and rejects a v1 receipt relabeled as v2',()=>withKernel(async({runtime})=>{
+ const current=[['Observe World Map','World Map'],['Start my adventure','Robo Lab'],['Continue to the test chamber','Movement test'],['Forward','1'],['Right','2'],['Forward','3'],['Pass movement test','Scanner test']];
+ for(const mixed of [false,true]) {
+  const directory=await mkdtemp(join(tmpdir(),'sara-v2-route-'));
+  try{
+   const kernel=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(ownerToken),softwareRuntime:{...runtime,testJourney:async()=>({...await runtime.testJourney() as object,profile:'nicos-movement-to-scanner-v2',steps:(mixed?stepPairs:current).map(([action,expected])=>({action,expected,observed:expected,passed:true}))})}});
+   const result=await kernel.executeOwnerMessage(kernel.authenticateOwnerToken(ownerToken),{requestId:'synthetic-v2-contract',text:request});
+   assert.equal(result.status,mixed?'BLOCKED':'COMPLETE');
+  }finally{await rm(directory,{recursive:true,force:true});}
+ }
+}));

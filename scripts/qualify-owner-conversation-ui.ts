@@ -67,6 +67,52 @@ try{
  await until("document.querySelector('#owner-dialog').open");
  await evaluate(`document.querySelector('#token').value=${JSON.stringify(credential)};document.querySelector('#owner-form button[type=submit]').click()`);
  await until("document.body.dataset.owner==='connected' && !document.querySelector('#owner-work-fields').disabled");
+ // The new primary workspace is qualified before opening preserved legacy workflows.
+ await until("!document.getElementById('brain-fields').disabled && !document.getElementById('owner-dialog').open");
+ const secondBrainScreenshots:{width:number;path:string;sha256:string}[]=[];
+ for(const width of [1280,390]) {
+  await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
+  assert.equal(await evaluate("document.getElementById('brain-legacy').open"),false);
+  await evaluate(`document.getElementById('brain-note').value='Synthetic continuity blocker ${width}';document.getElementById('brain-kind').value='blocker';document.querySelector('#brain-capture button').click()`);
+  await until(`document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker ${width}')`);
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Second brain fits phone viewport');
+  assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('reported')"),true);
+  await evaluate("document.getElementById('brain-project').value='sara';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
+  await until("document.getElementById('brain-handoff').value.includes('SARA / SARA')");
+  assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')"),false);
+  await evaluate("document.getElementById('brain-project').value='nico';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
+  await until("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')");
+  await evaluate("document.getElementById('brain-question').focus()");
+  await send('Input.insertText',{text:'continuity'});
+  assert.equal(await evaluate("document.activeElement.id"),'brain-question','Phone search accepts keyboard focus');
+  const previousHandoff=await evaluate("document.getElementById('brain-handoff').value");
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r',unmodifiedText:'\r'});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  await until(`document.getElementById('brain-handoff').value!==${JSON.stringify(previousHandoff)} && document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')`);
+  await evaluate("document.getElementById('brain-copy').click()");
+  await until("/Handoff copied|Select and copy/.test(document.getElementById('brain-status').textContent)");
+  // Private synthetic notes cannot become provider candidates; no key is wired into this server.
+  await evaluate("document.getElementById('brain-jev').closest('details').open=true;document.getElementById('brain-query-public').checked=true;document.getElementById('brain-jev').click()");
+  await until("document.getElementById('brain-jev-result').textContent.includes('No current public records are eligible for Jev.')");
+  assert.equal(await evaluate("document.getElementById('brain-jev-result').textContent.includes('Local search')"),true);
+  assert.equal(await evaluate("document.getElementById('brain-jev-details').closest('details').open"),false,'Experimental details start collapsed');
+  await evaluate("document.getElementById('brain-jev-details').closest('details').querySelector('summary').click()");
+  assert.equal(await evaluate("JSON.parse(document.getElementById('brain-jev-details').textContent).mode"),'local_search');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Expanded Jev details fit the phone');
+  await evaluate("document.getElementById('brain-project').value='sara';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
+  await until("document.getElementById('brain-handoff').value.includes('SARA / SARA')");
+  assert.equal(await evaluate("document.getElementById('brain-jev-details').textContent"),'','Project change clears experimental details');
+  await evaluate("document.getElementById('brain-project').value='nico';document.getElementById('brain-project').dispatchEvent(new Event('change'));document.getElementById('brain-jev-details').closest('details').open=false");
+  await until("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')");
+  await evaluate("document.getElementById('brain-title').scrollIntoView()");
+  const brainShot=Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64');
+  const brainShotPath=`artifacts/owner-software-runtime-second-brain-${width}.png`;
+  await mkdir('artifacts',{recursive:true});await writeFile(brainShotPath,brainShot);
+  secondBrainScreenshots.push({width,path:brainShotPath,sha256:sha256(brainShot)});
+  await evaluate("document.getElementById('brain-question').value=''");
+ }
+ await evaluate("document.querySelector('#brain-legacy > summary').click()");
+ assert.equal(await evaluate("document.getElementById('brain-legacy').open"),true,'Legacy operations remain reachable through disclosure');
  const screenshots:string[]=[];
  for(const width of [1280,390]){
   await send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:1,mobile:width===390});
@@ -284,7 +330,7 @@ try{
  assert.equal((await kernel.learningCampaignStatus()).campaign?.reserved,3);
  assert.deepEqual(await ProceduralKnowledgeStore.inspectExisting(legacy.directory),knowledgeAfterRepair);
  repairReport.replayVerified=true;await writeFile(repairReportPath,JSON.stringify(repairReport,null,2)+'\n',{mode:0o600});
- console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:15,executedReceipts:qualifiedCount+5+repairReceipts.length,isolatedRepairQualification:repairReport,repairReportPath,preservedBaseline:{ordinaryRequests:13,executedReceipts:qualifiedCount},softwareRuntimeQualification:softwareReport,softwareReportPath,defectNoFailure:true,isolatedReproduction:true,defectReplay:true,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
+ console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:15,executedReceipts:qualifiedCount+5+repairReceipts.length,isolatedRepairQualification:repairReport,repairReportPath,preservedBaseline:{ordinaryRequests:13,executedReceipts:qualifiedCount},softwareRuntimeQualification:softwareReport,softwareReportPath,defectNoFailure:true,isolatedReproduction:true,defectReplay:true,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,secondBrainScreenshots,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
  socket?.close();chrome.kill('SIGKILL');
