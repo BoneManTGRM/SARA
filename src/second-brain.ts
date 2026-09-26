@@ -1,3 +1,4 @@
+import {projectTracking} from './second-brain-tracking.ts';
 import {CORE_MEMORY_SEEDS} from "./memory-fabric.ts";
 import {canonicalJson,sha256} from './canonical.ts';
 import type {MemoryRecord} from './types.ts';
@@ -31,14 +32,14 @@ export function safeSource(value:unknown):string {
  return url.href;
 }
 export function noteInput(input:Record<string,unknown>,now:string):Omit<EvidenceMemory,'id'> {
- const allowed=new Set(['project','text','source','observedAt','kind','supersedes','conflictsWith']);
+ const allowed=new Set(['project','text','source','observedAt','kind','supersedes','conflictsWith','relatedTo']);
  if(Object.keys(input).some(k=>!allowed.has(k)))throw new Error('Unsupported note field.');
  const project=projectId(input.project),statement=text(input.text,8000,'note');
  const kind=input.kind??'note';if(!['note','decision','blocker','goal','constraint','next_action','approval'].includes(String(kind)))throw new Error('Invalid note kind.');
  const ids=(value:unknown)=>{if(value===undefined)return [];if(!Array.isArray(value)||value.length>12||value.some(id=>typeof id!=='string'||!/^memory-[a-f0-9]{64}$/.test(id)))throw new Error('Invalid evidence relationships.');return [...new Set(value)] as string[];};
  const observedAt=timestamp(input.observedAt);
  if(observedAt&&Date.parse(observedAt)>Date.parse(now)+60_000)throw new Error('Observation cannot be in the future.');
- return {category:'working',statement,source:safeSource(input.source),scope:project,observedAt:observedAt??'',lastValidatedAt:'',confidence:0,verification:'inferred',dependencies:[],status:'active',supersedes:ids(input.supersedes),tags:['second-brain'],projectEvidence:{schemaVersion:1,project,kind:kind as ProjectEvidence['kind'],verification:'reported',dataClass:'owner_private',contentDigest:sha256(statement),ingestedAt:now,observedAt,lastVerifiedAt:null,expiresAt:null,stage:null,outcome:null,repository:null,revision:null,pr:null,runId:null,runAttempt:null,artifactId:null,deploymentId:null,environment:null,claimKey:null,conflictsWith:ids(input.conflictsWith)}};
+ return {category:'working',statement,source:safeSource(input.source),scope:project,observedAt:observedAt??'',lastValidatedAt:'',confidence:0,verification:'inferred',dependencies:ids(input.relatedTo),status:'active',supersedes:ids(input.supersedes),tags:['second-brain'],projectEvidence:{schemaVersion:1,project,kind:kind as ProjectEvidence['kind'],verification:'reported',dataClass:'owner_private',contentDigest:sha256(statement),ingestedAt:now,observedAt,lastVerifiedAt:null,expiresAt:null,stage:null,outcome:null,repository:null,revision:null,pr:null,runId:null,runAttempt:null,artifactId:null,deploymentId:null,environment:null,claimKey:null,conflictsWith:ids(input.conflictsWith)}};
 }
 export function evidenceId(input:Omit<EvidenceMemory,'id'>):string {
  const e=input.projectEvidence;
@@ -57,8 +58,9 @@ export function acceptsEvidence(memory:EvidenceMemory,target:{stage:Stage;reposi
  &&(target.runId===undefined||target.runId===e.runId)&&(target.runAttempt===undefined||target.runAttempt===e.runAttempt)
  &&(target.environment===undefined||target.environment===e.environment)&&(target.deploymentId===undefined||target.deploymentId===e.deploymentId);
 }
-export function projectView(memories:readonly MemoryRecord[],project:Project,query='',now=new Date()) {
+export function projectView(memories:readonly MemoryRecord[],project:Project,query='',now=new Date(),sinceInput:unknown=null) {
  projectId(project);if(query.length>300)throw new Error('Question exceeds 300 characters.');
+ const since=timestamp(sinceInput);if(since&&Date.parse(since)>now.getTime())throw new Error('Change interval cannot start in the future.');
  const all=memories.filter((m):m is EvidenceMemory=>m.scope===project&&m.projectEvidence?.project===project);
  const superseded=new Set(all.flatMap(m=>m.supersedes??[]));
  // Only observations from the same source claim can form an automatic history chain.
@@ -68,6 +70,7 @@ export function projectView(memories:readonly MemoryRecord[],project:Project,que
  const conflicts=new Set<string>();
  for(const a of current)for(const b of current){if(a.id===b.id)continue;const x=a.projectEvidence,y=b.projectEvidence;
  if(x.conflictsWith.includes(b.id)||y.conflictsWith.includes(a.id)||(x.claimKey&&x.claimKey===y.claimKey&&x.outcome!==y.outcome&&x.observedAt===y.observedAt)){conflicts.add(a.id);conflicts.add(b.id);}}
+ const tracking=projectTracking(all,current,conflicts,superseded,now,since);
  const words=query.toLowerCase().match(/[\p{L}\p{N}]+/gu)??[];
  const ranked=current.map(m=>({m,score:words.filter(w=>(m.statement+' '+m.projectEvidence.kind+' '+(m.projectEvidence.stage??'')).toLowerCase().includes(w)).length})).filter(x=>!words.length||x.score>0).sort((a,b)=>b.score-a.score||(b.m.projectEvidence.observedAt??'').localeCompare(a.m.projectEvidence.observedAt??'')||a.m.id.localeCompare(b.m.id));
  const records=ranked.slice(0,30).map(x=>structuredClone(x.m));
@@ -91,10 +94,11 @@ export function projectView(memories:readonly MemoryRecord[],project:Project,que
  for(const m of excerptCandidates.slice(0,8)) {
   const e=m.projectEvidence;
   const entry=`\n\n[${m.id}] ${conflicts.has(m.id)?'CONFLICT ':''}${e.verification} / ${e.stage??e.kind}\n${m.statement.slice(0,500)}${m.statement.length>500?'… [excerpt]':''}\nSource: ${m.source}\nObserved: ${e.observedAt??'unknown'}; checked: ${e.lastVerifiedAt??'not verified'}; ingested: ${e.ingestedAt}\nIdentity: ${canonicalJson({repository:e.repository,revision:e.revision,pr:e.pr,runId:e.runId,runAttempt:e.runAttempt,deploymentId:e.deploymentId,environment:e.environment})}\nDigest: ${e.contentDigest}`;
-  if(handoff.length+entry.length>15500)break;
+  if(handoff.length+entry.length>(since?12000:15500))break;
   handoff+=entry;included++;
  }
+ if(since){handoff+=`\n\nRecords saved since ${since}: ${tracking.changes.total}. ${tracking.changes.notice}`;let changeCount=0;for(const m of tracking.changes.items.slice(0,3)){const entry=`\n${m.id}: ${m.kind}, ${m.state}; saved ${m.ingestedAt}; observed ${m.observedAt??'unknown'}; Source: ${m.source}`;if(handoff.length+entry.length>15300)break;handoff+=entry;changeCount++;}handoff+=`\nShowing ${changeCount}/${tracking.changes.total} change identifiers; open What changed for complete source details.`;}
  handoff+=`\n\nIncluded ${included}/${excerptCandidates.length} conflict and matching source excerpts. Open Sources and History in SARA for complete conflict groups and additional matches.`;
 
- return {project,asOf:now.toISOString(),mode:'local_search' as const,records,anchors:structuredClone(anchors),conflicts:all.filter(m=>conflicts.has(m.id)),history:all.filter(m=>superseded.has(m.id)||stale(m)).map(m=>({id:m.id,source:m.source,observedAt:m.projectEvidence.observedAt,stale:stale(m),superseded:superseded.has(m.id)})),totalMatching:ranked.length,totalRecords:all.length,handoff};
+ return {project,tracking,asOf:now.toISOString(),mode:'local_search' as const,records,anchors:structuredClone(anchors),conflicts:all.filter(m=>conflicts.has(m.id)),history:all.filter(m=>superseded.has(m.id)||stale(m)).map(m=>({id:m.id,source:m.source,observedAt:m.projectEvidence.observedAt,stale:stale(m),superseded:superseded.has(m.id)})),totalMatching:ranked.length,totalRecords:all.length,handoff};
 }

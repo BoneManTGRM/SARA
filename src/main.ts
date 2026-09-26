@@ -1,3 +1,4 @@
+import {jevEnvironment} from './jev-contract.ts';
 import {startupPolicy} from './second-brain-mode.ts';
 import {collectSoftwareSource} from './software-source-reader.ts';
 import {runNicosMovementJourney,readSoftwareBrowserConfigurationIdentity} from './software-journey-browser.ts';
@@ -180,8 +181,7 @@ const websiteMaintenance=productPolicy.websiteMaintenance ? new WebsiteMaintenan
 console.log(`SARA product startup policy ${JSON.stringify({...productPolicy,customerFulfillment:"Existing confirmed payments and authorized jobs continue under existing mandate, budgets and review gates; this mode creates no new mandate or scout."})}`);
 export const server = createSaraServer(kernel, {
   productMode: productPolicy.mode,
-  ...(process.env.TYPESAFE_API_KEY ? {jevApiKey:process.env.TYPESAFE_API_KEY} : {}),
-  jevDisabled: process.env.SARA_JEV_DISABLED === "true",
+  ...jevEnvironment(process.env),
   learningRuntimeStatus: () => ({enabled: learningWorker !== null, providerConfigured: Boolean(process.env.CLOUDFLARE_ACCOUNT_ID && process.env.CLOUDFLARE_API_TOKEN && process.env.SARA_WORKERS_PLAN === "free")}),
   ownerTokenSha256,
   stateDirectory,

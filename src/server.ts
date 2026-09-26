@@ -1,3 +1,4 @@
+import type {JevProvider} from './jev-contract.ts';
 import { createJevSecondBrain } from "./jev-second-brain.ts";
 const secondBrainProviders = new WeakMap<SaraKernel,ReturnType<typeof createJevSecondBrain>>();
 import { secondBrainWorkspace } from "./second-brain-ui.ts";
@@ -51,6 +52,7 @@ export type SaraRuntimeStatus = {
 
 export type ServerOptions = {
   productMode?: "second_brain" | "legacy";
+  jevProvider?: JevProvider;
   jevApiKey?: string;
   jevDisabled?: boolean;
   learningRuntimeStatus?: () => { enabled: boolean; providerConfigured: boolean };
@@ -1195,15 +1197,15 @@ async function handleAuthenticatedRequest(
   if (url.pathname.startsWith("/api/second-brain/")) {
     try {
       let provider=secondBrainProviders.get(kernel);
-      if(!provider){provider=createJevSecondBrain({enabled:options.jevDisabled!==true,apiKey:options.jevApiKey,budget:kernel.jevBudget(owner)});secondBrainProviders.set(kernel,provider);}
+      if(!provider){provider=createJevSecondBrain({provider:options.jevProvider,enabled:options.jevDisabled!==true,apiKey:options.jevApiKey,budget:kernel.jevBudget(owner,options.jevProvider)});secondBrainProviders.set(kernel,provider);}
       if(request.method==="GET" && url.pathname==="/api/second-brain/jev/reallocation") {
-        json(response,200,await kernel.reviewJevReallocation(owner));return;
+        json(response,200,await kernel.reviewJevReallocation(owner,options.jevProvider));return;
       }
       if(request.method==="POST" && url.pathname==="/api/second-brain/jev/reallocation") {
         const body=await readJson(request);const targetId=String(body.targetId??"");
         if(body.confirm!==true)throw new Error("Exact reviewed reallocation confirmation required.");
-        await kernel.reallocateModelBudgetToJev(owner,targetId,{approvalId:randomUUID(),action:"owner_funded_ceiling_change",targetId,approvedAt:new Date().toISOString(),ownerId:owner.id});
-        json(response,200,await kernel.jevBudgetStatus());return;
+        await kernel.reallocateModelBudgetToJev(owner,targetId,{approvalId:randomUUID(),action:"owner_funded_ceiling_change",targetId,approvedAt:new Date().toISOString(),ownerId:owner.id},options.jevProvider);
+        json(response,200,await kernel.jevBudgetStatus(options.jevProvider));return;
       }
       if(request.method==="POST" && url.pathname==="/api/second-brain/jev/evaluate") {
         const body=await readJson(request);
@@ -1212,11 +1214,11 @@ async function handleAuthenticatedRequest(
         await kernel.authorizeOwnerProjectInference(owner,view.project);
         const candidates=view.records.filter(m=>m.projectEvidence.dataClass==="public"&&!view.conflicts.some(c=>c.id===m.id)).slice(0,8).map(m=>({id:m.id,project:view.project,digest:m.projectEvidence.contentDigest,text:m.statement,dataClass:"public" as const,freshUntil:m.projectEvidence.expiresAt??""}));
         const result=await provider.rerank({principalId:owner.id,project:view.project,query:body.query,queryApprovedForExternal:true,candidates,canRead:r=>r.project===view.project&&candidates.some(c=>c.id===r.id&&c.digest===r.digest)});
-        json(response,200,{...result,budget:await kernel.jevBudgetStatus()});return;
+        json(response,200,{...result,budget:await kernel.jevBudgetStatus(options.jevProvider)});return;
       }
 
       if (request.method === "GET" && url.pathname === "/api/second-brain/brief") {
-        json(response,200,await kernel.readProjectBrief(owner,url.searchParams.get("project"),url.searchParams.get("q")??""));return;
+        json(response,200,await kernel.readProjectBrief(owner,url.searchParams.get("project"),url.searchParams.get("q")??"",url.searchParams.get("since")));return;
       }
       if (request.method === "POST" && url.pathname === "/api/second-brain/notes") {
         json(response,201,await kernel.captureProjectNote(owner,await readJson(request)));return;
@@ -1234,7 +1236,7 @@ async function handleAuthenticatedRequest(
       if (request.method === "GET" && url.pathname === "/api/second-brain/status") {
         const status=await kernel.getStatus();
         const receipts=(await kernel.inspectAudit()).filter(e=>e.type==="project_import_receipt").slice(-10).map(e=>e.data);
-        json(response,200,{productMode:options.productMode??"legacy",recentImports:receipts,providerMode:`Local search · Jev ${provider.status().reason} · model ${provider.status().model} · live qualification pending`,provider:provider.status(),jevBudget:await kernel.jevBudgetStatus(),
+        json(response,200,{productMode:options.productMode??"legacy",recentImports:receipts,providerMode:`Local search · Jev via ${provider.status().provider}: ${provider.status().reason} · model ${provider.status().model} · live qualification pending`,provider:provider.status(),jevBudget:await kernel.jevBudgetStatus(options.jevProvider),
           obligations:{jobs:status.jobs.map(j=>({id:j.id,objective:j.workCard.objective,status:j.status})),revenueJobs:status.revenuePilotJobs.map(j=>({id:j.id,status:j.status})),standingMandate:status.standingMandate,emergencyStopped:status.emergencyStopped,
           note:"Legacy obligations are preserved. No new actions are started by capture, retrieval or handoff."}});return;
       }

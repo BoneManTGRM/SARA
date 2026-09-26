@@ -77,9 +77,27 @@ try{
   await until(`document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker ${width}')`);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Second brain fits phone viewport');
   assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('reported')"),true);
+  await until(`document.getElementById('brain-tracking').textContent.includes('Synthetic continuity blocker ${width}')`);
+  assert.equal(await evaluate("document.getElementById('brain-tracking').textContent.includes('authorization not established')"),true);
+  await evaluate("document.getElementById('brain-change-panel').open=true;document.getElementById('brain-last-day').click()");
+  await until(`document.getElementById('brain-changes').textContent.includes('Synthetic continuity blocker ${width}')`);
+  await until("document.getElementById('brain-handoff').value.includes('Records saved since')");
+  await evaluate("document.querySelector('#brain-tracking details').open=true;document.querySelector('#brain-tracking details button').click()");
+  assert.equal(await evaluate("Boolean(document.getElementById('brain-related').value)"),true);
+  await evaluate(`document.getElementById('brain-note').value='Synthetic linked decision ${width}';document.getElementById('brain-kind').value='decision';document.querySelector('#brain-capture button').click()`);
+  await until(`document.getElementById('brain-tracking').textContent.includes('Synthetic linked decision ${width}')`);
+  assert.equal(await evaluate("document.documentElement.scrollWidth<=window.innerWidth+1"),true,'Expanded tracking fits phone');
+  await evaluate("document.getElementById('brain-note').value='PRIVATE UNSAVED DRAFT';document.getElementById('brain-question').value='PRIVATE QUERY';document.getElementById('brain-import-id').value='PRIVATE TARGET';document.getElementById('brain-attempt').value='2'");
+
   await evaluate("document.getElementById('brain-project').value='sara';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
   await until("document.getElementById('brain-handoff').value.includes('SARA / SARA')");
   assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')"),false);
+  assert.equal(await evaluate("document.getElementById('brain-tracking').textContent.includes('Synthetic linked decision')"),false);
+  assert.equal(await evaluate("document.getElementById('brain-changes').textContent.includes('Synthetic continuity blocker')"),false);
+  assert.equal(await evaluate("document.getElementById('brain-related').value"),'');
+  assert.equal(await evaluate("document.getElementById('brain-note').value"),'');
+  for(const field of ['brain-question','brain-import-id','brain-attempt'])assert.equal(await evaluate(`document.getElementById('${field}').value`),'','Project switch clears '+field);
+
   await evaluate("document.getElementById('brain-project').value='nico';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
   await until("document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')");
   await evaluate("document.getElementById('brain-question').focus()");
@@ -330,6 +348,10 @@ try{
  assert.equal((await kernel.learningCampaignStatus()).campaign?.reserved,3);
  assert.deepEqual(await ProceduralKnowledgeStore.inspectExisting(legacy.directory),knowledgeAfterRepair);
  repairReport.replayVerified=true;await writeFile(repairReportPath,JSON.stringify(repairReport,null,2)+'\n',{mode:0o600});
+ await evaluate("document.getElementById('brain-note').value='PRIVATE LOGOUT DRAFT';document.getElementById('brain-question').value='PRIVATE QUERY';document.getElementById('brain-import-id').value='PRIVATE TARGET';document.getElementById('brain-attempt').value='2';document.getElementById('connect').click()");
+ await until("document.body.dataset.owner!=='connected' && document.getElementById('brain-fields').disabled");
+ for(const field of ['brain-note','brain-question','brain-import-id','brain-attempt','brain-related','brain-since','brain-handoff'])assert.equal(await evaluate(`document.getElementById('${field}').value`),'','Logout clears '+field);
+ assert.equal(await evaluate("document.getElementById('brain-tracking').textContent"),'','Logout clears tracking');
  console.log(JSON.stringify({status:'VERIFIED',provenance:'ISOLATED',ownerInterface:'actual served dashboard with production theme and activity',viewports:[1280,390],ordinaryRequests:15,executedReceipts:qualifiedCount+5+repairReceipts.length,isolatedRepairQualification:repairReport,repairReportPath,preservedBaseline:{ordinaryRequests:13,executedReceipts:qualifiedCount},softwareRuntimeQualification:softwareReport,softwareReportPath,defectNoFailure:true,isolatedReproduction:true,defectReplay:true,ownerExpenseForm:true,expenseReplay:true,syntheticUnpaidJobExpenseUsd:0.25,durableCommunicationReuse:true,exactRetryBoundaryVisible:true,preservedLearningReservations:3,secondBrainScreenshots,screenshotDigests:screenshots,actualCashMicroUsd:0,productionAcceptance:false}));
  for(const p of pending.values()){clearTimeout(p.timer);p.reject(new Error('Fixture closed'));}pending.clear();
 }finally{
