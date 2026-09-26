@@ -44,3 +44,6 @@ Final local release gate after the v2 repair: `npm run verify` exit 0, 1,559/1,5
 
 
 Keyboard CI36248311227/job108421515665 on425873f caught the authenticated modal retaining focus in the token field while legacy inventories loaded. Repair closes the modal immediately after successful authenticated /api/status, before secondary refreshes; failed authentication still returns before closing/unlocking. The browser proof waits for modal closure and an actually refreshed handoff after Enter. Focused auth16/16 and full verify1,559/1,559 plus all proofs passed locally (exit0). This failed CI is retained; it does not qualify the revised candidate. No production changes.
+
+
+The next CI36248638881/job108422399616 passed the focus assertion, then timed out waiting for Enter submission. The raw protocol test event omitted Enter's generated carriage-return text (Puppeteer's official USKeyboardLayout maps Enter to text `\\r`). The qualification now sends both key identity and generated text, retaining the assertion that the handoff must actually refresh. This is a test-driver correction, not a weaker assertion or a browser product success claim. Application sources are unchanged from the last locally passing1,559-test gate; final exact-candidate CI must still pass.

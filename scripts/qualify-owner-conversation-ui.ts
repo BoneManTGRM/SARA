@@ -86,7 +86,7 @@ try{
   await send('Input.insertText',{text:'continuity'});
   assert.equal(await evaluate("document.activeElement.id"),'brain-question','Phone search accepts keyboard focus');
   const previousHandoff=await evaluate("document.getElementById('brain-handoff').value");
-  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13,text:'\r',unmodifiedText:'\r'});
   await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
   await until(`document.getElementById('brain-handoff').value!==${JSON.stringify(previousHandoff)} && document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker')`);
   await evaluate("document.getElementById('brain-copy').click()");
