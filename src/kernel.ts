@@ -1,5 +1,6 @@
 import {jevContract,type JevProvider} from './jev-contract.ts';
 import { importGitHubEvidence, githubContextPredecessors, type GitHubImportInput } from "./second-brain-github.ts";
+import { importBountyIssue, bountyBoard, bountyTarget } from "./second-brain-bounty.ts";
 import { noteInput, evidenceId, projectId, projectView, type EvidenceMemory } from "./second-brain.ts";
 import { repositoryCollectionRetryDue, repositoryCollectionFailure, repositoryCollectionRetryAt, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import {unresolvedRevenueAllowance} from './revenue-pilot.ts';
@@ -898,6 +899,36 @@ export class SaraKernel {
         else await this.#store.append("project_evidence_rechecked",principal,{id,scope,checkedAt:result.checkedAt,expiresAt:memory.projectEvidence.expiresAt});
       }
       const receipt={project:scope,status:result.status,errors:result.errors,coverage:result.coverage,checkedAt:result.checkedAt,recordIds:ids};
+      await this.#store.append("project_import_receipt",principal,receipt);
+      return receipt;
+    });
+  }
+
+  async readSoftwareBounties(principal: Principal, project: unknown) {
+    if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
+    if(projectId(project)!=="sara")throw new Error("Bounty review belongs to SARA scope.");
+    return bountyBoard((await this.state()).memories);
+  }
+
+  async importSoftwareBounty(principal: Principal, project: unknown, url: unknown) {
+    if(projectId(project)!=="sara")throw new Error("Bounty review belongs to SARA scope.");
+    const target=bountyTarget(url);
+    await this.serializeMutation(async()=>{
+      if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
+      await this.authorize(principal,{action:"external_read",targetId:target.source,external:true});
+    });
+    const result=await importBountyIssue(target.source);
+    return this.serializeMutation(async()=>{
+      if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
+      await this.authorize(principal,{action:"external_read",targetId:target.source,external:true});
+      await this.authorize(principal,{action:"record_memory",targetId:"sara",external:false});
+      const state=await this.state(),ids:string[]=[];
+      for(const memory of result.records){
+        const id=evidenceId(memory);ids.push(id);
+        if(!state.memories.some(m=>m.id===id))await this.#store.append("memory_recorded",principal,{...memory,id});
+        else await this.#store.append("project_evidence_rechecked",principal,{id,scope:"sara",checkedAt:result.checkedAt,expiresAt:memory.projectEvidence.expiresAt});
+      }
+      const receipt={kind:"software_bounty",project:"sara",source:target.source,status:result.status,errors:result.errors,coverage:result.coverage,checkedAt:result.checkedAt,recordIds:ids};
       await this.#store.append("project_import_receipt",principal,receipt);
       return receipt;
     });
