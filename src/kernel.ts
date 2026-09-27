@@ -1,3 +1,4 @@
+import {reportInput} from './project-report.ts';
 import {jevContract,type JevProvider} from './jev-contract.ts';
 import { importGitHubEvidence, githubContextPredecessors, type GitHubImportInput } from "./second-brain-github.ts";
 import { importBountyIssue, bountyBoard, bountyTarget } from "./second-brain-bounty.ts";
@@ -860,9 +861,17 @@ export class SaraKernel {
   }
 
   captureProjectNote(principal: Principal, input: Record<string, unknown>): Promise<EvidenceMemory> {
+    return this.captureProjectRecord(principal,()=>noteInput(input,new Date().toISOString()));
+  }
+
+  captureProjectReport(principal: Principal, input: Record<string, unknown>): Promise<EvidenceMemory> {
+    return this.captureProjectRecord(principal,()=>reportInput(input,new Date().toISOString()));
+  }
+
+  private captureProjectRecord(principal: Principal, build:()=>Omit<EvidenceMemory,'id'>): Promise<EvidenceMemory> {
     return this.serializeMutation(async () => {
       if (!this.isVerifiedOwner(principal)) throw new Error("Authenticated owner required.");
-      const memory = noteInput(input, new Date().toISOString());
+      const memory = build();
       await this.authorize(principal, {action:"record_memory",targetId:memory.scope,external:false});
       const state = await this.state();
       const id = evidenceId(memory);

@@ -39,4 +39,13 @@ test('late brief/status replies cannot repopulate a changed project or logged-ou
  node('brain-project').value='sara';const loading=node('brain-bounty-load').handlers.get('click')();const bountyReply=pending.splice(0);
  body.dataset.owner='';observe();for(const request of bountyReply)request.resolve(Response.json({notice:'PRIVATE BOUNTY',asOf:now.toISOString(),candidates:[],totalCurrent:0,history:[]}));await loading;
  assert.equal(node('brain-bounties').textContent,'');assert.equal(node('brain-bounty-brief').value,'');assert.equal(node('brain-bounty-copy').disabled,true);
+ // A delayed report save must not clear or repopulate a different authenticated project.
+ body.dataset.owner='connected';observe();reply(pending.splice(0),empty);await setImmediate();
+ node('brain-report-title').value='PRIVATE REPORT';node('brain-report-source').value='https://example.com/private';node('brain-report-text').value='PRIVATE EXCERPT';
+ const capture=node('brain-report-capture').handlers.get('submit')();const saveReply=pending.splice(0);assert.equal(saveReply.length,1);
+ node('brain-project').value='nico';const switched=node('brain-project').handlers.get('change')();reply(pending.splice(0),projectView([],'nico','',now));await switched;
+ node('brain-report-title').value='NEW PROJECT DRAFT';for(const request of saveReply)request.resolve(Response.json({id:'old-private-record'}));await capture;
+ assert.equal(node('brain-report-title').value,'NEW PROJECT DRAFT');assert.equal(node('brain-repair-brief').value,'');assert.equal(pending.length,0);
+ body.dataset.owner='';observe();assert.equal(node('brain-report-title').value,'');assert.equal(node('brain-repair-export').disabled,true);
+
 });

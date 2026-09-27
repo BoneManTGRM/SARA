@@ -108,6 +108,17 @@ try{
   await until("document.getElementById('brain-answer').textContent.includes('Unknown — no current records')");
   assert.equal(await evaluate("document.getElementById('brain-answer').textContent.includes('grants no permission')"),true);
   assert.equal(await evaluate("document.documentElement.scrollWidth<=window.innerWidth+1"),true,'Question answers fit the phone');
+  await evaluate("document.getElementById('brain-report-panel').open=true;document.getElementById('brain-report-title').value='Synthetic report finding';document.getElementById('brain-report-source').value='https://example.com/synthetic-report';document.getElementById('brain-report-text').value='Synthetic reported failure <script>window.reportInjected=true</script>';document.querySelector('#brain-report-capture button').click()");
+  await until("document.getElementById('brain-report-work').textContent.includes('Synthetic report finding')");
+  await evaluate("document.querySelector('#brain-report-work button').click()");
+  await until("document.getElementById('brain-repair-brief').value.includes('not authorized')");
+  assert.equal(await evaluate("Boolean(window.reportInjected)"),false);
+  assert.equal(await evaluate("document.getElementById('brain-repair-brief').value.includes('Revision: unknown')"),true);
+  await evaluate("document.getElementById('brain-repair-copy').click()");
+  await until("/Repair preparation copied|Select and copy/.test(document.getElementById('brain-status').textContent)");
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Report intake and repair brief fit phone');
+  const reportView=await kernel.readProjectBrief(kernel.authenticateOwnerToken(credential),'nico');
+  assert.equal(reportView.reportWork.total,1,'Phone/desktop report replay is idempotent');
   await evaluate("document.getElementById('brain-note').value='PRIVATE UNSAVED DRAFT';document.getElementById('brain-question').value='PRIVATE QUERY';document.getElementById('brain-import-id').value='PRIVATE TARGET';document.getElementById('brain-attempt').value='2'");
 
   await evaluate("document.getElementById('brain-project').value='sara';document.getElementById('brain-project').dispatchEvent(new Event('change'))");
@@ -118,6 +129,9 @@ try{
   assert.equal(await evaluate("document.getElementById('brain-tracking').textContent.includes('Synthetic linked decision')"),false);
   assert.equal(await evaluate("document.getElementById('brain-changes').textContent.includes('Synthetic continuity blocker')"),false);
   assert.equal(await evaluate("document.getElementById('brain-related').value"),'');
+  assert.equal(await evaluate("document.getElementById('brain-repair-brief').value"),'');
+  assert.equal(await evaluate("document.getElementById('brain-report-work').textContent.includes('Synthetic report finding')"),false);
+  assert.equal(await evaluate("document.getElementById('brain-repair-copy').disabled"),true);
   assert.equal(await evaluate("document.getElementById('brain-note').value"),'');
   for(const field of ['brain-question','brain-import-id','brain-attempt'])assert.equal(await evaluate(`document.getElementById('${field}').value`),'','Project switch clears '+field);
 
