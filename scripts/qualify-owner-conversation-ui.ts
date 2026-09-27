@@ -113,6 +113,9 @@ try{
   await evaluate("document.querySelector('#brain-report-work button').click()");
   await until("document.getElementById('brain-repair-brief').value.includes('not authorized')");
   assert.equal(await evaluate("Boolean(window.reportInjected)"),false);
+  assert.equal(await evaluate("document.getElementById('brain-overview').textContent.includes('Needs your decision')"),true,'Owner overview renders');
+  assert.equal(await evaluate("document.getElementById('brain-overview').textContent.includes('repair preparation briefs')"),true,'Overview exposes saved preparation');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Overview fits phone');
   assert.equal(await evaluate("document.getElementById('brain-repair-brief').value.includes('Revision: unknown')"),true);
   await evaluate("document.getElementById('brain-repair-copy').click()");
   await until("/Repair preparation copied|Select and copy/.test(document.getElementById('brain-status').textContent)");
