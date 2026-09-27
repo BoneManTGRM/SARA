@@ -138,7 +138,7 @@ export class OwnerAssistant {
     return this.#statusFrom(await this.#receipts(), now);
   }
 
-  analyze(input: { requestId: string; text: string }, now = new Date()): Promise<OwnerAssistantResult> {
+  analyze(input: { requestId: string; text: string; beforeDispatch?: () => Promise<boolean> }, now = new Date()): Promise<OwnerAssistantResult> {
     const operation = this.#tail.then(async () => {
       if (!safeRequestId(input.requestId)) throw new Error("Owner-assistant request id is invalid.");
       const text = input.text.trim();
@@ -173,7 +173,7 @@ export class OwnerAssistant {
       let accountedCostUsd = 0;
       let outputDigest: string | null = null;
       try {
-        const execution = await executeWorkerModelTask(OWNER_ROUTE, prompt, [this.#client]);
+        const execution = await executeWorkerModelTask(OWNER_ROUTE, prompt, [this.#client], input.beforeDispatch);
         accountedCostUsd = execution.evidence.accountedCostUsd;
         outputDigest = execution.evidence.outputDigest;
         const outputText = safeOutput(execution.outputText);

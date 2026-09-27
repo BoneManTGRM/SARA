@@ -117,6 +117,12 @@ try{
   await evaluate("document.getElementById('brain-repair-copy').click()");
   await until("/Repair preparation copied|Select and copy/.test(document.getElementById('brain-status').textContent)");
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Report intake and repair brief fit phone');
+  await evaluate("document.getElementById('brain-ask-form').closest('details').open=true;document.getElementById('brain-ask-query').value='Synthetic';document.getElementById('brain-ask-private').checked=true;document.querySelector('#brain-ask-form button').click()");
+  await until("document.getElementById('brain-ask-preview').textContent.includes('Input sources:')");
+  assert.equal(await evaluate("document.getElementById('brain-ask-send').disabled"),true,'Unconfigured AI cannot dispatch');
+  assert.equal(await evaluate("document.getElementById('brain-ask-preview').textContent.includes('owner_private')"),true,'Explicit private preview labels disclosure');
+  assert.equal(await evaluate("document.getElementById('brain-refresh-auto').checked"),false,'No automatic network opt-in');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'AI preview fits phone');
   const reportView=await kernel.readProjectBrief(kernel.authenticateOwnerToken(credential),'nico');
   assert.equal(reportView.reportWork.total,1,'Phone/desktop report replay is idempotent');
   await evaluate("document.getElementById('brain-note').value='PRIVATE UNSAVED DRAFT';document.getElementById('brain-question').value='PRIVATE QUERY';document.getElementById('brain-import-id').value='PRIVATE TARGET';document.getElementById('brain-attempt').value='2'");
@@ -133,6 +139,9 @@ try{
   assert.equal(await evaluate("document.getElementById('brain-report-work').textContent.includes('Synthetic report finding')"),false);
   assert.equal(await evaluate("document.getElementById('brain-repair-copy').disabled"),true);
   assert.equal(await evaluate("document.getElementById('brain-note').value"),'');
+  assert.equal(await evaluate("document.getElementById('brain-ask-preview').textContent"),'','Project switch clears private preview');
+  assert.equal(await evaluate("document.getElementById('brain-refresh-auto').checked"),false);
+
   for(const field of ['brain-question','brain-import-id','brain-attempt'])assert.equal(await evaluate(`document.getElementById('${field}').value`),'','Project switch clears '+field);
 
   assert.equal(await evaluate("document.getElementById('brain-bounty-panel').hidden"),false);

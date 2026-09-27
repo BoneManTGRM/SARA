@@ -21,7 +21,7 @@ test('late brief/status replies cannot repopulate a changed project or logged-ou
  const script=secondBrainWorkspace('<html><head></head><body><main></main></body></html>').match(/<script>([\s\S]*)<\/script>/)![1];
  const context=createContext({document:{body,getElementById:node,querySelectorAll:()=>[],createElement:()=>node('created-'+created++)},
   Option:class {constructor(public textContent:string,public value:string){}},MutationObserver:class{constructor(fn:()=>void){observe=fn;}observe(){}},
-  sessionStorage:{getItem:()=> 'synthetic-owner'},fetch:(path:string)=>new Promise<Response>(resolve=>pending.push({path,resolve})),encodeURIComponent,Map,JSON,Date,setTimeout});
+  sessionStorage:{getItem:()=> 'synthetic-owner'},fetch:(path:string)=>new Promise<Response>(resolve=>pending.push({path,resolve})),encodeURIComponent,Map,JSON,Date,setTimeout,clearTimeout});
  new Script(script).runInContext(context);
  assert.equal(pending.length,0,'Locked page makes no private requests');
  const now=new Date('2026-09-26T12:00:00Z');const input=noteInput({project:'nico',kind:'decision',text:'PRIVATE OLD PROJECT'},now.toISOString());
@@ -47,5 +47,14 @@ test('late brief/status replies cannot repopulate a changed project or logged-ou
  node('brain-report-title').value='NEW PROJECT DRAFT';for(const request of saveReply)request.resolve(Response.json({id:'old-private-record'}));await capture;
  assert.equal(node('brain-report-title').value,'NEW PROJECT DRAFT');assert.equal(node('brain-repair-brief').value,'');assert.equal(pending.length,0);
  body.dataset.owner='';observe();assert.equal(node('brain-report-title').value,'');assert.equal(node('brain-repair-export').disabled,true);
+
+ // Private AI previews and replies cannot cross a project switch.
+ body.dataset.owner='connected';observe();reply(pending.splice(0),empty);await setImmediate();
+ node('brain-ask-query').value='compiler';node('brain-ask-private').checked=true;
+ const previewing=node('brain-ask-form').handlers.get('submit')();const previews=pending.splice(0);
+ node('brain-project').value='sara';const nextProject=node('brain-project').handlers.get('change')();reply(pending.splice(0),empty);await nextProject;
+ for(const r of previews)r.resolve(Response.json({configured:true,text:'PRIVATE OLD PREVIEW',sources:[],query:'compiler',includePrivate:true}));await previewing;
+ assert.equal(node('brain-ask-preview').textContent,'');assert.equal(node('brain-ask-send').disabled,true);
+ assert.equal(node('brain-refresh-auto').checked,false);
 
 });
