@@ -64,6 +64,7 @@ try{
  }else if(m.method==='Fetch.requestPaused'){
    const url=String(m.params.request.url);void send(url.startsWith(origin+'/')?'Fetch.continueRequest':'Fetch.failRequest',{requestId:m.params.requestId,...(url.startsWith(origin+'/')?{}:{errorReason:'BlockedByClient'})},m.sessionId).catch(()=>{});
  }});
+ const downloadDirectory=join(directory,'downloads');await mkdir(downloadDirectory);await send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:downloadDirectory});
  const target=await send('Target.createTarget',{url:'about:blank'});
  sessionId=(await send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
  await send('Page.enable');await send('Runtime.enable');await send('Fetch.enable',{patterns:[{urlPattern:'*'}]});
@@ -88,6 +89,16 @@ try{
   await until(`document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker ${width}')`);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Second brain fits phone viewport');
   assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('reported')"),true);
+  const expectedDownload=await evaluate("document.getElementById('brain-handoff').value");
+  await evaluate("document.getElementById('brain-export').click()");
+  await until("Boolean(document.querySelector('#brain-download a'))");
+  await evaluate("document.querySelector('#brain-download a').click()");
+  const downloadPath=join(downloadDirectory,'SARA-nico-handoff.txt');
+  let downloaded:string|undefined;const downloadDeadline=performance.now()+15000;
+  while(performance.now()<downloadDeadline){try{downloaded=await readFile(downloadPath,'utf8');if(downloaded===expectedDownload)break;}catch{}await delay(100);}
+  assert.equal(downloaded,expectedDownload,'Actual downloaded handoff bytes match displayed evidence');
+  await rm(downloadPath);
+
   await until(`document.getElementById('brain-tracking').textContent.includes('Synthetic continuity blocker ${width}')`);
   assert.equal(await evaluate("document.getElementById('brain-tracking').textContent.includes('authorization not established')"),true);
   await evaluate("document.getElementById('brain-change-panel').open=true;document.getElementById('brain-last-day').click()");

@@ -63,10 +63,10 @@ export async function importGitHubEvidence(project:Project,input:GitHubImportInp
  }
  async function acquire(){
   publicRepo(await get(''),repository);
-  const data=await get('/'+path);let revision:string,observedAt:string,stage:Stage|null=null,outcome:string,source:string,pr:number|null=null,runId:number|null=null,runAttempt:number|null=null;
+  const data=await get('/'+(kind==='commit'?'git/'+path:path));let revision:string,observedAt:string,stage:Stage|null=null,outcome:string,source:string,pr:number|null=null,runId:number|null=null,runAttempt:number|null=null;
   let payload:Record<string,unknown>;
   if(kind==='commit'){
-   revision=sha(data.sha);if(revision!==value.sha)throw new Error('Source SHA mismatch.');const commit=object(data.commit);observedAt=sourceTime(object(commit.committer).date,now);stage='committed';outcome='success';source=`https://github.com/${repository}/commit/${revision}`;
+   revision=sha(data.sha);if(revision!==value.sha)throw new Error('Source SHA mismatch.');const commit=data;observedAt=sourceTime(object(commit.committer).date,now);stage='committed';outcome='success';source=`https://github.com/${repository}/commit/${revision}`;
    payload={kind,repository,revision,committedAt:observedAt,reportedContent:{verification:'reported',message:reportedExcerpt(commit.message,4096)}};
   }else if(kind==='pr'){
    pr=integer(data.number);if(pr!==value.number)throw new Error('Source PR mismatch.');publicRepo(object(data.base).repo,repository);

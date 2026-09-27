@@ -17,10 +17,10 @@ test('public source descriptions survive bounded import without promoting their 
  assert.equal(JSON.parse(imported.records[0]!.statement).reportedContent.message.text,'Synthetic commit');
 });
 test('absent source prose remains unknown; malformed prose fails closed',async()=>{
- const absent=fixture({sha,commit:{committer:commit.commit.committer}});
+ const absent=fixture({sha,committer:commit.committer});
  const a=await importGitHubEvidence('nico',{kind:'commit',sha},{fetch:absent.fetch,now});
  assert.equal(JSON.parse(a.records[0]!.statement).reportedContent.message,null);
- const malformed=fixture({sha,commit:{message:{instructions:'forged'},committer:commit.commit.committer}});
+ const malformed=fixture({sha,message:{instructions:'forged'},committer:commit.committer});
  assert.equal((await importGitHubEvidence('nico',{kind:'commit',sha},{fetch:malformed.fetch,now})).status,'failed');
 });
 test('enrichment cannot supersede different revisions, observations, scope, or existing reported text',async()=>{
@@ -36,7 +36,7 @@ test('enrichment cannot supersede different revisions, observations, scope, or e
   {...structuredClone(next),id:'already-enriched'},
  ])assert.deepEqual(githubContextPredecessors([previous],next),[]);
 });
-const commit={sha,commit:{message:'Synthetic commit',committer:{date:'2026-09-24T10:00:00Z'}}};
+const commit={sha,message:'Synthetic commit',committer:{date:'2026-09-24T10:00:00Z'}};
 function fixture(payload:unknown,metadata:unknown=repo){const calls:string[]=[];return {calls,fetch:async (url:string|URL|Request,init?:RequestInit)=>{calls.push(String(url));assert.equal(init?.redirect,'error');assert.equal(new Headers(init?.headers).has('authorization'),false);return Response.json(calls.length===1?metadata:payload);}};}
 test('exact public commit preserves source time and replay identity',async()=>{const a=fixture(commit),b=fixture(commit);const one=await importGitHubEvidence('nico',{kind:'commit',sha},{fetch:a.fetch,now});const two=await importGitHubEvidence('nico',{kind:'commit',sha},{fetch:b.fetch,now});assert.equal(one.status,'complete');assert.deepEqual(one.records,two.records);assert.equal(one.records[0]?.projectEvidence.observedAt,'2026-09-24T10:00:00.000Z');assert.equal(one.records[0]?.projectEvidence.lastVerifiedAt,now);assert.equal(one.records[0]?.projectEvidence.stage,'committed');assert.match(a.calls[1]!,new RegExp(sha));});
 test('workflow success does not manufacture test acceptance; requires exact attempt',async()=>{const f=fixture({id:123,run_attempt:2,head_sha:sha,status:'completed',conclusion:'success',updated_at:'2026-09-25T10:00:00Z',repository:repo});const r=await importGitHubEvidence('nico',{kind:'workflow',runId:123,attempt:2},{fetch:f.fetch,now});assert.equal(r.status,'complete');assert.equal(r.records[0]?.projectEvidence.stage,null);assert.equal(r.records[0]?.projectEvidence.runAttempt,2);assert.match(f.calls[1]!,/runs\/123\/attempts\/2$/);const bad=fixture({id:123,run_attempt:1,head_sha:sha});assert.equal((await importGitHubEvidence('nico',{kind:'workflow',runId:123,attempt:2},{fetch:bad.fetch,now})).status,'failed');});
@@ -45,3 +45,10 @@ test('PR captures head and merge identity without claiming deployment',async()=>
 test('rate limits, cancellation, malformed and oversized responses are visible',async()=>{for(const fetcher of [async()=>new Response('rate limit',{status:429}),async()=>new Response('not json'),async()=>new Response('x'.repeat(270000))]){const r=await importGitHubEvidence('nico',{kind:'commit',sha},{fetch:fetcher,now});assert.equal(r.status,'failed');assert.equal(r.records.length,0);assert.ok(r.errors.length);}const controller=new AbortController();controller.abort();assert.equal((await importGitHubEvidence('nico',{kind:'commit',sha},{signal:controller.signal,now})).status,'failed');});
 test('deadline is finite even if transport ignores cancellation',async()=>{const started=Date.now();const r=await importGitHubEvidence('nico',{kind:'commit',sha},{fetch:async()=>new Promise<Response>(()=>{}),timeoutMs:10,now});assert.equal(r.status,'failed');assert.match(r.errors[0]!,/deadline/);assert.ok(Date.now()-started<1000);});
 test('global concurrency bound rejects third request without dispatch',async()=>{let calls=0;const hanging=async()=>{calls++;return new Promise<Response>(()=>{});};const first=importGitHubEvidence('nico',{kind:'commit',sha},{fetch:hanging,timeoutMs:30,now});const second=importGitHubEvidence('sara',{kind:'commit',sha},{fetch:hanging,timeoutMs:30,now});const third=await importGitHubEvidence('nicos-world',{kind:'commit',sha},{fetch:hanging,timeoutMs:30,now});assert.equal(third.status,'failed');assert.match(third.errors[0]!,/concurrency/);assert.equal(calls,2);await Promise.all([first,second]);});
+
+test('large commit import reads exact metadata without requesting file patches',async()=>{
+ const paths:string[]=[];const r=await importGitHubEvidence('nico',{kind:'commit',sha},{now,fetch:async(url)=>{
+ const path=String(url);paths.push(path);if(path.endsWith('/git/commits/'+sha))return Response.json({sha,message:'Large commit metadata',committer:{date:'2026-09-24T10:00:00Z'}});
+ if(path.endsWith('/commits/'+sha))return new Response('x'.repeat(270000));return Response.json(repo);
+ }});assert.equal(r.status,'complete');assert.equal(r.records[0]?.projectEvidence.claimKey,'github:BoneManTGRM/NICO:commits/'+sha);assert.equal(paths.length,2);
+});

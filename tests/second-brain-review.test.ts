@@ -26,7 +26,7 @@ test('review: identical GitHub refresh renews freshness append-only and survives
  const dir=await mkdtemp(join(tmpdir(),'sara-review-refresh-'));
  const originalFetch=globalThis.fetch;
  t.mock.timers.enable({apis:['Date'],now:new Date(now)});
- globalThis.fetch=async(url)=>new Response(JSON.stringify(String(url).endsWith('/'+revision)?{sha:revision,commit:{committer:{date:'2026-09-20T00:00:00Z'}}}:{private:false,full_name:'BoneManTGRM/NICO'}));
+ globalThis.fetch=async(url)=>new Response(JSON.stringify(String(url).endsWith('/'+revision)?{sha:revision,committer:{date:'2026-09-20T00:00:00Z'}}:{private:false,full_name:'BoneManTGRM/NICO'}));
  try{const k=await SaraKernel.boot({stateDirectory:dir,ownerTokenSha256:sha256(token)});const owner=k.authenticateOwnerToken(token);
  const first=await k.importProjectGitHub(owner,'nico',{kind:'commit',sha:revision});assert.equal(first.status,'complete');
  const initial=(await k.readProjectBrief(owner,'nico')).records[0]!;

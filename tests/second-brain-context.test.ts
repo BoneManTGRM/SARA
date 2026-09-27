@@ -31,7 +31,7 @@ test('public reported source context survives restart/replay, remains scoped and
 
 test('historical metadata-only import becomes explicit enrichment without changing source time or deleting history',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'sara-context-upgrade-')),token='synthetic-context-upgrade';
- const repo={full_name:'BoneManTGRM/NICO',private:false},revision='d'.repeat(40),source={sha:revision,commit:{message:'Compiler timeout fixed according to this commit message.',committer:{date:'2026-09-25T12:00:00Z'}}};
+ const repo={full_name:'BoneManTGRM/NICO',private:false},revision='d'.repeat(40),source={sha:revision,message:'Compiler timeout fixed according to this commit message.',committer:{date:'2026-09-25T12:00:00Z'}};
  const originalFetch=globalThis.fetch;globalThis.fetch=async url=>Response.json(String(url).endsWith('/'+revision)?source:repo);
  try{
   const initial=await SaraKernel.boot({stateDirectory:directory,ownerTokenSha256:sha256(token)}),owner=initial.authenticateOwnerToken(token);

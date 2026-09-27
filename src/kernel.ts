@@ -905,7 +905,7 @@ export class SaraKernel {
     const discovery=await discoverProjectUpdates(scope);
     const receipts=[];
     for(const target of discovery.targets)receipts.push(await this.importProjectGitHub(principal,scope,target));
-    const result={project:scope,status:discovery.status==='failed'?'failed':receipts.some(r=>r.status!=='complete')?'partial':'complete',nextCheckAt:claim.nextCheckAt,coverage:UPDATE_COVERAGE,receipts};
+    const result={project:scope,status:discovery.status==='failed'?'failed':receipts.some(r=>r.status!=='complete')?'partial':'complete',nextCheckAt:claim.nextCheckAt,coverage:UPDATE_COVERAGE,receipts,...(discovery.status==='failed'?{failure:discovery.failure}:{})};
     await this.serializeMutation(async()=>{await this.#store.append("project_refresh_finished",principal,result);});
     return result;
   }

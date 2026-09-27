@@ -19,3 +19,7 @@ Operational scope: polling is optional and tied to the open authenticated page; 
 ## Owner overview follow-on (2026-09-27)
 
 Owner said Go to a phone screen showing what changed, what needs a decision, and what SARA prepared. Scope: compose existing project tracking and report preparations in the authenticated workspace, with no new service, model calls, authority or spending. Show at most three cards per group with full counts, preserve explicit time-window semantics, distinguish reported pending approvals from granted authorization, and link to existing full sections and source evidence. Empty evidence is unknown, not all-clear. Scope/auth changes clear the overview and late responses cannot refill it. Acceptance: actual-script race tests, phone/desktop qualification assertions, typecheck and full verify. Keep PR draft and production unchanged.
+
+## Canary repair scope
+
+Repair observed GitHub refresh opacity and oversized commit detail imports without lifting byte/time/auth bounds; use exact Git commit metadata instead of file patches. Preserve legacy claim identities and source links. Classify the production-only procedural proof as not applicable on the isolated canary while retaining production identity/state checks. Replace detached transient download clicks with visible download links, clear/revoke on auth/scope changes, and verify downloaded bytes in actual browser CI. No production promotion or model funding.
