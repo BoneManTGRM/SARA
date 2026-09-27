@@ -1,3 +1,4 @@
+import {reportWork,type ReportContext} from './project-report.ts';
 import {projectTracking} from './second-brain-tracking.ts';
 import {questionKind,projectAnswer} from './second-brain-answers.ts';
 import {CORE_MEMORY_SEEDS} from "./memory-fabric.ts";
@@ -7,6 +8,7 @@ export const PROJECTS = {nico:'NICO',sara:'SARA','nicos-world':"Nico’s World"}
 export type Project = keyof typeof PROJECTS;
 export type Stage = 'prepared'|'committed'|'tests_passed'|'merged'|'deployed'|'production_verified';
 export type ProjectEvidence = {
+ report?:ReportContext;
  schemaVersion:1; project:Project; kind:'note'|'decision'|'blocker'|'goal'|'constraint'|'next_action'|'approval'|'source';
  verification:'reported'|'source_observed'; dataClass:'owner_private'|'public';
  contentDigest:string; ingestedAt:string; observedAt:string|null; lastVerifiedAt:string|null; expiresAt:string|null;
@@ -74,7 +76,7 @@ export function projectView(memories:readonly MemoryRecord[],project:Project,que
  const tracking=projectTracking(all,current,conflicts,superseded,now,since);
  const words=query.toLowerCase().match(/[\p{L}\p{N}]+/gu)??[];
  const kind=questionKind(query);
- const ranked=current.filter(m=>!kind||m.projectEvidence.kind===kind).map(m=>({m,score:kind?1:words.filter(w=>(m.statement+' '+m.projectEvidence.kind+' '+(m.projectEvidence.stage??'')).toLowerCase().includes(w)).length})).filter(x=>!words.length||x.score>0).sort((a,b)=>b.score-a.score||(b.m.projectEvidence.observedAt??'').localeCompare(a.m.projectEvidence.observedAt??'')||a.m.id.localeCompare(b.m.id));
+ const ranked=current.filter(m=>!kind||m.projectEvidence.kind===kind).map(m=>({m,score:kind?1:words.filter(w=>(m.statement+' '+m.projectEvidence.kind+' '+(m.projectEvidence.stage??'')+' '+(m.projectEvidence.report?canonicalJson(m.projectEvidence.report):'')+' '+(m.projectEvidence.repository??'')+' '+(m.projectEvidence.revision??'')).toLowerCase().includes(w)).length})).filter(x=>!words.length||x.score>0).sort((a,b)=>b.score-a.score||(b.m.projectEvidence.observedAt??'').localeCompare(a.m.projectEvidence.observedAt??'')||a.m.id.localeCompare(b.m.id));
  const answer=projectAnswer(kind,ranked.map(x=>x.m),conflicts,now.toISOString());
  const records=ranked.slice(0,30).map(x=>structuredClone(x.m));
  const anchors=CORE_MEMORY_SEEDS.filter(m=>m.tags?.includes('anchor')&&['constitutional','economic','procedural'].includes(m.category));
@@ -97,12 +99,12 @@ export function projectView(memories:readonly MemoryRecord[],project:Project,que
  let included=0;
  for(const m of excerptCandidates.slice(0,8)) {
   const e=m.projectEvidence;
-  const entry=`\n\n[${m.id}] ${conflicts.has(m.id)?'CONFLICT ':''}${e.verification} / ${e.stage??e.kind}\n${m.statement.slice(0,500)}${m.statement.length>500?'… [excerpt]':''}\nSource: ${m.source}\nObserved: ${e.observedAt??'unknown'}; checked: ${e.lastVerifiedAt??'not verified'}; ingested: ${e.ingestedAt}\nIdentity: ${canonicalJson({repository:e.repository,revision:e.revision,pr:e.pr,runId:e.runId,runAttempt:e.runAttempt,deploymentId:e.deploymentId,environment:e.environment})}\nDigest: ${e.contentDigest}`;
+  const entry=`\n\n[${m.id}] ${conflicts.has(m.id)?'CONFLICT ':''}${e.verification} / ${e.stage??e.kind}\n${m.statement.slice(0,500)}${m.statement.length>500?'… [excerpt]':''}\nSource: ${m.source}\nObserved: ${e.observedAt??'unknown'}; checked: ${e.lastVerifiedAt??'not verified'}; ingested: ${e.ingestedAt}\nIdentity: ${canonicalJson({repository:e.repository,revision:e.revision,pr:e.pr,runId:e.runId,runAttempt:e.runAttempt,deploymentId:e.deploymentId,environment:e.environment,...(e.report?{reportId:e.report.reportId,findingId:e.report.findingId}: {})})}\nDigest: ${e.contentDigest}`;
   if(handoff.length+entry.length>(since?12000:15500))break;
   handoff+=entry;included++;
  }
  if(since){handoff+=`\n\nRecords saved since ${since}: ${tracking.changes.total}. ${tracking.changes.notice}`;let changeCount=0;for(const m of tracking.changes.items.slice(0,3)){const entry=`\n${m.id}: ${m.kind}, ${m.state}; saved ${m.ingestedAt}; observed ${m.observedAt??'unknown'}; Source: ${m.source}`;if(handoff.length+entry.length>15300)break;handoff+=entry;changeCount++;}handoff+=`\nShowing ${changeCount}/${tracking.changes.total} change identifiers; open What changed for complete source details.`;}
  handoff+=`\n\nIncluded ${included}/${excerptCandidates.length} conflict and matching source excerpts. Open Sources and History in SARA for complete conflict groups and additional matches.`;
 
- return {project,tracking,answer,asOf:now.toISOString(),mode:'local_search' as const,records,anchors:structuredClone(anchors),conflicts:all.filter(m=>conflicts.has(m.id)),history:all.filter(m=>superseded.has(m.id)||stale(m)).map(m=>({id:m.id,source:m.source,observedAt:m.projectEvidence.observedAt,stale:stale(m),superseded:superseded.has(m.id)})),totalMatching:ranked.length,totalRecords:all.length,handoff};
+ return {project,reportWork:reportWork(clean,now.toISOString()),tracking,answer,asOf:now.toISOString(),mode:'local_search' as const,records,anchors:structuredClone(anchors),conflicts:all.filter(m=>conflicts.has(m.id)),history:all.filter(m=>superseded.has(m.id)||stale(m)).map(m=>({id:m.id,source:m.source,observedAt:m.projectEvidence.observedAt,stale:stale(m),superseded:superseded.has(m.id)})),totalMatching:ranked.length,totalRecords:all.length,handoff};
 }
