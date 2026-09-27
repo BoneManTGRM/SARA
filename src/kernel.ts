@@ -1,6 +1,7 @@
 import {jevContract,type JevProvider} from './jev-contract.ts';
 import { importGitHubEvidence, githubContextPredecessors, type GitHubImportInput } from "./second-brain-github.ts";
 import { importBountyIssue, bountyBoard, bountyTarget } from "./second-brain-bounty.ts";
+import {validateTaskPackage,runTaskPackage} from './task-worker.ts';
 import { noteInput, evidenceId, projectId, projectView, type EvidenceMemory } from "./second-brain.ts";
 import { repositoryCollectionRetryDue, repositoryCollectionFailure, repositoryCollectionRetryAt, type RevenueRepositoryCollection } from './revenue-repository-collection.ts';
 import {unresolvedRevenueAllowance} from './revenue-pilot.ts';
@@ -902,6 +903,64 @@ export class SaraKernel {
       await this.#store.append("project_import_receipt",principal,receipt);
       return receipt;
     });
+  }
+
+  async readTaskWork(principal: Principal, project: unknown) {
+    if(!this.isVerifiedOwner(principal))throw new Error('Authenticated owner required.');
+    if(projectId(project)!=='sara')throw new Error('Task work belongs to SARA scope.');
+    const latest=new Map<string,{kind:string;id:string;status:string;result?:Awaited<ReturnType<typeof runTaskPackage>>}>();
+    for(const event of (await this.state()).events){if(event.type!=='project_import_receipt')continue;
+      const data=event.data as {kind:string;id:string;status:string;result?:Awaited<ReturnType<typeof runTaskPackage>>};
+      if(data.kind==='isolated_task_worker')latest.set(data.id,data);
+    }
+    return [...latest.values()];
+  }
+
+  async cancelTaskWork(principal: Principal, project: unknown, id: unknown) {
+    return this.serializeMutation(async()=>{
+      const rows=await this.readTaskWork(principal,project),row=rows.find(r=>r.id===id);
+      if(!row)throw new Error('Unknown task.');
+      if(row.status!=='running')return row;
+      const receipt={kind:'isolated_task_worker',id:row.id,status:'cancelled',checkedAt:new Date().toISOString()};
+      await this.#store.append('project_import_receipt',principal,receipt);return receipt;
+    });
+  }
+
+  async runTaskWork(principal: Principal, project: unknown, raw: unknown) {
+    await this.readTaskWork(principal,project);
+    const input=validateTaskPackage(raw),id='task:'+sha256(canonicalJson(input));
+    const prior=await this.serializeMutation(async()=>{
+      await this.authorize(principal,{action:'sandbox_development',targetId:id,external:false});
+      const rows=await this.readTaskWork(principal,project),existing=rows.find(r=>r.id===id);
+      if(existing)return existing;
+      if(rows.some(r=>r.status==='running'))throw new Error('Prior task is running or interrupted; cancel it before starting another.');
+      await this.#store.append('project_import_receipt',principal,{kind:'isolated_task_worker',id,status:'running',source:input.source,revision:input.revision,checkedAt:new Date().toISOString()});
+      return null;
+    });
+    if(prior)return prior;
+    try{
+      const result=await runTaskPackage(input,this.constitutionDigest,async()=>{
+        await this.serializeMutation(async()=>{
+          await this.readTaskWork(principal,project);
+          await this.authorize(principal,{action:'sandbox_development',targetId:id,external:false});
+          if((await this.readTaskWork(principal,project)).find(r=>r.id===id)?.status!=='running')throw new Error('Task cancelled.');
+        });
+      });
+      return await this.serializeMutation(async()=>{
+        const current=(await this.readTaskWork(principal,project)).find(r=>r.id===id)!;
+        if(current.status!=='running')return current;
+        await this.authorize(principal,{action:'sandbox_development',targetId:id,external:false});
+        const receipt={kind:'isolated_task_worker',id,status:'completed',result,checkedAt:new Date().toISOString()};
+        await this.#store.append('project_import_receipt',principal,receipt);return receipt;
+      });
+    }catch{
+      return this.serializeMutation(async()=>{
+        const current=(await this.readTaskWork(principal,project)).find(r=>r.id===id)!;
+        if(current.status!=='running')return current;
+        const receipt={kind:'isolated_task_worker',id,status:'failed',message:'Execution interrupted or unavailable; no automatic retry.',checkedAt:new Date().toISOString()};
+        await this.#store.append('project_import_receipt',principal,receipt);return receipt;
+      });
+    }
   }
 
   async readSoftwareBounties(principal: Principal, project: unknown) {

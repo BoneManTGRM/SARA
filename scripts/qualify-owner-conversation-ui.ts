@@ -133,6 +133,12 @@ try{
   await until("/Task brief copied|Select and copy/.test(document.getElementById('brain-status').textContent)");
   const bountyOwner=kernel.authenticateOwnerToken(credential),bounties=await kernel.readSoftwareBounties(bountyOwner,'sara');
   assert.equal(bounties.candidates.length,1,'Repeated phone/desktop import is idempotent');assert.equal(bounties.candidates[0]!.executionAuthorized,false);
+  const source='export const value: number = 41;\n';
+  const task={version:'task-worker-v1',source:bountyFixtureUrl,revision:'a'.repeat(40),objective:'Synthetic bounded repair',baseline:{schemaVersion:1,candidateKind:'typescript_program',programName:'Synthetic browser task',summary:'Fixture only',limitations:[],files:[{path:'src/index.ts',content:'export { value } from "./value.ts";\n'},{path:'src/value.ts',content:source},{path:'tests/value.test.ts',content:'import { value } from "../src/value.ts";\nif(value !== 42) throw new Error("required value");\n'}]},proposals:[{path:'src/value.ts',before:sha256(source),content:'export const value: number = 42;\n'}]};
+  await evaluate(`document.getElementById('brain-task-run').closest('details').open=true;{const data=new DataTransfer();data.items.add(new File([${JSON.stringify(JSON.stringify(task))}],'synthetic-task.json',{type:'application/json'}));document.getElementById('brain-task-file').files=data.files;}document.querySelector('#brain-task-run button').click()`);
+  await until("document.getElementById('brain-task-results').textContent.includes('verified_isolated')");
+  assert.equal((await kernel.readTaskWork(bountyOwner,'sara')).length,1,'Repeated phone/desktop run reuses canonical receipt');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Task results fit phone');
   await evaluate("document.getElementById('brain-bounty-panel').scrollIntoView()");
   await mkdir('artifacts',{recursive:true});
   await writeFile(`artifacts/owner-software-runtime-bounty-${width}.png`,Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));

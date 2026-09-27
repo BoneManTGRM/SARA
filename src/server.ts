@@ -1217,6 +1217,14 @@ async function handleAuthenticatedRequest(
         json(response,200,{...result,budget:await kernel.jevBudgetStatus(options.jevProvider)});return;
       }
 
+      if(url.pathname==='/api/second-brain/task-work') {
+        if(request.method==='GET'){json(response,200,await kernel.readTaskWork(owner,url.searchParams.get('project')));return;}
+        if(request.method==='POST'){
+          const body=await readJson(request);
+          if(Object.keys(body).some(k=>!['project','package','cancelId'].includes(k))||('package' in body)===('cancelId' in body))throw new Error('Provide one task package or cancellation.');
+          json(response,200,'cancelId' in body?await kernel.cancelTaskWork(owner,body.project,body.cancelId):await kernel.runTaskWork(owner,body.project,body.package));return;
+        }
+      }
       if(request.method==="GET" && url.pathname==="/api/second-brain/bounties") {
         json(response,200,await kernel.readSoftwareBounties(owner,url.searchParams.get("project")));return;
       }

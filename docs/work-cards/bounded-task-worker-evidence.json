@@ -1,0 +1,28 @@
+{
+  "baseline": "5b6180a4351405b17213afc708fedb8583c05c12",
+  "files": {
+    "scripts/qualify-owner-conversation-ui.ts": "8dc1f64d0f20fda36800bf1246e2b765713e81e795997a69850d9851733b7a62",
+    "src/kernel.ts": "41a806dee9481f32309dcc391aa71148d52444156f186f9113cd2d891be05a91",
+    "src/second-brain-ui.ts": "020e01707f27b745cb1fef5dd70d948743208b1441d060dccd07f8f9bb2bf0cc",
+    "src/server.ts": "cfbc1b011b97a968dab5a2e6e7105fab7a5025ffe9eb86c8b63c0f2d7d9813eb",
+    "src/task-worker.ts": "899f1a4340eda9217a5f083d424eebb68c6dc4475e393d61950c4e902a689a4b",
+    "tests/task-worker.test.ts": "9595d12847733b22260e51b94b3f85995ed56fe51259e697125a65eee11039dc"
+  },
+  "checks": [
+    {
+      "command": "node --import tsx --test tests/task-worker.test.ts tests/coding-benchmark-post-fix-grant.test.ts",
+      "exitCode": 0,
+      "tests": 13,
+      "logSha256": "f0016de122bbfb008ee88d7d07923dd47f2ba52ac48e26cc65cd4e030adb961b"
+    },
+    {
+      "command": "npm run verify",
+      "exitCode": 0,
+      "mainTests": 1613,
+      "logSha256": "2b1af798d74ad07df7919cd03a3f4e1e59540b6ad9fe82835a94608653e31f4f"
+    }
+  ],
+  "browser": "local launch unavailable; CI pending; no iPhone/WebKit test",
+  "providerCalls": 0,
+  "productionChanged": false
+}
