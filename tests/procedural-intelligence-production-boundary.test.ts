@@ -27,3 +27,9 @@ test("production procedural reuse proof is bound to the actual Railway project, 
     runtime: expected,
   }), /PROCEDURAL_PRODUCTION_STATE_NOT_ON_PERSISTENT_VOLUME/);
 });
+
+test('production procedural startup proof is inapplicable to isolated canary services',async()=>{
+ const {productionProceduralReuseApplies}=await import('../src/production-procedural-reuse.ts');
+ assert.equal(productionProceduralReuseApplies('7302295c-86e2-494e-8dd6-a72c1ee4b60e'),false);
+ assert.equal(productionProceduralReuseApplies('ecb1a55e-5ae1-447e-885b-0bbe31b352b5'),true);
+});

@@ -64,6 +64,7 @@ try{
  }else if(m.method==='Fetch.requestPaused'){
    const url=String(m.params.request.url);void send(url.startsWith(origin+'/')?'Fetch.continueRequest':'Fetch.failRequest',{requestId:m.params.requestId,...(url.startsWith(origin+'/')?{}:{errorReason:'BlockedByClient'})},m.sessionId).catch(()=>{});
  }});
+ const downloadDirectory=join(directory,'downloads');await mkdir(downloadDirectory);await send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:downloadDirectory});
  const target=await send('Target.createTarget',{url:'about:blank'});
  sessionId=(await send('Target.attachToTarget',{targetId:target.targetId,flatten:true})).sessionId;
  await send('Page.enable');await send('Runtime.enable');await send('Fetch.enable',{patterns:[{urlPattern:'*'}]});
@@ -88,6 +89,16 @@ try{
   await until(`document.getElementById('brain-handoff').value.includes('Synthetic continuity blocker ${width}')`);
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Second brain fits phone viewport');
   assert.equal(await evaluate("document.getElementById('brain-handoff').value.includes('reported')"),true);
+  const expectedDownload=await evaluate("document.getElementById('brain-handoff').value");
+  await evaluate("document.getElementById('brain-export').click()");
+  await until("Boolean(document.querySelector('#brain-download a'))");
+  await evaluate("document.querySelector('#brain-download a').click()");
+  const downloadPath=join(downloadDirectory,'SARA-nico-handoff.txt');
+  let downloaded:string|undefined;const downloadDeadline=performance.now()+15000;
+  while(performance.now()<downloadDeadline){try{downloaded=await readFile(downloadPath,'utf8');if(downloaded===expectedDownload)break;}catch{}await delay(100);}
+  assert.equal(downloaded,expectedDownload,'Actual downloaded handoff bytes match displayed evidence');
+  await rm(downloadPath);
+
   await until(`document.getElementById('brain-tracking').textContent.includes('Synthetic continuity blocker ${width}')`);
   assert.equal(await evaluate("document.getElementById('brain-tracking').textContent.includes('authorization not established')"),true);
   await evaluate("document.getElementById('brain-change-panel').open=true;document.getElementById('brain-last-day').click()");
@@ -113,10 +124,19 @@ try{
   await evaluate("document.querySelector('#brain-report-work button').click()");
   await until("document.getElementById('brain-repair-brief').value.includes('not authorized')");
   assert.equal(await evaluate("Boolean(window.reportInjected)"),false);
+  assert.equal(await evaluate("document.getElementById('brain-overview').textContent.includes('Needs your decision')"),true,'Owner overview renders');
+  assert.equal(await evaluate("document.getElementById('brain-overview').textContent.includes('repair preparation briefs')"),true,'Overview exposes saved preparation');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Overview fits phone');
   assert.equal(await evaluate("document.getElementById('brain-repair-brief').value.includes('Revision: unknown')"),true);
   await evaluate("document.getElementById('brain-repair-copy').click()");
   await until("/Repair preparation copied|Select and copy/.test(document.getElementById('brain-status').textContent)");
   assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'Report intake and repair brief fit phone');
+  await evaluate("document.getElementById('brain-ask-form').closest('details').open=true;document.getElementById('brain-ask-query').value='Synthetic';document.getElementById('brain-ask-private').checked=true;document.querySelector('#brain-ask-form button').click()");
+  await until("document.getElementById('brain-ask-preview').textContent.includes('Input sources:')");
+  assert.equal(await evaluate("document.getElementById('brain-ask-send').disabled"),true,'Unconfigured AI cannot dispatch');
+  assert.equal(await evaluate("document.getElementById('brain-ask-preview').textContent.includes('owner_private')"),true,'Explicit private preview labels disclosure');
+  assert.equal(await evaluate("document.getElementById('brain-refresh-auto').checked"),false,'No automatic network opt-in');
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=window.innerWidth+1'),true,'AI preview fits phone');
   const reportView=await kernel.readProjectBrief(kernel.authenticateOwnerToken(credential),'nico');
   assert.equal(reportView.reportWork.total,1,'Phone/desktop report replay is idempotent');
   await evaluate("document.getElementById('brain-note').value='PRIVATE UNSAVED DRAFT';document.getElementById('brain-question').value='PRIVATE QUERY';document.getElementById('brain-import-id').value='PRIVATE TARGET';document.getElementById('brain-attempt').value='2'");
@@ -133,6 +153,9 @@ try{
   assert.equal(await evaluate("document.getElementById('brain-report-work').textContent.includes('Synthetic report finding')"),false);
   assert.equal(await evaluate("document.getElementById('brain-repair-copy').disabled"),true);
   assert.equal(await evaluate("document.getElementById('brain-note').value"),'');
+  assert.equal(await evaluate("document.getElementById('brain-ask-preview').textContent"),'','Project switch clears private preview');
+  assert.equal(await evaluate("document.getElementById('brain-refresh-auto').checked"),false);
+
   for(const field of ['brain-question','brain-import-id','brain-attempt'])assert.equal(await evaluate(`document.getElementById('${field}').value`),'','Project switch clears '+field);
 
   assert.equal(await evaluate("document.getElementById('brain-bounty-panel').hidden"),false);

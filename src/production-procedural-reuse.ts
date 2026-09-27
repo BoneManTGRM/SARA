@@ -19,6 +19,8 @@ const EXPECTED_PRODUCTION_RUNTIME: Readonly<ProductionRailwayRuntimeIdentity> = 
   volumeMountPath: "/data",
 });
 
+export function productionProceduralReuseApplies(serviceId:string):boolean {return serviceId===EXPECTED_PRODUCTION_RUNTIME.serviceId;}
+
 function sameRuntimeIdentity(actual: ProductionRailwayRuntimeIdentity): boolean {
   return actual.projectId === EXPECTED_PRODUCTION_RUNTIME.projectId &&
     actual.serviceId === EXPECTED_PRODUCTION_RUNTIME.serviceId &&

@@ -104,7 +104,8 @@ if (productPolicy.codingBenchmark) {
       console.log(JSON.stringify({event:'sara_expansion_runtime_proof',...proof}));
     }catch{console.error(JSON.stringify({event:'sara_expansion_runtime_proof',status:'failed_closed',sourceRevision,deploymentId}));}
     try {
-      const { runBoundProductionProceduralReuseProof } = await import("../src/production-procedural-reuse.ts");
+      const { runBoundProductionProceduralReuseProof, productionProceduralReuseApplies } = await import("../src/production-procedural-reuse.ts");
+      if(!productionProceduralReuseApplies(process.env.RAILWAY_SERVICE_ID??'')){console.log(JSON.stringify({event:'sara_procedural_reuse_proof',status:'not_applicable',reason:'production_service_only',sourceRevision,deploymentId}));}else{
       const proof = await runBoundProductionProceduralReuseProof({
         stateDirectory,
         sourceRevision,
@@ -131,6 +132,7 @@ if (productPolicy.codingBenchmark) {
         efficiency: proof.efficiency,
         runtimeBoundary: proof.runtimeBoundary,
       }));
+      }
     } catch {
       console.error(JSON.stringify({ event: "sara_procedural_reuse_proof", status: "failed_closed" }));
     }

@@ -15,13 +15,13 @@ test('late brief/status replies cannot repopulate a changed project or logged-ou
    replaceChildren(...items:any[]){text='';children.splice(0,children.length,...items);},append(...items:any[]){children.push(...items);},
    addEventListener(name:string,fn:Function){handlers.set(name,fn);},focus(){}});}return nodes.get(id);
  };
- let observe=()=>{};let created=0;
+ let observe=()=>{};let created=0;const downloads=new Map<string,Blob>();const revoked:string[]=[];
  const pending:{path:string;resolve:(r:Response)=>void}[]=[];
  const body={dataset:{owner:''}};
  const script=secondBrainWorkspace('<html><head></head><body><main></main></body></html>').match(/<script>([\s\S]*)<\/script>/)![1];
  const context=createContext({document:{body,getElementById:node,querySelectorAll:()=>[],createElement:()=>node('created-'+created++)},
   Option:class {constructor(public textContent:string,public value:string){}},MutationObserver:class{constructor(fn:()=>void){observe=fn;}observe(){}},
-  sessionStorage:{getItem:()=> 'synthetic-owner'},fetch:(path:string)=>new Promise<Response>(resolve=>pending.push({path,resolve})),encodeURIComponent,Map,JSON,Date,setTimeout});
+  sessionStorage:{getItem:()=> 'synthetic-owner'},fetch:(path:string)=>new Promise<Response>(resolve=>pending.push({path,resolve})),encodeURIComponent,Map,JSON,Date,setTimeout,clearTimeout,Blob,URL:{createObjectURL:(blob:Blob)=>{const url="blob:test-"+downloads.size;downloads.set(url,blob);return url;},revokeObjectURL:(url:string)=>revoked.push(url)}});
  new Script(script).runInContext(context);
  assert.equal(pending.length,0,'Locked page makes no private requests');
  const now=new Date('2026-09-26T12:00:00Z');const input=noteInput({project:'nico',kind:'decision',text:'PRIVATE OLD PROJECT'},now.toISOString());
@@ -30,11 +30,11 @@ test('late brief/status replies cannot repopulate a changed project or logged-ou
  body.dataset.owner='connected';observe();assert.equal(pending.length,2);const old=pending.splice(0);
  node('brain-project').value='sara';const switching=node('brain-project').handlers.get('change')();const current=pending.splice(0);
  reply(current,empty);await switching;assert.match(node('brain-obligations').textContent,/synthetic obligation/);
- reply(old,privateView);await setImmediate();assert.ok(!node('brain-answer').textContent.includes('PRIVATE'));assert.ok(!node('brain-handoff').value.includes('PRIVATE'));
+ reply(old,privateView);await setImmediate();assert.ok(!node('brain-answer').textContent.includes('PRIVATE'));assert.ok(!node('brain-handoff').value.includes('PRIVATE'));assert.ok(!node('brain-overview').textContent.includes('PRIVATE'));
  const refreshing=node('brain-search').handlers.get('submit')();const afterLogout=pending.splice(0);body.dataset.owner='';observe();reply(afterLogout,privateView);await refreshing;
- for(const id of ['brain-answer','brain-obligations','brain-tracking'])assert.equal(node(id).textContent,'');assert.equal(node('brain-handoff').value,'');assert.equal(node('brain-fields').disabled,true);
+ for(const id of ['brain-answer','brain-obligations','brain-tracking','brain-overview'])assert.equal(node(id).textContent,'');assert.equal(node('brain-handoff').value,'');assert.equal(node('brain-fields').disabled,true);
  // A failed runtime read must be visible without suppressing usable evidence.
- body.dataset.owner='connected';observe();reply(pending.splice(0),empty,503);await setImmediate();assert.match(node('brain-obligations').textContent,/refresh failed/);assert.match(node('brain-mode').textContent,/unavailable/);assert.match(node('brain-handoff').value,/SARA \/ SARA/);
+ body.dataset.owner='connected';observe();reply(pending.splice(0),empty,503);await setImmediate();assert.match(node('brain-obligations').textContent,/refresh failed/);assert.match(node('brain-mode').textContent,/unavailable/);assert.match(node('brain-handoff').value,/SARA \/ SARA/);assert.match(node('brain-overview').textContent,/Needs your decision/);assert.match(node('brain-overview').textContent,/No pending approval records/);assert.match(node('brain-overview').textContent,/Choose a time range/);
  // The bounty panel uses the same actual-script scope and logout boundary.
  node('brain-project').value='sara';const loading=node('brain-bounty-load').handlers.get('click')();const bountyReply=pending.splice(0);
  body.dataset.owner='';observe();for(const request of bountyReply)request.resolve(Response.json({notice:'PRIVATE BOUNTY',asOf:now.toISOString(),candidates:[],totalCurrent:0,history:[]}));await loading;
@@ -47,5 +47,32 @@ test('late brief/status replies cannot repopulate a changed project or logged-ou
  node('brain-report-title').value='NEW PROJECT DRAFT';for(const request of saveReply)request.resolve(Response.json({id:'old-private-record'}));await capture;
  assert.equal(node('brain-report-title').value,'NEW PROJECT DRAFT');assert.equal(node('brain-repair-brief').value,'');assert.equal(pending.length,0);
  body.dataset.owner='';observe();assert.equal(node('brain-report-title').value,'');assert.equal(node('brain-repair-export').disabled,true);
+
+ // Private AI previews and replies cannot cross a project switch.
+ body.dataset.owner='connected';observe();reply(pending.splice(0),empty);await setImmediate();
+ node('brain-ask-query').value='compiler';node('brain-ask-private').checked=true;
+ const previewing=node('brain-ask-form').handlers.get('submit')();const previews=pending.splice(0);
+ node('brain-project').value='sara';const nextProject=node('brain-project').handlers.get('change')();reply(pending.splice(0),empty);await nextProject;
+ for(const r of previews)r.resolve(Response.json({configured:true,text:'PRIVATE OLD PREVIEW',sources:[],query:'compiler',includePrivate:true}));await previewing;
+ assert.equal(node('brain-ask-preview').textContent,'');assert.equal(node('brain-ask-send').disabled,true);
+ assert.equal(node('brain-refresh-auto').checked,false);
+
+ // The overview bounds cards and retains counts; recorded approval requests never grant authority.
+ node('brain-project').value='nico';
+ const approvals=Array.from({length:4},(_,i)=>{const n=noteInput({project:'nico',kind:'approval',text:'PRIVATE approval '+i},now.toISOString());return {...n,id:evidenceId(n)};});
+ const overviewRefresh=node('brain-search').handlers.get('submit')();reply(pending.splice(0),projectView(approvals,'nico','',now));await overviewRefresh;
+ assert.match(node('brain-overview').textContent,/Showing 3\/4 records · 1 omitted/);
+ assert.match(node('brain-overview').textContent,/No permission is granted here/);
+ assert.match(node('brain-overview').textContent,/continuation brief is ready/);
+ // Export remains a visible, usable link until scope or authentication changes.
+ node('brain-export').handlers.get('click')();
+ const download=node('brain-download').children[0];assert.equal(download.download,'SARA-nico-handoff.txt');
+ assert.equal(await downloads.get(download.href)!.text(),node('brain-handoff').value);assert.equal(revoked.includes(download.href),false);
+ node('brain-project').value='sara';const downloadSwitch=node('brain-project').handlers.get('change')();
+ assert.equal(node('brain-download').children.length,0);assert.ok(revoked.includes(download.href));reply(pending.splice(0),empty);await downloadSwitch;
+ node('brain-export').handlers.get('click')();const secondDownload=node('brain-download').children[0];
+ body.dataset.owner='';observe();assert.equal(node('brain-overview').textContent,'');
+ assert.equal(node('brain-download').children.length,0);assert.ok(revoked.includes(secondDownload.href));
+ node('brain-export').handlers.get('click')();assert.equal(node('brain-download').children.length,0);
 
 });

@@ -1,3 +1,4 @@
+import {discoverProjectUpdates,PROJECT_REFRESH_INTERVAL_MS,UPDATE_COVERAGE} from './project-updates.ts';
 import {reportInput} from './project-report.ts';
 import {jevContract,type JevProvider} from './jev-contract.ts';
 import { importGitHubEvidence, githubContextPredecessors, type GitHubImportInput } from "./second-brain-github.ts";
@@ -888,6 +889,27 @@ export class SaraKernel {
     });
   }
 
+  async refreshProjectGitHub(principal: Principal, project: unknown) {
+    const scope=projectId(project),now=new Date().toISOString();
+    const claim=await this.serializeMutation(async()=>{
+      if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
+      await this.authorize(principal,{action:"external_read",targetId:`second-brain:${scope}:github`,external:true});
+      const state=await this.state();
+      const last=state.events.filter(e=>e.type==="project_refresh_started"&&(e.data as {project:string}).project===scope).at(-1);
+      const next=last?Date.parse(last.occurredAt)+PROJECT_REFRESH_INTERVAL_MS:0;
+      if(Date.parse(now)<next)return {allowed:false,nextCheckAt:new Date(next).toISOString()};
+      await this.#store.append("project_refresh_started",principal,{project:scope});
+      return {allowed:true,nextCheckAt:new Date(Date.parse(now)+PROJECT_REFRESH_INTERVAL_MS).toISOString()};
+    });
+    if(!claim.allowed)return {project:scope,status:"cooldown",nextCheckAt:claim.nextCheckAt,coverage:UPDATE_COVERAGE,receipts:[]};
+    const discovery=await discoverProjectUpdates(scope);
+    const receipts=[];
+    for(const target of discovery.targets)receipts.push(await this.importProjectGitHub(principal,scope,target));
+    const result={project:scope,status:discovery.status==='failed'?'failed':receipts.some(r=>r.status!=='complete')?'partial':'complete',nextCheckAt:claim.nextCheckAt,coverage:UPDATE_COVERAGE,receipts,...(discovery.status==='failed'?{failure:discovery.failure}:{})};
+    await this.serializeMutation(async()=>{await this.#store.append("project_refresh_finished",principal,result);});
+    return result;
+  }
+
   async importProjectGitHub(principal: Principal, project: unknown, input: GitHubImportInput) {
     const scope=projectId(project);
     await this.serializeMutation(async()=>{
@@ -897,6 +919,7 @@ export class SaraKernel {
     const result=await importGitHubEvidence(scope,input);
     return this.serializeMutation(async()=>{
       if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
+      await this.authorize(principal,{action:"external_read",targetId:`second-brain:${scope}:github`,external:true});
       await this.authorize(principal,{action:"record_memory",targetId:scope,external:false});
       const state=await this.state();
       const ids:string[]=[];
@@ -943,11 +966,11 @@ export class SaraKernel {
     });
   }
 
-  authorizeOwnerProjectInference(principal: Principal, project: unknown): Promise<void> {
+  authorizeOwnerProjectInference(principal: Principal, project: unknown, purpose:"jev"|"project-assistant"="jev"): Promise<void> {
     return this.serializeMutation(async()=>{
       const scope=projectId(project);
       if(!this.isVerifiedOwner(principal))throw new Error("Authenticated owner required.");
-      await this.authorize(principal,{action:"external_read",targetId:`second-brain:${scope}:jev`,external:true});
+      await this.authorize(principal,{action:"external_read",targetId:`second-brain:${scope}:${purpose}`,external:true});
     });
   }
 

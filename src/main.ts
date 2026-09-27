@@ -159,6 +159,9 @@ if (reparodynamicCodingMode !== "off" && !client) {
 const ownerAssistant = productPolicy.legacyInteractions && client && telegramBridgeTokenSha256 && telegramMonthlyBudgetUsd > 0
   ? new OwnerAssistant({ modelClient: client, stateDirectory, monthlyBudgetUsd: telegramMonthlyBudgetUsd })
   : null;
+// Separate opt-in; a key or product mode alone never activates project inference.
+const projectAssistant = client && process.env.SARA_PROJECT_ASSISTANT_ENABLED === 'true'
+  ? new OwnerAssistant({modelClient:client,stateDirectory,monthlyBudgetUsd:Number(process.env.SARA_PROJECT_ASSISTANT_MONTHLY_USD ?? '0')}) : null;
 const activeTelegramMonthlyBudgetUsd = ownerAssistant ? telegramMonthlyBudgetUsd : 0;
 let operator: RevenuePilotOperator | null = null;
 let startupProof: LunaStartupProof = {
@@ -189,6 +192,7 @@ export const server = createSaraServer(kernel, {
   ...(readOnlyBridgeTokenSha256 ? { readOnlyBridgeTokenSha256 } : {}),
   ...(telegramBridgeTokenSha256 ? { telegramBridgeTokenSha256 } : {}),
   ...(ownerAssistant ? { ownerAssistant } : {}),
+  ...(projectAssistant ? { projectAssistant } : {}),
   ...(commerce ? { commerce } : {}),
   ...(nicoOperator && productPolicy.legacyInteractions ? { nicoOperator } : {}),
   ...(client && reparodynamicCodingMode !== "off" ? {

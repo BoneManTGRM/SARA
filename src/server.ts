@@ -1,3 +1,4 @@
+import {prepareProjectQuestion} from './project-question.ts';
 import type {JevProvider} from './jev-contract.ts';
 import { createJevSecondBrain } from "./jev-second-brain.ts";
 const secondBrainProviders = new WeakMap<SaraKernel,ReturnType<typeof createJevSecondBrain>>();
@@ -60,6 +61,7 @@ export type ServerOptions = {
   readOnlyBridgeTokenSha256?: string;
   telegramBridgeTokenSha256?: string;
   ownerAssistant?: OwnerAssistant;
+  projectAssistant?: OwnerAssistant;
   runtimeStatus?: () => Promise<SaraRuntimeStatus>;
   stateDirectory?: string;
   commerce?: {
@@ -1198,6 +1200,31 @@ async function handleAuthenticatedRequest(
     try {
       let provider=secondBrainProviders.get(kernel);
       if(!provider){provider=createJevSecondBrain({provider:options.jevProvider,enabled:options.jevDisabled!==true,apiKey:options.jevApiKey,budget:kernel.jevBudget(owner,options.jevProvider)});secondBrainProviders.set(kernel,provider);}
+      if(request.method==="POST" && url.pathname==="/api/second-brain/refresh") {
+        const body=await readJson(request);
+        if(Object.keys(body).some(k=>k!=="project"))throw new Error("Unsupported refresh fields");
+        json(response,200,await kernel.refreshProjectGitHub(owner,body.project));return;
+      }
+      if(request.method==="POST" && ["/api/second-brain/question/preview","/api/second-brain/question/ask"].includes(url.pathname)) {
+        const body=await readJson(request);
+        if(Object.keys(body).some(k=>!["project","query","includePrivate","digest","approveDisclosure"].includes(k))||typeof body.query!=="string"||typeof body.includePrivate!=="boolean")throw new Error("Invalid question");
+        const view=await kernel.readProjectBrief(owner,body.project,body.query);
+        const preview=prepareProjectQuestion(view,body.query,body.includePrivate);
+        if(url.pathname.endsWith('/preview')){json(response,200,{...preview,configured:!!options.projectAssistant});return;}
+        if(body.approveDisclosure!==true||body.digest!==preview.digest)throw new Error("Preview changed or disclosure not approved");
+        if(!options.projectAssistant){json(response,200,{mode:"unavailable",message:"Project AI needs explicit server enablement and an approved allowance. Local search remains available."});return;}
+        if(!preview.sources.length){json(response,200,{mode:"unknown",message:"No eligible current evidence. Save or refresh relevant sources first."});return;}
+        const beforeDispatch=async()=>{
+          if(response.destroyed)return false;
+          await kernel.authorizeOwnerProjectInference(owner,view.project,"project-assistant");
+          const current=prepareProjectQuestion(await kernel.readProjectBrief(owner,view.project,preview.query),preview.query,preview.includePrivate);
+          return current.digest===preview.digest;
+        };
+        if(!await beforeDispatch())throw new Error("Source context changed");
+        const result=await options.projectAssistant.analyze({requestId:'project:'+preview.digest,text:preview.text,beforeDispatch});
+        if(!await beforeDispatch())throw new Error("Source context changed during analysis");
+        json(response,200,{mode:"ai_analysis",...result,sources:preview.sources,notice:preview.notice});return;
+      }
       if(request.method==="GET" && url.pathname==="/api/second-brain/jev/reallocation") {
         json(response,200,await kernel.reviewJevReallocation(owner,options.jevProvider));return;
       }
