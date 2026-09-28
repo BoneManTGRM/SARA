@@ -31,6 +31,7 @@ const host = process.env.SARA_HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 3000);
 const ownerTokenSha256 = process.env.SARA_OWNER_TOKEN_SHA256;
 const readOnlyBridgeTokenSha256 = process.env.SARA_READ_ONLY_BRIDGE_TOKEN_SHA256?.trim();
+const projectBridgeTokenSha256 = process.env.SARA_PROJECT_BRIDGE_TOKEN_SHA256?.trim();
 const telegramBridgeTokenSha256 = process.env.SARA_TELEGRAM_BRIDGE_TOKEN_SHA256?.trim();
 const apiKey = process.env.OPENAI_API_KEY?.trim();
 const monthlyBudgetUsd = Number(process.env.SARA_MONTHLY_MODEL_BUDGET_USD ?? 10);
@@ -54,6 +55,10 @@ if (!ownerTokenSha256 || !/^[a-f0-9]{64}$/i.test(ownerTokenSha256)) {
 }
 if (readOnlyBridgeTokenSha256 && !/^[a-f0-9]{64}$/i.test(readOnlyBridgeTokenSha256)) {
   throw new Error("SARA_READ_ONLY_BRIDGE_TOKEN_SHA256 must be a SHA-256 digest when configured.");
+}
+if (projectBridgeTokenSha256 && (!/^[a-f0-9]{64}$/i.test(projectBridgeTokenSha256) ||
+  [readOnlyBridgeTokenSha256, telegramBridgeTokenSha256, ownerTokenSha256].some(digest => digest?.toLowerCase() === projectBridgeTokenSha256.toLowerCase()))) {
+  throw new Error("SARA_PROJECT_BRIDGE_TOKEN_SHA256 must be a distinct SHA-256 digest when configured.");
 }
 if (telegramBridgeTokenSha256 && !/^[a-f0-9]{64}$/i.test(telegramBridgeTokenSha256)) {
   throw new Error("SARA_TELEGRAM_BRIDGE_TOKEN_SHA256 must be a SHA-256 digest when configured.");
@@ -187,6 +192,7 @@ export const server = createSaraServer(kernel, {
   stateDirectory,
   ...(publicBaseUrl ? { publicBaseUrl } : {}),
   ...(readOnlyBridgeTokenSha256 ? { readOnlyBridgeTokenSha256 } : {}),
+  ...(projectBridgeTokenSha256 ? { projectBridgeTokenSha256 } : {}),
   ...(telegramBridgeTokenSha256 ? { telegramBridgeTokenSha256 } : {}),
   ...(ownerAssistant ? { ownerAssistant } : {}),
   ...(commerce ? { commerce } : {}),

@@ -58,6 +58,7 @@ export type ServerOptions = {
   learningRuntimeStatus?: () => { enabled: boolean; providerConfigured: boolean };
   ownerTokenSha256: string;
   readOnlyBridgeTokenSha256?: string;
+  projectBridgeTokenSha256?: string;
   telegramBridgeTokenSha256?: string;
   ownerAssistant?: OwnerAssistant;
   runtimeStatus?: () => Promise<SaraRuntimeStatus>;
@@ -1437,6 +1438,30 @@ async function routeSaraRequest(
       services: listRevenueServices(),
       operationalSkills: await kernel.inspectOperationalSkills(),
     });
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/bridge/project/")) {
+    if (!options.projectBridgeTokenSha256 || !authenticatedToken(request, options.projectBridgeTokenSha256)) {
+      bridgeUnauthorized(response, "Project bridge");
+      return;
+    }
+    if (request.method !== "GET" || url.pathname !== "/api/bridge/project/brief") {
+      json(response, 404, { error: "Unsupported project bridge operation." });
+      return;
+    }
+    try {
+      const view = await kernel.readProjectBriefForBridge(url.searchParams.get("project"), url.searchParams.get("q") ?? "");
+      const group = (value: { total: number; items: Array<{ id: string; text: string; source: string; state: string; observedAt: string | null; verification: string }> }) =>
+        ({ total: value.total, items: value.items.slice(0, 8).map(item => ({ id: item.id, text: item.text,
+          source: item.source, state: item.state, observedAt: item.observedAt, verification: item.verification })) });
+      json(response, 200, { project: view.project, asOf: view.asOf, handoff: view.handoff,
+        tracking: { decisions: group(view.tracking.decisions), blockers: group(view.tracking.blockers),
+          nextActions: group(view.tracking.nextActions), pendingApprovals: group(view.tracking.pendingApprovals) },
+        totalRecords: view.totalRecords });
+    } catch {
+      json(response, 400, { error: "Invalid project or query." });
+    }
     return;
   }
 

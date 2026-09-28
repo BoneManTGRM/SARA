@@ -956,6 +956,12 @@ export class SaraKernel {
     return projectView((await this.state()).memories,projectId(project),query,new Date(),since);
   }
 
+  /** Called only behind the dedicated project bridge credential in server.ts. Read-only. */
+  async readProjectBriefForBridge(project: unknown, query = "") {
+    if (typeof query !== "string" || query.length > 300) throw new Error("Invalid project query.");
+    return projectView((await this.state()).memories,projectId(project),query,new Date());
+  }
+
   recordMemory(principal: Principal, input: Omit<MemoryRecord, "id">, external = false): Promise<MemoryRecord> {
     return this.serializeMutation(async () => {
       await this.authorize(principal, { action: "record_memory", targetId: input.scope, external });
