@@ -16,6 +16,8 @@ describe("SARA owner dashboard HTTP boundary", () => {
   const tokenHash = createHash("sha256").update(token).digest("hex");
   const bridgeToken = "test-read-only-bridge-token";
   const bridgeTokenHash = createHash("sha256").update(bridgeToken).digest("hex");
+  const projectBridgeToken = "test-private-project-bridge-token";
+  const projectBridgeTokenHash = createHash("sha256").update(projectBridgeToken).digest("hex");
   const telegramBridgeToken = "test-telegram-action-bridge-token";
   const telegramBridgeTokenHash = createHash("sha256").update(telegramBridgeToken).digest("hex");
   let directory: string;
@@ -53,6 +55,7 @@ describe("SARA owner dashboard HTTP boundary", () => {
       ownerTokenSha256: tokenHash,
       stateDirectory: directory,
       readOnlyBridgeTokenSha256: bridgeTokenHash,
+      projectBridgeTokenSha256: projectBridgeTokenHash,
       telegramBridgeTokenSha256: telegramBridgeTokenHash,
       ownerAssistant: new OwnerAssistant({
         stateDirectory: directory,
@@ -222,6 +225,25 @@ describe("SARA owner dashboard HTTP boundary", () => {
       headers: { Authorization: `Bearer ${bridgeToken}`, "content-type": "application/json" },
       body: JSON.stringify({ objective: "must remain unauthorized" }),
     })).status, 401);
+  });
+
+  it("isolates private project briefs behind a separate read-only credential", async () => {
+    const path = `${baseUrl}/api/bridge/project/brief?project=sara&q=blockers`;
+    for (const credential of [undefined, token, bridgeToken, telegramBridgeToken]) {
+      const response = await fetch(path, credential ? { headers: { Authorization: `Bearer ${credential}` } } : {});
+      assert.equal(response.status, 401);
+    }
+    const headers = { Authorization: `Bearer ${projectBridgeToken}` };
+    const response = await fetch(path, { headers });
+    assert.equal(response.status, 200);
+    const brief = await response.json() as { project: string; handoff: string };
+    assert.equal(brief.project, "sara");
+    assert.match(brief.handoff, /SARA/);
+    assert.equal((await fetch(`${baseUrl}/api/bridge/catalog`, { headers })).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/bridge/actions/status`, { headers })).status, 401);
+    assert.equal((await fetch(`${baseUrl}/api/second-brain/brief?project=sara`, { headers })).status, 401);
+    assert.equal((await fetch(path, { method: "POST", headers })).status, 404);
+    assert.equal((await fetch(`${baseUrl}/api/bridge/project/brief?project=unknown`, { headers })).status, 400);
   });
 
   it("gives the Telegram action credential only bounded explicit actions", async () => {
